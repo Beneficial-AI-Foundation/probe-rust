@@ -1,0 +1,112 @@
+# Reusable workflow for generating call graph atoms from Rust projects
+#
+# Uses probe-rust to generate compact function call graph data from any Rust repository.
+#
+# Usage - analyze a specific external repo:
+#   jobs:
+#     generate:
+#       uses: Beneficial-AI-Foundation/probe-rust/.github/workflows/generate-atoms.yml@main
+#       with:
+#         target_repo: some-org/some-rust-project
+#         artifact_name: my-atoms
+#
+# Usage - analyze multiple repos (matrix):
+#   jobs:
+#     generate:
+#       strategy:
+#         matrix:
+#           include:
+#             - repo: some-org/project-a
+#               name: project-a
+#             - repo: some-org/project-b
+#               name: project-b
+#       uses: Beneficial-AI-Foundation/probe-rust/.github/workflows/generate-atoms.yml@main
+#       with:
+#         target_repo: ${{ matrix.repo }}
+#         artifact_name: ${{ matrix.name }}-atoms
+#
+name: Generate Atoms
+
+on:
+  workflow_call:
+    inputs:
+      target_repo:
+        description: 'Repository to analyze (org/repo format, e.g., "some-org/some-rust-project")'
+        required: true
+        type: string
+      target_ref:
+        description: 'Branch, tag, or SHA to checkout (default: default branch)'
+        required: false
+        default: ''
+        type: string
+      project_path:
+        description: 'Path to the Rust project within the repo (relative to repo root)'
+        required: false
+        default: '.'
+        type: string
+      artifact_name:
+        description: 'Name for the uploaded artifact'
+        required: false
+        default: 'atoms-json'
+        type: string
+
+jobs:
+  build:
+    name: Generate Atoms
+    runs-on: ubuntu-latest
+
+    outputs:
+      artifact_name: ${{ inputs.artifact_name }}
+
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repo }}
+          ref: ${{ inputs.target_ref || '' }}
+          path: project
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-analyzer
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-probe-rust-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-probe-rust-
+
+      - name: Install scip CLI
+        run: |
+          wget -q "https://github.com/sourcegraph/scip/releases/latest/download/scip-linux-amd64.tar.gz" -O scip-linux.tar.gz
+          tar -xzf scip-linux.tar.gz
+          chmod +x scip
+          sudo mv scip /usr/local/bin/
+          scip --version
+
+      - name: Install probe-rust
+        run: |
+          cargo install --force --git https://github.com/Beneficial-AI-Foundation/probe-rust
+
+      - name: Generate atoms
+        working-directory: project/${{ inputs.project_path }}
+        run: |
+          mkdir -p ${{ github.workspace }}/output
+          probe-rust extract . -o ${{ github.workspace }}/output/atoms.json
+          echo "Generated atoms.json:"
+          ls -la ${{ github.workspace }}/output/atoms.json
+          echo "Preview (first 50 lines):"
+          head -50 ${{ github.workspace }}/output/atoms.json
+
+      - name: Upload atoms.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ github.workspace }}/output/atoms.json
+          retention-days: 30
