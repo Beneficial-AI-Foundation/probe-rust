@@ -25,10 +25,13 @@ pub fn cmd_extract(
     println!("═══════════════════════════════════════════════════════════");
     println!();
 
-    if let Err(msg) = validate_project(&project_path) {
-        eprintln!("✗ Error: {}", msg);
-        std::process::exit(1);
-    }
+    let project_path = match validate_project(&project_path) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("✗ Error: {}", msg);
+            std::process::exit(1);
+        }
+    };
     println!("  ✓ Valid Rust project found");
 
     let mut scip_cache = ScipCache::new(&project_path).with_auto_install(auto_install);
@@ -104,7 +107,10 @@ pub fn cmd_extract(
     print_success_summary(&output, &atoms_dict);
 }
 
-fn validate_project(project_path: &Path) -> Result<(), String> {
+/// Validate the given project path contains a `Cargo.toml`.
+/// If not found at the top level, searches subdirectories (up to 2 levels deep).
+/// Returns the validated project root (which may differ from the input).
+fn validate_project(project_path: &Path) -> Result<PathBuf, String> {
     if !project_path.exists() {
         return Err(format!(
             "Project path does not exist: {}",
@@ -113,14 +119,69 @@ fn validate_project(project_path: &Path) -> Result<(), String> {
     }
 
     let cargo_toml = project_path.join("Cargo.toml");
-    if !cargo_toml.exists() {
-        return Err(format!(
-            "Not a valid Rust project (Cargo.toml not found): {}",
-            project_path.display()
-        ));
+    if cargo_toml.exists() {
+        return Ok(project_path.to_path_buf());
     }
 
-    Ok(())
+    let candidates = find_cargo_tomls(project_path, 2);
+    match candidates.len() {
+        0 => Err(format!(
+            "Not a valid Rust project (no Cargo.toml found in {} or its subdirectories)",
+            project_path.display()
+        )),
+        1 => {
+            let found = &candidates[0];
+            println!(
+                "  ℹ No Cargo.toml at top level; found one in: {}",
+                found.display()
+            );
+            Ok(found.clone())
+        }
+        _ => {
+            let mut msg = format!(
+                "No Cargo.toml at top level of {}.\n\
+                 Found {} Rust projects in subdirectories:\n",
+                project_path.display(),
+                candidates.len()
+            );
+            for c in &candidates {
+                msg.push_str(&format!("    {}\n", c.display()));
+            }
+            msg.push_str("\nPlease specify the exact project path, e.g.:\n");
+            msg.push_str(&format!(
+                "    probe-rust extract {}",
+                candidates[0].display()
+            ));
+            Err(msg)
+        }
+    }
+}
+
+/// Search for directories containing `Cargo.toml` under `root`, up to `max_depth` levels.
+fn find_cargo_tomls(root: &Path, max_depth: u32) -> Vec<PathBuf> {
+    let mut results = Vec::new();
+    find_cargo_tomls_recursive(root, max_depth, &mut results);
+    results.sort();
+    results
+}
+
+fn find_cargo_tomls_recursive(dir: &Path, remaining_depth: u32, results: &mut Vec<PathBuf>) {
+    if remaining_depth == 0 {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if path.join("Cargo.toml").exists() {
+                results.push(path.clone());
+            }
+            find_cargo_tomls_recursive(&path, remaining_depth - 1, results);
+        }
+    }
 }
 
 fn get_scip_json(cache: &mut ScipCache, regenerate: bool) -> PathBuf {
