@@ -36,11 +36,10 @@ pub struct CharonFunInfo {
 
 /// Parse an LLBC JSON file and return Charon function info grouped by match key.
 pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFunInfo>>, String> {
-    let file =
-        std::fs::File::open(llbc_path).map_err(|e| format!("failed to read LLBC file: {e}"))?;
-    let reader = std::io::BufReader::new(file);
+    let contents = std::fs::read_to_string(llbc_path)
+        .map_err(|e| format!("failed to read LLBC file: {e}"))?;
     let root: serde_json::Value =
-        serde_json::from_reader(reader).map_err(|e| format!("failed to parse LLBC JSON: {e}"))?;
+        serde_json::from_str(&contents).map_err(|e| format!("failed to parse LLBC JSON: {e}"))?;
 
     let translated = root
         .get("translated")
@@ -59,6 +58,7 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
     let trait_decl_names = build_trait_decl_name_map(item_names);
     let trait_impl_to_decl = build_trait_impl_to_decl_map(translated);
     let type_decl_names = build_type_decl_name_map(item_names);
+    let trait_impl_self_types = build_trait_impl_self_type_map(translated, &type_decl_names);
 
     let mut result: HashMap<String, Vec<CharonFunInfo>> = HashMap::new();
 
@@ -82,6 +82,7 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
             &trait_decl_names,
             &trait_impl_to_decl,
             &type_decl_names,
+            &trait_impl_self_types,
         );
 
         let match_key = make_match_key_from_charon(&qualified_name, crate_name);
@@ -107,6 +108,7 @@ fn format_name(
     trait_decl_names: &HashMap<u64, String>,
     trait_impl_to_decl: &HashMap<u64, u64>,
     type_decl_names: &HashMap<u64, String>,
+    trait_impl_self_types: &HashMap<u64, String>,
 ) -> String {
     let mut parts = Vec::new();
 
@@ -122,7 +124,11 @@ fn format_name(
                     .and_then(|decl_id| trait_decl_names.get(decl_id))
                     .map(|s| s.as_str())
                     .unwrap_or("?");
-                parts.push(format!("{{impl {trait_name}}}"));
+                if let Some(self_type) = trait_impl_self_types.get(&trait_impl_id) {
+                    parts.push(format!("{{{trait_name} for {self_type}}}"));
+                } else {
+                    parts.push(format!("{{impl {trait_name}}}"));
+                }
             } else if let Some(ty_data) = impl_data.get("Ty") {
                 if let Some(type_name) = resolve_impl_ty(ty_data, type_decl_names) {
                     parts.push(format!("{{{type_name}}}"));
@@ -141,10 +147,97 @@ fn resolve_impl_ty(
     type_decl_names: &HashMap<u64, String>,
 ) -> Option<String> {
     let skip_binder = ty_data.get("skip_binder")?;
-    let untagged = skip_binder.get("Untagged")?;
-    let adt = untagged.get("Adt")?;
+    // Handle both direct and Untagged-wrapped type representations
+    let inner = skip_binder.get("Untagged").unwrap_or(skip_binder);
+    let adt = inner.get("Adt")?;
     let adt_id = adt.get("id")?.get("Adt")?.as_u64()?;
     type_decl_names.get(&adt_id).cloned()
+}
+
+/// Resolve an LLBC type JSON value to a human-readable name.
+/// Handles Adt (named types), Ref (references), and Literal (primitives).
+/// Some Charon versions wrap types in an `Untagged` envelope; this is handled
+/// transparently.
+fn format_type(ty: &serde_json::Value, type_decl_names: &HashMap<u64, String>) -> Option<String> {
+    // Unwrap the `Untagged` wrapper if present
+    let ty = ty.get("Untagged").unwrap_or(ty);
+
+    if let Some(adt) = ty.get("Adt") {
+        let adt_id = adt.get("id")?.get("Adt")?.as_u64()?;
+        return type_decl_names.get(&adt_id).cloned();
+    }
+
+    if let Some(ref_arr) = ty.get("Ref") {
+        if let Some(arr) = ref_arr.as_array() {
+            let inner_ty = arr.get(1)?;
+            let inner_name = format_type(inner_ty, type_decl_names)?;
+
+            let region_str = arr.first().and_then(|r| {
+                r.get("Var")
+                    .and_then(|v| v.get("Free"))
+                    .and_then(|f| f.as_u64())
+                    .map(|idx| format!("&'{idx} "))
+            });
+            let prefix = region_str.as_deref().unwrap_or("&");
+            return Some(format!("{prefix}({inner_name})"));
+        }
+    }
+
+    if let Some(lit) = ty.get("Literal") {
+        if let Some(s) = lit.as_str() {
+            let name = match s {
+                "Bool" => "bool",
+                "Char" => "char",
+                _ => s,
+            };
+            return Some(name.to_string());
+        }
+    }
+
+    if let Some(tv) = ty.get("TypeVar") {
+        if let Some(free) = tv.get("Free").and_then(|v| v.as_u64()) {
+            return Some(format!("T{free}"));
+        }
+    }
+
+    None
+}
+
+/// Build a map from TraitImpl def_id to the formatted Self type name.
+/// Extracts `impl_trait.generics.types[0]` from each trait_impl entry.
+fn build_trait_impl_self_type_map(
+    translated: &serde_json::Value,
+    type_decl_names: &HashMap<u64, String>,
+) -> HashMap<u64, String> {
+    let mut map = HashMap::new();
+    let trait_impls = match translated.get("trait_impls").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return map,
+    };
+
+    for ti in trait_impls {
+        if ti.is_null() {
+            continue;
+        }
+        let def_id = match ti.get("def_id").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => continue,
+        };
+        let self_type = ti
+            .get("impl_trait")
+            .and_then(|it| it.get("generics"))
+            .and_then(|g| g.get("types"))
+            .and_then(|t| t.as_array())
+            .and_then(|arr| arr.first());
+
+        if let Some(ty) = self_type {
+            if let Some(name) = format_type(ty, type_decl_names) {
+                map.insert(def_id, name);
+            }
+        }
+    }
+
+    map
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +320,16 @@ fn module_from_code_path(code_path: &str) -> String {
         .replace('/', "::")
 }
 
-use crate::bare_function_name;
+/// Strip `Type::` prefix from display names to get the bare function name.
+/// `Scalar::from_bytes_mod_order` -> `from_bytes_mod_order`
+/// `free_function` -> `free_function`
+fn bare_function_name(display_name: &str) -> &str {
+    if let Some(pos) = display_name.rfind("::") {
+        &display_name[pos + 2..]
+    } else {
+        display_name
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Lookup table builders
@@ -403,6 +505,13 @@ mod tests {
         );
         assert_eq!(
             make_match_key_from_charon(
+                "curve25519_dalek::scalar::{core::clone::Clone for curve25519_dalek::scalar::Scalar}::clone",
+                "curve25519_dalek"
+            ),
+            "scalar::clone"
+        );
+        assert_eq!(
+            make_match_key_from_charon(
                 "curve25519_dalek::scalar::{impl core::clone::Clone}::clone",
                 "curve25519_dalek"
             ),
@@ -442,12 +551,47 @@ mod tests {
             r#"[{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Ident": ["func", 0]}]"#,
         )
         .unwrap();
-        let name = format_name(&elems, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        let name = format_name(
+            &elems,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
         assert_eq!(name, "my_crate::module::func");
     }
 
     #[test]
-    fn test_format_name_with_trait_impl() {
+    fn test_format_name_with_trait_impl_and_self_type() {
+        let elems: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[{"Ident": ["crate", 0]}, {"Impl": {"Trait": 5}}, {"Ident": ["method", 0]}]"#,
+        )
+        .unwrap();
+
+        let mut trait_decl_names = HashMap::new();
+        trait_decl_names.insert(10u64, "core::clone::Clone".to_string());
+
+        let mut trait_impl_to_decl = HashMap::new();
+        trait_impl_to_decl.insert(5u64, 10u64);
+
+        let mut trait_impl_self_types = HashMap::new();
+        trait_impl_self_types.insert(5u64, "my_crate::MyType".to_string());
+
+        let name = format_name(
+            &elems,
+            &trait_decl_names,
+            &trait_impl_to_decl,
+            &HashMap::new(),
+            &trait_impl_self_types,
+        );
+        assert_eq!(
+            name,
+            "crate::{core::clone::Clone for my_crate::MyType}::method"
+        );
+    }
+
+    #[test]
+    fn test_format_name_with_trait_impl_no_self_type() {
         let elems: Vec<serde_json::Value> = serde_json::from_str(
             r#"[{"Ident": ["crate", 0]}, {"Impl": {"Trait": 5}}, {"Ident": ["method", 0]}]"#,
         )
@@ -464,7 +608,34 @@ mod tests {
             &trait_decl_names,
             &trait_impl_to_decl,
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(name, "crate::{impl core::clone::Clone}::method");
+    }
+
+    #[test]
+    fn test_format_type_adt() {
+        let ty: serde_json::Value = serde_json::from_str(
+            r#"{"Adt": {"id": {"Adt": 3}, "generics": {"regions": [], "types": [], "const_generics": [], "trait_refs": []}}}"#,
+        ).unwrap();
+        let mut type_decl_names = HashMap::new();
+        type_decl_names.insert(3u64, "my_crate::Scalar".to_string());
+        assert_eq!(
+            format_type(&ty, &type_decl_names),
+            Some("my_crate::Scalar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_format_type_ref() {
+        let ty: serde_json::Value = serde_json::from_str(
+            r#"{"Ref": [{"Var": {"Free": 0}}, {"Adt": {"id": {"Adt": 3}, "generics": {"regions": [], "types": [], "const_generics": [], "trait_refs": []}}}, "Shared"]}"#,
+        ).unwrap();
+        let mut type_decl_names = HashMap::new();
+        type_decl_names.insert(3u64, "my_crate::Point".to_string());
+        assert_eq!(
+            format_type(&ty, &type_decl_names),
+            Some("&'0 (my_crate::Point)".to_string())
+        );
     }
 }
