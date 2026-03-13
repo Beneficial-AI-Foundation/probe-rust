@@ -41,6 +41,18 @@ pub enum ProbeError {
     /// External tool error
     #[error("External tool '{tool}' error: {message}")]
     ExternalTool { tool: String, message: String },
+
+    /// SCIP index generation/caching error
+    #[error("SCIP generation error: {0}")]
+    ScipGeneration(String),
+
+    /// Charon LLBC generation error
+    #[error("Charon error: {0}")]
+    CharonGeneration(String),
+
+    /// I/O error (non-path-specific)
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl ProbeError {
@@ -69,6 +81,33 @@ impl ProbeError {
         ProbeError::ExternalTool {
             tool: tool.into(),
             message: message.into(),
+        }
+    }
+}
+
+impl From<crate::scip_cache::ScipError> for ProbeError {
+    fn from(e: crate::scip_cache::ScipError) -> Self {
+        ProbeError::ScipGeneration(e.to_string())
+    }
+}
+
+impl From<crate::charon_cache::CharonError> for ProbeError {
+    fn from(e: crate::charon_cache::CharonError) -> Self {
+        ProbeError::CharonGeneration(e.to_string())
+    }
+}
+
+impl From<crate::tool_manager::ToolError> for ProbeError {
+    fn from(e: crate::tool_manager::ToolError) -> Self {
+        ProbeError::ExternalTool {
+            tool: match &e {
+                crate::tool_manager::ToolError::PlatformNotSupported(t, _)
+                | crate::tool_manager::ToolError::DownloadFailed(t, _)
+                | crate::tool_manager::ToolError::DecompressFailed(t, _)
+                | crate::tool_manager::ToolError::IoError(t, _)
+                | crate::tool_manager::ToolError::NotInstalled(t) => t.to_string(),
+            },
+            message: e.to_string(),
         }
     }
 }

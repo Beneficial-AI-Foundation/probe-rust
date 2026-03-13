@@ -17,6 +17,8 @@ use std::process::{Command, Stdio};
 const SCIP_FALLBACK_VERSION: &str = "v0.6.1";
 const SCIP_VERSION_ENV: &str = "PROBE_SCIP_VERSION";
 const SCIP_REPO: &str = "sourcegraph/scip";
+const CHARON_REPO: &str = "https://github.com/AeneasVerif/charon.git";
+const CHARON_SRC_DIR: &str = "charon-src";
 
 // ---------------------------------------------------------------------------
 // Tool enum
@@ -27,6 +29,8 @@ const SCIP_REPO: &str = "sourcegraph/scip";
 pub enum Tool {
     RustAnalyzer,
     Scip,
+    Charon,
+    CharonDriver,
 }
 
 impl Tool {
@@ -34,6 +38,8 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => "rust-analyzer",
             Tool::Scip => "scip",
+            Tool::Charon => "charon",
+            Tool::CharonDriver => "charon-driver",
         }
     }
 
@@ -41,6 +47,8 @@ impl Tool {
         match self {
             Tool::RustAnalyzer => "rust-analyzer",
             Tool::Scip => "scip",
+            Tool::Charon => "charon",
+            Tool::CharonDriver => "charon-driver",
         }
     }
 }
@@ -88,6 +96,11 @@ impl std::fmt::Display for ToolError {
                     f,
                     "scip not found. Install it with: probe-rust setup\n\
                      Or download manually from https://github.com/sourcegraph/scip/releases"
+                ),
+                Tool::Charon | Tool::CharonDriver => write!(
+                    f,
+                    "charon not found. Use --auto-install to build from source, \
+                     or install manually from https://github.com/AeneasVerif/charon"
                 ),
             },
         }
@@ -166,10 +179,16 @@ pub struct ResolvedVersion {
 
 /// Resolve the version to install for scip.
 pub fn resolve_version() -> ResolvedVersion {
-    if let Ok(v) = std::env::var(SCIP_VERSION_ENV) {
+    let env_override = std::env::var(SCIP_VERSION_ENV).ok();
+    resolve_version_with_override(env_override.as_deref())
+}
+
+/// Resolve the version with an explicit env override (avoids unsafe env mutation in tests).
+pub fn resolve_version_with_override(env_override: Option<&str>) -> ResolvedVersion {
+    if let Some(v) = env_override {
         if !v.is_empty() {
             return ResolvedVersion {
-                tag: v,
+                tag: v.to_string(),
                 source: VersionSource::EnvVar,
             };
         }
@@ -237,7 +256,7 @@ pub fn resolve_tool(tool: Tool) -> Result<PathBuf, ToolError> {
     Err(ToolError::NotInstalled(tool))
 }
 
-/// Resolve, or auto-download if `auto_install` is true. Only scip is downloadable.
+/// Resolve, or auto-download/build if `auto_install` is true.
 pub fn resolve_or_install(tool: Tool, auto_install: bool) -> Result<PathBuf, ToolError> {
     match resolve_tool(tool) {
         Ok(p) => Ok(p),
@@ -246,28 +265,19 @@ pub fn resolve_or_install(tool: Tool, auto_install: bool) -> Result<PathBuf, Too
             download_scip()?;
             resolve_tool(tool)
         }
+        Err(ToolError::NotInstalled(_))
+            if auto_install && matches!(tool, Tool::Charon | Tool::CharonDriver) =>
+        {
+            eprintln!("charon not found, building from source...");
+            build_charon()?;
+            resolve_tool(tool)
+        }
         Err(e) => Err(e),
     }
 }
 
 fn find_in_path(name: &str) -> Option<PathBuf> {
-    let cmd = if cfg!(windows) { "where" } else { "which" };
-    Command::new(cmd)
-        .arg(name)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| {
-            let s = String::from_utf8_lossy(&o.stdout);
-            let line = s.lines().next()?.trim().to_string();
-            if line.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(line))
-            }
-        })
+    which::which(name).ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -300,9 +310,11 @@ pub fn download_scip() -> Result<PathBuf, ToolError> {
         .call()
         .map_err(|e| ToolError::DownloadFailed(Tool::Scip, e.to_string()))?;
 
+    const MAX_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
     let mut compressed_bytes: Vec<u8> = Vec::new();
     response
         .into_reader()
+        .take(MAX_DOWNLOAD_BYTES)
         .read_to_end(&mut compressed_bytes)
         .map_err(|e| ToolError::DownloadFailed(Tool::Scip, e.to_string()))?;
 
@@ -363,6 +375,93 @@ fn extract_tar_gz(data: &[u8], dest: &Path) -> Result<(), ToolError> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Build from source (charon)
+// ---------------------------------------------------------------------------
+
+/// Clone and build charon from source into the managed tools directory.
+///
+/// Charon is a rustc driver, so it must be built from source with the
+/// matching nightly toolchain (specified by the repo's rust-toolchain file).
+/// Both `charon` and `charon-driver` binaries are installed.
+pub fn build_charon() -> Result<PathBuf, ToolError> {
+    let dest_dir = tools_dir().ok_or_else(|| {
+        ToolError::IoError(
+            Tool::Charon,
+            io::Error::new(io::ErrorKind::NotFound, "cannot determine home directory"),
+        )
+    })?;
+    fs::create_dir_all(&dest_dir).map_err(|e| ToolError::IoError(Tool::Charon, e))?;
+
+    let src_dir = dest_dir.join(CHARON_SRC_DIR);
+
+    if !src_dir.join("charon").join("Cargo.toml").exists() {
+        eprintln!("Cloning charon from {}...", CHARON_REPO);
+        let src_dir_str = src_dir.to_string_lossy();
+        let status = Command::new("git")
+            .args(["clone", "--depth", "1", CHARON_REPO, src_dir_str.as_ref()])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .map_err(|e| ToolError::DownloadFailed(Tool::Charon, e.to_string()))?;
+        if !status.success() {
+            return Err(ToolError::DownloadFailed(
+                Tool::Charon,
+                format!("git clone failed with {status}"),
+            ));
+        }
+    } else {
+        eprintln!("Updating existing charon source...");
+        let _ = Command::new("git")
+            .args(["pull", "--ff-only"])
+            .current_dir(&src_dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    let charon_crate_dir = src_dir.join("charon");
+    eprintln!("Building charon (this may take a few minutes)...");
+    let status = Command::new("cargo")
+        .args(["build", "--release"])
+        .current_dir(&charon_crate_dir)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(|e| {
+            ToolError::DownloadFailed(Tool::Charon, format!("cargo build failed to start: {e}"))
+        })?;
+    if !status.success() {
+        return Err(ToolError::DownloadFailed(
+            Tool::Charon,
+            format!("cargo build --release failed with {status}"),
+        ));
+    }
+
+    let release_dir = charon_crate_dir.join("target").join("release");
+    for binary in ["charon", "charon-driver"] {
+        let src = release_dir.join(binary);
+        let dst = dest_dir.join(binary);
+        fs::copy(&src, &dst).map_err(|e| {
+            ToolError::IoError(
+                Tool::Charon,
+                io::Error::new(e.kind(), format!("failed to copy {}: {e}", src.display())),
+            )
+        })?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = fs::Permissions::from_mode(0o755);
+            fs::set_permissions(&dst, perms).map_err(|e| ToolError::IoError(Tool::Charon, e))?;
+        }
+    }
+
+    let charon_path = dest_dir.join("charon");
+    eprintln!("Installed charon to {}", charon_path.display());
+    Ok(charon_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,6 +504,8 @@ mod tests {
     fn test_tool_binary_names() {
         assert_eq!(Tool::RustAnalyzer.binary_name(), "rust-analyzer");
         assert_eq!(Tool::Scip.binary_name(), "scip");
+        assert_eq!(Tool::Charon.binary_name(), "charon");
+        assert_eq!(Tool::CharonDriver.binary_name(), "charon-driver");
     }
 
     #[test]
@@ -417,13 +518,20 @@ mod tests {
 
     #[test]
     fn test_resolve_version_env_override() {
-        use std::sync::Mutex;
-        static ENV_MUTEX: Mutex<()> = Mutex::new(());
-        let _guard = ENV_MUTEX.lock().unwrap();
-        unsafe { std::env::set_var(SCIP_VERSION_ENV, "custom-version") };
-        let resolved = resolve_version();
-        unsafe { std::env::remove_var(SCIP_VERSION_ENV) };
+        let resolved = resolve_version_with_override(Some("custom-version"));
         assert_eq!(resolved.tag, "custom-version");
         assert_eq!(resolved.source, VersionSource::EnvVar);
+    }
+
+    #[test]
+    fn test_resolve_version_empty_override_falls_through() {
+        let resolved = resolve_version_with_override(Some(""));
+        assert_ne!(resolved.source, VersionSource::EnvVar);
+    }
+
+    #[test]
+    fn test_resolve_version_none_override_falls_through() {
+        let resolved = resolve_version_with_override(None);
+        assert_ne!(resolved.source, VersionSource::EnvVar);
     }
 }

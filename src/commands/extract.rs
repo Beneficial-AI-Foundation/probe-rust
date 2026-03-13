@@ -1,12 +1,13 @@
 //! Extract command - Generate call graph atoms from SCIP indexes.
 
 use probe_rust::{
-    add_external_stubs, build_call_graph, convert_to_atoms_with_parsed_spans,
-    find_duplicate_code_names,
+    add_external_stubs, build_call_graph,
+    charon_cache::CharonCache,
+    charon_names, convert_to_atoms_with_parsed_spans, find_duplicate_code_names,
     metadata::{gather_metadata, get_default_output_path, wrap_in_envelope},
     parse_scip_json,
     scip_cache::ScipCache,
-    AtomWithLines,
+    AtomWithLines, ProbeError, ProbeResult,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -19,37 +20,28 @@ pub fn cmd_extract(
     with_locations: bool,
     allow_duplicates: bool,
     auto_install: bool,
-) {
+    with_charon: bool,
+) -> ProbeResult<()> {
     println!("═══════════════════════════════════════════════════════════");
     println!("  Probe Rust - Extract: Generate Call Graph Data");
     println!("═══════════════════════════════════════════════════════════");
     println!();
 
-    let project_path = match validate_project(&project_path) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("✗ Error: {}", msg);
-            std::process::exit(1);
-        }
-    };
+    let project_path = validate_project(&project_path)?;
     println!("  ✓ Valid Rust project found");
 
     let mut scip_cache = ScipCache::new(&project_path).with_auto_install(auto_install);
-    let json_path = get_scip_json(&mut scip_cache, regenerate_scip);
+    let json_path = get_scip_json(&mut scip_cache, regenerate_scip)?;
 
     println!("Parsing SCIP JSON and building call graph...");
 
-    let scip_index = match parse_scip_json(json_path.to_str().unwrap()) {
-        Ok(idx) => idx,
-        Err(e) => {
-            eprintln!("✗ Failed to parse SCIP JSON: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let scip_index = parse_scip_json(&json_path)?;
 
     let (call_graph, symbol_to_display_name) = build_call_graph(&scip_index);
     println!("  ✓ Call graph built with {} functions", call_graph.len());
     println!();
+
+    let metadata = gather_metadata(&project_path);
 
     println!("Converting to atoms format with accurate line numbers...");
     println!("  Parsing source files with syn for accurate function spans...");
@@ -59,6 +51,7 @@ pub fn cmd_extract(
         &symbol_to_display_name,
         &project_path,
         with_locations,
+        Some(&metadata.pkg_name),
     );
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
     if with_locations {
@@ -78,7 +71,12 @@ pub fn cmd_extract(
         } else {
             eprintln!();
             eprintln!("{}", report);
-            std::process::exit(1);
+            let names = duplicates
+                .into_iter()
+                .map(|d| d.code_name)
+                .collect::<Vec<_>>();
+            let count = names.len();
+            return Err(ProbeError::DuplicateCodeNames { count, names });
         }
     }
 
@@ -87,35 +85,38 @@ pub fn cmd_extract(
         atoms_dict.entry(atom.code_name.clone()).or_insert(atom);
     }
 
+    if with_charon {
+        enrich_with_charon(&project_path, auto_install, &mut atoms_dict);
+    }
+
     let stub_count = add_external_stubs(&mut atoms_dict);
     if stub_count > 0 {
         println!("  ✓ Added {} external function stub(s)", stub_count);
     }
-
-    let metadata = gather_metadata(&project_path);
     let output =
         output.unwrap_or_else(|| get_default_output_path(&project_path, &metadata, "atoms"));
 
     if let Some(parent) = output.parent() {
-        std::fs::create_dir_all(parent).expect("Failed to create output directory");
+        std::fs::create_dir_all(parent).map_err(|e| ProbeError::file_io(parent, e))?;
     }
 
     let envelope = wrap_in_envelope("probe-rust/atoms", "extract", &atoms_dict, &metadata);
-    let json = serde_json::to_string_pretty(&envelope).expect("Failed to serialize JSON");
-    std::fs::write(&output, &json).expect("Failed to write output file");
+    let json = serde_json::to_string_pretty(&envelope)?;
+    std::fs::write(&output, &json).map_err(|e| ProbeError::file_io(&output, e))?;
 
     print_success_summary(&output, &atoms_dict);
+    Ok(())
 }
 
 /// Validate the given project path contains a `Cargo.toml`.
 /// If not found at the top level, searches subdirectories (up to 2 levels deep).
 /// Returns the validated project root (which may differ from the input).
-fn validate_project(project_path: &Path) -> Result<PathBuf, String> {
+fn validate_project(project_path: &Path) -> ProbeResult<PathBuf> {
     if !project_path.exists() {
-        return Err(format!(
+        return Err(ProbeError::ProjectValidation(format!(
             "Project path does not exist: {}",
             project_path.display()
-        ));
+        )));
     }
 
     let cargo_toml = project_path.join("Cargo.toml");
@@ -125,10 +126,10 @@ fn validate_project(project_path: &Path) -> Result<PathBuf, String> {
 
     let candidates = find_cargo_tomls(project_path, 2);
     match candidates.len() {
-        0 => Err(format!(
+        0 => Err(ProbeError::ProjectValidation(format!(
             "Not a valid Rust project (no Cargo.toml found in {} or its subdirectories)",
             project_path.display()
-        )),
+        ))),
         1 => {
             let found = &candidates[0];
             println!(
@@ -152,7 +153,7 @@ fn validate_project(project_path: &Path) -> Result<PathBuf, String> {
                 "    probe-rust extract {}",
                 candidates[0].display()
             ));
-            Err(msg)
+            Err(ProbeError::ProjectValidation(msg))
         }
     }
 }
@@ -175,7 +176,7 @@ fn find_cargo_tomls_recursive(dir: &Path, remaining_depth: u32, results: &mut Ve
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        if path.is_dir() && !path.is_symlink() {
             if path.join("Cargo.toml").exists() {
                 results.push(path.clone());
             }
@@ -184,7 +185,7 @@ fn find_cargo_tomls_recursive(dir: &Path, remaining_depth: u32, results: &mut Ve
     }
 }
 
-fn get_scip_json(cache: &mut ScipCache, regenerate: bool) -> PathBuf {
+fn get_scip_json(cache: &mut ScipCache, regenerate: bool) -> ProbeResult<PathBuf> {
     if cache.has_cached_json() && !regenerate {
         println!(
             "  ✓ Found existing SCIP JSON at {}",
@@ -192,23 +193,16 @@ fn get_scip_json(cache: &mut ScipCache, regenerate: bool) -> PathBuf {
         );
         println!("    (use --regenerate-scip to force regeneration)");
         println!();
-        return cache.json_path();
+        return Ok(cache.json_path());
     }
 
     let reason = cache.generation_reason(regenerate);
     println!("Generating SCIP index {}...", reason);
     println!("  (This may take a while for large projects)");
 
-    match cache.get_or_generate(regenerate, true) {
-        Ok(path) => {
-            println!();
-            path
-        }
-        Err(e) => {
-            eprintln!("✗ Error: {}", e);
-            std::process::exit(1);
-        }
-    }
+    let path = cache.get_or_generate(regenerate, true)?;
+    println!();
+    Ok(path)
 }
 
 fn format_duplicate_report(duplicates: &[probe_rust::DuplicateCodeName]) -> String {
@@ -229,6 +223,41 @@ fn format_duplicate_report(duplicates: &[probe_rust::DuplicateCodeName]) -> Stri
     msg.push_str("    This may indicate trait implementations that cannot be distinguished.\n");
     msg.push_str("    Use --allow-duplicates to continue anyway (first occurrence kept).");
     msg
+}
+
+fn enrich_with_charon(
+    project_path: &Path,
+    auto_install: bool,
+    atoms_dict: &mut BTreeMap<String, AtomWithLines>,
+) {
+    println!();
+    println!("Enriching rust-qualified-names with Charon (Aeneas-compatible)...");
+
+    let mut charon_cache = CharonCache::new(project_path).with_auto_install(auto_install);
+
+    let regenerate = false;
+    let llbc_path = match charon_cache.get_or_generate(regenerate, true) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!(
+                "  ⚠ Charon enrichment skipped: {}\n    \
+                 rust-qualified-name will use heuristic (file path + display name)",
+                e
+            );
+            return;
+        }
+    };
+
+    match charon_names::enrich_atoms_with_charon_names(atoms_dict, &llbc_path, true) {
+        Ok(count) => {
+            let total = atoms_dict.len();
+            println!("  ✓ Enriched {count}/{total} atoms with Charon-derived rust-qualified-name");
+        }
+        Err(e) => {
+            eprintln!("  ⚠ Charon LLBC parsing failed: {e}");
+            eprintln!("    rust-qualified-name will use heuristic");
+        }
+    }
 }
 
 fn print_success_summary(output: &Path, atoms_dict: &BTreeMap<String, AtomWithLines>) {

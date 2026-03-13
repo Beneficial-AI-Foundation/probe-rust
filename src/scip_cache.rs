@@ -215,8 +215,9 @@ impl ScipCache {
         }
 
         let scip_index_path = self.scip_path();
+        let scip_index_str = scip_index_path.to_string_lossy();
         let output = Command::new(scip_bin)
-            .args(["print", "--json", scip_index_path.to_str().unwrap()])
+            .args(["print", "--json", scip_index_str.as_ref()])
             .output();
 
         match output {

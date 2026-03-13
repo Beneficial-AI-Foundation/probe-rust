@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
 
+pub mod charon_cache;
+pub mod charon_names;
 pub mod constants;
 pub mod error;
 pub mod metadata;
@@ -187,8 +189,10 @@ pub struct CodeTextInfo {
 }
 
 /// Parse a SCIP JSON file
-pub fn parse_scip_json(file_path: &str) -> Result<ScipIndex, Box<dyn std::error::Error>> {
-    let contents = std::fs::read_to_string(file_path)?;
+#[must_use = "parsing result should be checked"]
+pub fn parse_scip_json(file_path: &Path) -> ProbeResult<ScipIndex> {
+    let contents =
+        std::fs::read_to_string(file_path).map_err(|e| ProbeError::file_io(file_path, e))?;
     let index: ScipIndex = serde_json::from_str(&contents)?;
     Ok(index)
 }
@@ -214,7 +218,16 @@ fn make_unique_key(
 }
 
 /// Derive a Rust-style qualified name from the code-path (file) and SCIP symbol.
-pub fn derive_rust_qualified_name(code_path: &str, display_name: &str) -> Option<String> {
+///
+/// When `pkg_name` is provided it is used as the crate prefix for bare `src/`
+/// paths (i.e. SCIP indexes generated from within a single crate rather than a
+/// workspace root).
+#[must_use]
+pub fn derive_rust_qualified_name(
+    code_path: &str,
+    display_name: &str,
+    pkg_name: Option<&str>,
+) -> Option<String> {
     if code_path.is_empty() {
         return None;
     }
@@ -231,7 +244,11 @@ pub fn derive_rust_qualified_name(code_path: &str, display_name: &str) -> Option
             .replace('-', "_");
         (crate_name, &code_path[pos + 5..])
     } else if let Some(rest) = code_path.strip_prefix("src/") {
-        (String::new(), rest)
+        let crate_name = pkg_name
+            .filter(|n| !n.is_empty())
+            .map(|n| n.replace('-', "_"))
+            .unwrap_or_default();
+        (crate_name, rest)
     } else {
         return None;
     };
@@ -288,6 +305,7 @@ fn extract_function_name_from_symbol(symbol: &str) -> String {
 }
 
 /// Build a call graph from SCIP data.
+#[must_use]
 pub fn build_call_graph(
     scip_data: &ScipIndex,
 ) -> (HashMap<String, FunctionNode>, HashMap<String, String>) {
@@ -501,8 +519,14 @@ pub fn build_call_graph(
 
         let mut ordered_occurrences = doc.occurrences.clone();
         ordered_occurrences.sort_by(|a, b| {
-            let a_start = (a.range[0], a.range[1]);
-            let b_start = (b.range[0], b.range[1]);
+            let a_start = (
+                a.range.first().copied().unwrap_or(i32::MAX),
+                a.range.get(1).copied().unwrap_or(i32::MAX),
+            );
+            let b_start = (
+                b.range.first().copied().unwrap_or(i32::MAX),
+                b.range.get(1).copied().unwrap_or(i32::MAX),
+            );
             a_start.cmp(&b_start)
         });
 
@@ -581,6 +605,9 @@ fn extract_impl_type_info(signature: &str) -> Option<String> {
 
     let params_start = signature.find('(')?;
     let params_end = signature.find(')')?;
+    if params_start >= params_end {
+        return None;
+    }
     let params = &signature[params_start + 1..params_end];
 
     let parts: Vec<&str> = params.split(',').map(|s| s.trim()).collect();
@@ -624,14 +651,20 @@ fn extract_type_from_param(param: &str) -> Option<String> {
     }
 }
 
+/// Strip a leading lifetime annotation (e.g. `'a `, `'static `, `'_ `) from a type string.
+fn strip_lifetime(s: &str) -> &str {
+    if s.starts_with('\'') {
+        s.find(' ').map(|i| &s[i + 1..]).unwrap_or(s)
+    } else {
+        s
+    }
+}
+
 fn clean_type_string_preserve_ref(type_str: &str) -> String {
     let type_str = type_str.trim();
     let is_ref = type_str.starts_with('&');
     let without_ref = type_str.trim_start_matches('&').trim();
-    let clean = without_ref
-        .trim_start_matches("'a ")
-        .trim_start_matches("'b ")
-        .trim_start_matches("'_ ")
+    let clean = strip_lifetime(without_ref)
         .trim_start_matches("mut ")
         .trim();
 
@@ -645,12 +678,8 @@ fn clean_type_string_preserve_ref(type_str: &str) -> String {
 }
 
 fn clean_type_string(type_str: &str) -> String {
-    type_str
-        .trim()
-        .trim_start_matches('&')
-        .trim_start_matches("'a ")
-        .trim_start_matches("'b ")
-        .trim_start_matches("'_ ")
+    let without_ref = type_str.trim().trim_start_matches('&');
+    strip_lifetime(without_ref)
         .trim_start_matches("mut ")
         .trim()
         .to_string()
@@ -662,11 +691,8 @@ fn extract_self_type(self_signature: &str) -> Option<String> {
     if let Some(colon_pos) = self_signature.find(':') {
         let type_part = self_signature[colon_pos + 1..].trim();
         let is_ref = type_part.starts_with('&');
-        let clean_type = type_part
-            .trim_start_matches('&')
-            .trim_start_matches("'a ")
-            .trim_start_matches("'b ")
-            .trim_start_matches("'_ ")
+        let clean_type = strip_lifetime(type_part.trim_start_matches('&').trim())
+            .trim_start_matches("mut ")
             .trim();
 
         if !clean_type.is_empty() {
@@ -681,7 +707,7 @@ fn extract_self_type(self_signature: &str) -> Option<String> {
     None
 }
 
-fn is_missing_self_type(symbol: &str) -> bool {
+fn needs_self_type_enrichment(symbol: &str) -> bool {
     let hash_count = symbol.matches('#').count();
     hash_count == 1
 }
@@ -785,7 +811,7 @@ fn symbol_to_code_name_full(
     }
 
     if let Some(self_t) = self_type {
-        if is_missing_self_type(&result) {
+        if needs_self_type_enrichment(&result) {
             if let Some(slash_pos) = result.rfind('/') {
                 let before_slash = &result[..=slash_pos];
                 let after_slash = &result[slash_pos + 1..];
@@ -815,11 +841,13 @@ fn symbol_to_code_name_full(
 }
 
 /// Convert call graph to atoms with accurate line numbers by parsing source files.
+#[must_use]
 pub fn convert_to_atoms_with_parsed_spans(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
     project_root: &Path,
     with_locations: bool,
+    pkg_name: Option<&str>,
 ) -> Vec<AtomWithLines> {
     let relative_paths: Vec<String> = call_graph
         .values()
@@ -835,6 +863,7 @@ pub fn convert_to_atoms_with_parsed_spans(
         symbol_to_display_name,
         Some(&span_map),
         with_locations,
+        pkg_name,
     )
 }
 
@@ -844,6 +873,7 @@ fn convert_to_atoms_with_lines_internal(
     symbol_to_display_name: &HashMap<String, String>,
     span_map: Option<&HashMap<(String, String, usize), rust_parser::SpanInfo>>,
     with_locations: bool,
+    pkg_name: Option<&str>,
 ) -> Vec<AtomWithLines> {
     // === Phase 1: Compute line ranges and base code_names for all nodes ===
     struct NodeData<'a> {
@@ -853,8 +883,15 @@ fn convert_to_atoms_with_lines_internal(
         base_code_name: String,
     }
 
-    let node_data: Vec<NodeData> = call_graph
-        .values()
+    let mut sorted_nodes: Vec<&FunctionNode> = call_graph.values().collect();
+    sorted_nodes.sort_by(|a, b| {
+        a.relative_path
+            .cmp(&b.relative_path)
+            .then_with(|| a.range.cmp(&b.range))
+    });
+
+    let node_data: Vec<NodeData> = sorted_nodes
+        .into_iter()
         .map(|node| {
             let lines_start = if !node.range.is_empty() {
                 node.range[0] as usize + 1
@@ -1118,7 +1155,11 @@ fn convert_to_atoms_with_lines_internal(
             }
 
             let code_module = extract_code_module(&code_name);
-            let rqn = derive_rust_qualified_name(&data.node.relative_path, &data.node.display_name);
+            let rqn = derive_rust_qualified_name(
+                &data.node.relative_path,
+                &data.node.display_name,
+                pkg_name,
+            );
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -1153,6 +1194,7 @@ pub struct DuplicateOccurrence {
 }
 
 /// Check for duplicate code_names in the atoms output.
+#[must_use]
 pub fn find_duplicate_code_names(atoms: &[AtomWithLines]) -> Vec<DuplicateCodeName> {
     let mut code_name_to_atoms: HashMap<String, Vec<&AtomWithLines>> = HashMap::new();
 
@@ -1198,11 +1240,13 @@ fn extract_display_name_from_code_name(code_name: &str) -> String {
 }
 
 /// Normalize a code_name by stripping a trailing dot if present.
+#[must_use]
 pub fn normalize_code_name(code_name: &str) -> String {
     code_name.strip_suffix('.').unwrap_or(code_name).to_string()
 }
 
 /// Add stub atoms for external function dependencies that don't have their own atom entry.
+#[must_use]
 pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> usize {
     let external_deps: Vec<String> = atoms_dict
         .values()
@@ -1330,6 +1374,7 @@ mod tests {
         let rqn = derive_rust_qualified_name(
             "curve25519-dalek/src/backend/serial/u64/field.rs",
             "FieldElement51::reduce",
+            None,
         );
         assert_eq!(
             rqn.unwrap(),
@@ -1339,30 +1384,53 @@ mod tests {
 
     #[test]
     fn test_derive_rust_qualified_name_lib_root() {
-        let rqn = derive_rust_qualified_name("my-crate/src/lib.rs", "init");
+        let rqn = derive_rust_qualified_name("my-crate/src/lib.rs", "init", None);
         assert_eq!(rqn.unwrap(), "my_crate::init");
     }
 
     #[test]
     fn test_derive_rust_qualified_name_bare_src_prefix() {
-        let rqn = derive_rust_qualified_name("src/lib.rs", "init");
+        let rqn = derive_rust_qualified_name("src/lib.rs", "init", None);
         assert_eq!(rqn.unwrap(), "init");
     }
 
     #[test]
+    fn test_derive_rust_qualified_name_bare_src_with_pkg_name() {
+        let rqn = derive_rust_qualified_name("src/lib.rs", "init", Some("curve25519-dalek"));
+        assert_eq!(rqn.unwrap(), "curve25519_dalek::init");
+    }
+
+    #[test]
     fn test_derive_rust_qualified_name_bare_src_nested() {
-        let rqn = derive_rust_qualified_name("src/commands/extract.rs", "cmd_extract");
+        let rqn = derive_rust_qualified_name("src/commands/extract.rs", "cmd_extract", None);
         assert_eq!(rqn.unwrap(), "commands::extract::cmd_extract");
     }
 
     #[test]
+    fn test_derive_rust_qualified_name_bare_src_nested_with_pkg_name() {
+        let rqn = derive_rust_qualified_name(
+            "src/commands/extract.rs",
+            "cmd_extract",
+            Some("probe-rust"),
+        );
+        assert_eq!(rqn.unwrap(), "probe_rust::commands::extract::cmd_extract");
+    }
+
+    #[test]
     fn test_derive_rust_qualified_name_no_src() {
-        assert!(derive_rust_qualified_name("some/path/file.rs", "foo").is_none());
+        assert!(derive_rust_qualified_name("some/path/file.rs", "foo", None).is_none());
     }
 
     #[test]
     fn test_derive_rust_qualified_name_empty() {
-        assert!(derive_rust_qualified_name("", "foo").is_none());
+        assert!(derive_rust_qualified_name("", "foo", None).is_none());
+    }
+
+    #[test]
+    fn test_derive_rust_qualified_name_pkg_name_ignored_when_crate_in_path() {
+        let rqn =
+            derive_rust_qualified_name("curve25519-dalek/src/lib.rs", "init", Some("other-crate"));
+        assert_eq!(rqn.unwrap(), "curve25519_dalek::init");
     }
 
     #[test]
