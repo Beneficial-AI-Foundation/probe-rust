@@ -27,6 +27,7 @@ use constants::{
 /// Declaration kind. For standard Rust this is always `Exec`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum DeclKind {
     #[default]
     Exec,
@@ -34,7 +35,9 @@ pub enum DeclKind {
 
 impl DeclKind {
     pub fn as_str(&self) -> &'static str {
-        "exec"
+        match self {
+            DeclKind::Exec => "exec",
+        }
     }
 }
 
@@ -119,6 +122,7 @@ pub struct CalleeInfo {
 /// Location where a function call occurs (always Inner for standard Rust)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum CallLocation {
     Inner,
 }
@@ -191,14 +195,10 @@ pub struct CodeTextInfo {
 /// Parse a SCIP JSON file
 #[must_use = "parsing result should be checked"]
 pub fn parse_scip_json(file_path: &Path) -> ProbeResult<ScipIndex> {
-    let contents =
-        std::fs::read_to_string(file_path).map_err(|e| ProbeError::file_io(file_path, e))?;
-    let index: ScipIndex = serde_json::from_str(&contents)?;
+    let file = std::fs::File::open(file_path).map_err(|e| ProbeError::file_io(file_path, e))?;
+    let reader = std::io::BufReader::new(file);
+    let index: ScipIndex = serde_json::from_reader(reader)?;
     Ok(index)
-}
-
-fn is_function_like(kind: i32) -> bool {
-    is_function_like_kind(kind)
 }
 
 fn make_unique_key(
@@ -271,6 +271,14 @@ pub fn derive_rust_qualified_name(
     }
 }
 
+/// Extract the bare function/method name from a possibly qualified display name.
+///
+/// E.g. `"EdwardsPoint::eq"` -> `"eq"`, `"simple_func"` -> `"simple_func"`.
+#[must_use]
+pub fn bare_function_name(name: &str) -> &str {
+    name.rsplit("::").next().unwrap_or(name)
+}
+
 /// For impl methods, prepend the Self type to produce "Type::method" display names.
 fn enrich_display_name(scip_symbol: &str, base_display_name: &str) -> String {
     let s = scip_symbol
@@ -304,17 +312,8 @@ fn extract_function_name_from_symbol(symbol: &str) -> String {
         .to_string()
 }
 
-/// Build a call graph from SCIP data.
-#[must_use]
-pub fn build_call_graph(
-    scip_data: &ScipIndex,
-) -> (HashMap<String, FunctionNode>, HashMap<String, String>) {
-    let mut call_graph: HashMap<String, FunctionNode> = HashMap::new();
-    let mut project_function_keys: HashSet<String> = HashSet::new();
-    let mut all_function_symbols: HashSet<String> = HashSet::new();
-    let mut symbol_to_display_name: HashMap<String, String> = HashMap::new();
-
-    // Pre-pass: Find where each symbol is DEFINED
+/// Collect all symbol definition locations from SCIP data, sorted by line number.
+fn collect_symbol_definitions(scip_data: &ScipIndex) -> HashMap<String, Vec<(String, i32)>> {
     let mut symbol_to_definitions: HashMap<String, Vec<(String, i32)>> = HashMap::new();
     for doc in &scip_data.documents {
         let rel_path = doc.relative_path.trim_start_matches('/').to_string();
@@ -328,13 +327,15 @@ pub fn build_call_graph(
             }
         }
     }
-
     for defs in symbol_to_definitions.values_mut() {
         defs.sort_by_key(|(_, line)| *line);
     }
+    symbol_to_definitions
+}
 
-    // Pre-pass: Collect type context for definitions
-    let mut definition_type_contexts: HashMap<(String, i32), Vec<String>> = HashMap::new();
+/// Collect type context (nearby type references) for each definition site.
+fn collect_definition_type_contexts(scip_data: &ScipIndex) -> HashMap<(String, i32), Vec<String>> {
+    let mut contexts: HashMap<(String, i32), Vec<String>> = HashMap::new();
     for doc in &scip_data.documents {
         let rel_path = doc.relative_path.trim_start_matches('/').to_string();
 
@@ -370,13 +371,16 @@ pub fn build_call_graph(
                 }
 
                 if !nearby_types.is_empty() {
-                    definition_type_contexts.insert((rel_path.clone(), def_line), nearby_types);
+                    contexts.insert((rel_path.clone(), def_line), nearby_types);
                 }
             }
         }
     }
+    contexts
+}
 
-    // Pre-pass: Collect self_type from `method().(self)` symbols
+/// Collect self-type information from `method().(self)` symbol entries.
+fn collect_self_types(scip_data: &ScipIndex) -> HashMap<String, Vec<String>> {
     let mut enclosing_to_self_types: HashMap<String, Vec<String>> = HashMap::new();
     for doc in &scip_data.documents {
         for symbol in &doc.symbols {
@@ -395,14 +399,31 @@ pub fn build_call_graph(
             }
         }
     }
+    enclosing_to_self_types
+}
+
+/// Build a call graph from SCIP data.
+#[must_use]
+pub fn build_call_graph(
+    scip_data: &ScipIndex,
+) -> (HashMap<String, FunctionNode>, HashMap<String, String>) {
+    let mut call_graph: HashMap<String, FunctionNode> = HashMap::new();
+    let mut all_function_symbols: HashSet<String> = HashSet::new();
+    let mut symbol_to_display_name: HashMap<String, String> = HashMap::new();
+
+    let symbol_to_definitions = collect_symbol_definitions(scip_data);
+    let definition_type_contexts = collect_definition_type_contexts(scip_data);
+    let enclosing_to_self_types = collect_self_types(scip_data);
 
     let mut symbol_self_type_idx: HashMap<String, usize> = HashMap::new();
     let mut symbol_seen_count: HashMap<String, usize> = HashMap::new();
+    let mut symbol_line_to_key: HashMap<(String, i32), String> = HashMap::new();
 
-    // First pass: identify all function symbols and handle duplicates
+    // Register all function symbols, build call graph nodes, and build the
+    // symbol_line_to_key lookup in a single pass over the SCIP symbol tables.
     for doc in &scip_data.documents {
         for symbol in &doc.symbols {
-            if is_function_like(symbol.kind) {
+            if is_function_like_kind(symbol.kind) {
                 let signature = &symbol.signature_documentation.text;
                 let base_display_name = symbol
                     .display_name
@@ -440,7 +461,8 @@ pub fn build_call_graph(
                             Some(*line),
                         );
 
-                        project_function_keys.insert(unique_key.clone());
+                        symbol_line_to_key
+                            .insert((symbol.symbol.clone(), *line), unique_key.clone());
 
                         let def_type_context = definition_type_contexts
                             .get(&(rel_path.clone(), *line))
@@ -466,54 +488,25 @@ pub fn build_call_graph(
         }
     }
 
-    // Rebuild symbol_line_to_key map
-    let mut symbol_line_to_key: HashMap<(String, i32), String> = HashMap::new();
-    let mut symbol_seen_for_lines: HashMap<String, usize> = HashMap::new();
-    let mut symbol_self_type_idx_for_lines: HashMap<String, usize> = HashMap::new();
-    for doc in &scip_data.documents {
-        for symbol in &doc.symbols {
-            if is_function_like(symbol.kind) {
-                let signature = &symbol.signature_documentation.text;
+    populate_call_relationships(
+        scip_data,
+        &symbol_line_to_key,
+        &mut call_graph,
+        &mut all_function_symbols,
+        &mut symbol_to_display_name,
+    );
 
-                let def_index = *symbol_seen_for_lines.get(&symbol.symbol).unwrap_or(&0);
-                symbol_seen_for_lines
-                    .entry(symbol.symbol.clone())
-                    .and_modify(|c| *c += 1)
-                    .or_insert(1);
+    (call_graph, symbol_to_display_name)
+}
 
-                let self_type =
-                    if let Some(self_types) = enclosing_to_self_types.get(&symbol.symbol) {
-                        let idx = *symbol_self_type_idx_for_lines
-                            .get(&symbol.symbol)
-                            .unwrap_or(&0);
-                        symbol_self_type_idx_for_lines
-                            .entry(symbol.symbol.clone())
-                            .and_modify(|i| *i += 1)
-                            .or_insert(1);
-                        self_types.get(idx).cloned()
-                    } else {
-                        None
-                    };
-
-                if let Some(defs) = symbol_to_definitions.get(&symbol.symbol) {
-                    if let Some((_, line)) = defs.get(def_index) {
-                        let unique_key = make_unique_key(
-                            &symbol.symbol,
-                            signature,
-                            self_type.as_deref(),
-                            Some(*line),
-                        );
-
-                        if call_graph.contains_key(&unique_key) {
-                            symbol_line_to_key.insert((symbol.symbol.clone(), *line), unique_key);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Second pass: build call relationships and extract ranges
+/// Walk through occurrences to assign ranges and connect callers to callees.
+fn populate_call_relationships(
+    scip_data: &ScipIndex,
+    symbol_line_to_key: &HashMap<(String, i32), String>,
+    call_graph: &mut HashMap<String, FunctionNode>,
+    all_function_symbols: &mut HashSet<String>,
+    symbol_to_display_name: &mut HashMap<String, String>,
+) {
     for doc in &scip_data.documents {
         let mut current_function_key: Option<String> = None;
 
@@ -561,7 +554,7 @@ pub fn build_call_graph(
 
             if !is_def
                 && (all_function_symbols.contains(&occurrence.symbol)
-                    || is_external_function_symbol(&occurrence.symbol, &all_function_symbols))
+                    || is_external_function_symbol(&occurrence.symbol, all_function_symbols))
             {
                 if all_function_symbols.insert(occurrence.symbol.clone()) {
                     let base_name = extract_function_name_from_symbol(&occurrence.symbol);
@@ -585,8 +578,6 @@ pub fn build_call_graph(
             }
         }
     }
-
-    (call_graph, symbol_to_display_name)
 }
 
 fn extract_type_name_from_symbol(symbol: &str) -> Option<String> {

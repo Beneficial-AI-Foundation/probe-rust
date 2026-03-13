@@ -11,63 +11,36 @@ use crate::constants::{DATA_DIR, SCIP_INDEX_FILE, SCIP_INDEX_JSON_FILE};
 use crate::tool_manager::{self, Tool};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use thiserror::Error;
 
 /// Error types for SCIP operations
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ScipError {
-    /// rust-analyzer not found
+    #[error("rust-analyzer not found. {0}")]
     AnalyzerNotFound(String),
-    /// scip CLI command not found
+
+    #[error("scip not found. {0}")]
     ScipCliNotFound(String),
-    /// rust-analyzer scip command failed
+
+    #[error("rust-analyzer scip failed: {0}")]
     AnalyzerFailed(String),
-    /// scip print command failed
+
+    #[error("scip print failed: {0}")]
     ScipPrintFailed(String),
-    /// index.scip file not generated
+
+    #[error("index.scip not generated (rust-analyzer may have failed silently)")]
     IndexNotGenerated,
-    /// Failed to create data directory
-    CreateDirFailed(std::io::Error),
-    /// Failed to move index file
-    MoveFileFailed(std::io::Error),
-    /// Failed to write JSON file
-    WriteJsonFailed(std::io::Error),
-}
 
-impl std::fmt::Display for ScipError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScipError::AnalyzerNotFound(detail) => {
-                write!(f, "rust-analyzer not found. {detail}")
-            }
-            ScipError::ScipCliNotFound(detail) => {
-                write!(f, "scip not found. {detail}")
-            }
-            ScipError::AnalyzerFailed(msg) => {
-                write!(f, "rust-analyzer scip failed: {}", msg)
-            }
-            ScipError::ScipPrintFailed(msg) => {
-                write!(f, "scip print failed: {}", msg)
-            }
-            ScipError::IndexNotGenerated => {
-                write!(
-                    f,
-                    "index.scip not generated (rust-analyzer may have failed silently)"
-                )
-            }
-            ScipError::CreateDirFailed(e) => {
-                write!(f, "failed to create data directory: {}", e)
-            }
-            ScipError::MoveFileFailed(e) => {
-                write!(f, "failed to move index.scip: {}", e)
-            }
-            ScipError::WriteJsonFailed(e) => {
-                write!(f, "failed to write SCIP JSON: {}", e)
-            }
-        }
-    }
-}
+    #[error("failed to create data directory")]
+    CreateDirFailed(#[source] std::io::Error),
 
-impl std::error::Error for ScipError {}
+    #[error("failed to move index.scip")]
+    MoveFileFailed(#[source] std::io::Error),
+
+    #[error("failed to write SCIP JSON")]
+    WriteJsonFailed(#[source] std::io::Error),
+}
 
 /// Manager for SCIP index caching.
 ///
@@ -150,7 +123,7 @@ impl ScipCache {
         let analyzer_bin = self
             .analyzer_path
             .as_ref()
-            .expect("check_prerequisites must be called first");
+            .ok_or_else(|| ScipError::AnalyzerNotFound("check_prerequisites not called".into()))?;
 
         if verbose {
             println!(
@@ -208,7 +181,7 @@ impl ScipCache {
         let scip_bin = self
             .scip_path_resolved
             .as_ref()
-            .expect("check_prerequisites must be called first");
+            .ok_or_else(|| ScipError::ScipCliNotFound("check_prerequisites not called".into()))?;
 
         if verbose {
             println!("Converting index.scip to JSON...");

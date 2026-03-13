@@ -131,8 +131,9 @@ pub fn unwrap_envelope(json: serde_json::Value) -> serde_json::Value {
     if let serde_json::Value::Object(mut map) = json {
         let is_envelope = matches!(
             map.get("schema"),
-            Some(serde_json::Value::String(s)) if s.contains('/')
-        );
+            Some(serde_json::Value::String(s)) if s.starts_with("probe-rust/")
+        ) && map.contains_key("schema-version")
+            && map.contains_key("data");
         if is_envelope {
             if let Some(data) = map.remove("data") {
                 return data;

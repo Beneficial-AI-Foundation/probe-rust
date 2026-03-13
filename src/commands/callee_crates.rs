@@ -190,19 +190,27 @@ fn resolve_function(
 
 /// Load atoms from a file or stdin, supporting both bare-dict and enveloped formats.
 fn load_atoms(atoms_file: Option<PathBuf>) -> ProbeResult<BTreeMap<String, AtomWithLines>> {
-    let content = match atoms_file {
-        Some(path) => std::fs::read_to_string(&path).map_err(|e| ProbeError::file_io(&path, e))?,
+    let json: serde_json::Value = match atoms_file {
+        Some(path) => {
+            let file = std::fs::File::open(&path).map_err(|e| ProbeError::file_io(&path, e))?;
+            let reader = std::io::BufReader::new(file);
+            serde_json::from_reader(reader)?
+        }
         None => {
             let mut buf = String::new();
             std::io::stdin().read_to_string(&mut buf)?;
-            buf
+            serde_json::from_str(&buf)?
         }
     };
 
-    let json: serde_json::Value = serde_json::from_str(&content)?;
     let data = unwrap_envelope(json);
-
-    Ok(serde_json::from_value(data)?)
+    let mut atoms: BTreeMap<String, AtomWithLines> = serde_json::from_value(data)?;
+    for (key, atom) in &mut atoms {
+        if atom.code_name.is_empty() {
+            atom.code_name = key.clone();
+        }
+    }
+    Ok(atoms)
 }
 
 /// Execute the callee-crates command.

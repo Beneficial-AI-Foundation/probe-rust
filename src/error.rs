@@ -5,6 +5,7 @@ use thiserror::Error;
 
 /// Main error type for probe-rust operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ProbeError {
     /// Error parsing SCIP index data
     #[error("SCIP parsing error: {0}")]

@@ -132,19 +132,24 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
     }
 
     fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
-        if let Some(ident) = &node.mac.path.get_ident() {
-            if *ident == "cfg_if" {
-                if let Ok(branches) = syn::parse2::<CfgIfMacroBody>(node.mac.tokens.clone()) {
-                    for items in branches.all_items {
-                        for item in items {
-                            self.visit_item(&item);
-                        }
-                    }
-                }
+        if let Some(items) = try_parse_cfg_if_items(node) {
+            for item in items {
+                self.visit_item(&item);
             }
         }
         syn::visit::visit_item_macro(self, node);
     }
+}
+
+/// Try to parse a `cfg_if!` macro node and return the items from all branches.
+/// Returns `None` if the macro is not `cfg_if` or parsing fails.
+fn try_parse_cfg_if_items(node: &syn::ItemMacro) -> Option<Vec<syn::Item>> {
+    let ident = node.mac.path.get_ident()?;
+    if *ident != "cfg_if" {
+        return None;
+    }
+    let branches = syn::parse2::<CfgIfMacroBody>(node.mac.tokens.clone()).ok()?;
+    Some(branches.all_items.into_iter().flatten().collect())
 }
 
 /// Helper struct to parse cfg_if! macro body
@@ -310,15 +315,9 @@ impl<'ast> Visit<'ast> for FunctionInfoVisitor {
     }
 
     fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
-        if let Some(ident) = &node.mac.path.get_ident() {
-            if *ident == "cfg_if" {
-                if let Ok(branches) = syn::parse2::<CfgIfMacroBody>(node.mac.tokens.clone()) {
-                    for items in branches.all_items {
-                        for item in items {
-                            self.visit_item(&item);
-                        }
-                    }
-                }
+        if let Some(items) = try_parse_cfg_if_items(node) {
+            for item in items {
+                self.visit_item(&item);
             }
         }
         syn::visit::visit_item_macro(self, node);
@@ -423,14 +422,7 @@ pub fn build_function_span_map(
     span_map
 }
 
-/// Extract the bare function name from a possibly enriched display name.
-///
-/// SCIP display names are enriched with type info (e.g., "EdwardsPoint::eq"),
-/// but syn only stores the bare function name ("eq"). This strips the
-/// `Type::` prefix to enable matching.
-fn bare_function_name(function_name: &str) -> &str {
-    function_name.rsplit("::").next().unwrap_or(function_name)
-}
+use crate::bare_function_name;
 
 /// Get the end line for a function given its path, name, and start line.
 pub fn get_function_end_line(

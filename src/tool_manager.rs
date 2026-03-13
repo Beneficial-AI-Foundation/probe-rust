@@ -9,13 +9,16 @@
 //! 2. Latest stable release from GitHub API
 //! 3. Known-good fallback version (compiled into the binary)
 
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use thiserror::Error;
 
 const SCIP_FALLBACK_VERSION: &str = "v0.6.1";
 const SCIP_VERSION_ENV: &str = "PROBE_SCIP_VERSION";
+const SCIP_SHA256_ENV: &str = "PROBE_SCIP_SHA256";
 const SCIP_REPO: &str = "sourcegraph/scip";
 const CHARON_REPO: &str = "https://github.com/AeneasVerif/charon.git";
 const CHARON_SRC_DIR: &str = "charon-src";
@@ -63,51 +66,41 @@ impl std::fmt::Display for Tool {
 // Errors
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ToolError {
+    #[error("{0}: platform not supported ({1}).")]
     PlatformNotSupported(Tool, String),
+
+    #[error("{0}: download failed: {1}")]
     DownloadFailed(Tool, String),
+
+    #[error("{0}: decompression failed: {1}")]
     DecompressFailed(Tool, String),
-    IoError(Tool, io::Error),
+
+    #[error("{0}: I/O error")]
+    IoError(Tool, #[source] io::Error),
+
+    #[error("{}", not_installed_message(.0))]
     NotInstalled(Tool),
 }
 
-impl std::fmt::Display for ToolError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ToolError::PlatformNotSupported(tool, detail) => {
-                write!(f, "{tool}: platform not supported ({detail}).")
-            }
-            ToolError::DownloadFailed(tool, msg) => {
-                write!(f, "{tool}: download failed: {msg}")
-            }
-            ToolError::DecompressFailed(tool, msg) => {
-                write!(f, "{tool}: decompression failed: {msg}")
-            }
-            ToolError::IoError(tool, e) => {
-                write!(f, "{tool}: I/O error: {e}")
-            }
-            ToolError::NotInstalled(tool) => match tool {
-                Tool::RustAnalyzer => write!(
-                    f,
-                    "rust-analyzer not found. Install it with: rustup component add rust-analyzer"
-                ),
-                Tool::Scip => write!(
-                    f,
-                    "scip not found. Install it with: probe-rust setup\n\
-                     Or download manually from https://github.com/sourcegraph/scip/releases"
-                ),
-                Tool::Charon | Tool::CharonDriver => write!(
-                    f,
-                    "charon not found. Use --auto-install to build from source, \
-                     or install manually from https://github.com/AeneasVerif/charon"
-                ),
-            },
+fn not_installed_message(tool: &Tool) -> String {
+    match tool {
+        Tool::RustAnalyzer => {
+            "rust-analyzer not found. Install it with: rustup component add rust-analyzer"
+                .to_string()
+        }
+        Tool::Scip => "scip not found. Install it with: probe-rust setup\n\
+             Or download manually from https://github.com/sourcegraph/scip/releases"
+            .to_string(),
+        Tool::Charon | Tool::CharonDriver => {
+            "charon not found. Use --auto-install to build from source, \
+             or install manually from https://github.com/AeneasVerif/charon"
+                .to_string()
         }
     }
 }
-
-impl std::error::Error for ToolError {}
 
 // ---------------------------------------------------------------------------
 // Managed tools directory
@@ -314,9 +307,34 @@ pub fn download_scip() -> Result<PathBuf, ToolError> {
     let mut compressed_bytes: Vec<u8> = Vec::new();
     response
         .into_reader()
-        .take(MAX_DOWNLOAD_BYTES)
+        .take(MAX_DOWNLOAD_BYTES + 1)
         .read_to_end(&mut compressed_bytes)
         .map_err(|e| ToolError::DownloadFailed(Tool::Scip, e.to_string()))?;
+
+    if compressed_bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
+        return Err(ToolError::DownloadFailed(
+            Tool::Scip,
+            format!(
+                "download exceeds maximum size of {} MB",
+                MAX_DOWNLOAD_BYTES / (1024 * 1024)
+            ),
+        ));
+    }
+
+    let actual_hash = hex_sha256(&compressed_bytes);
+    eprintln!("  SHA-256: {actual_hash}");
+
+    if let Ok(expected) = std::env::var(SCIP_SHA256_ENV) {
+        if !expected.is_empty() && expected.to_lowercase() != actual_hash {
+            return Err(ToolError::DownloadFailed(
+                Tool::Scip,
+                format!(
+                    "SHA-256 mismatch: expected {expected}, got {actual_hash}. \
+                     Set {SCIP_SHA256_ENV} to the correct hash or unset it to skip verification."
+                ),
+            ));
+        }
+    }
 
     extract_tar_gz(&compressed_bytes, &dest_path)?;
 
@@ -375,6 +393,11 @@ fn extract_tar_gz(data: &[u8], dest: &Path) -> Result<(), ToolError> {
     Ok(())
 }
 
+fn hex_sha256(data: &[u8]) -> String {
+    let hash = Sha256::digest(data);
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 // ---------------------------------------------------------------------------
 // Build from source (charon)
 // ---------------------------------------------------------------------------
@@ -412,12 +435,24 @@ pub fn build_charon() -> Result<PathBuf, ToolError> {
         }
     } else {
         eprintln!("Updating existing charon source...");
-        let _ = Command::new("git")
+        let pull_status = Command::new("git")
             .args(["pull", "--ff-only"])
             .current_dir(&src_dir)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .status();
+        match pull_status {
+            Ok(s) if !s.success() => {
+                eprintln!(
+                    "Warning: git pull --ff-only failed ({}), building with existing source",
+                    s
+                );
+            }
+            Err(e) => {
+                eprintln!("Warning: git pull failed ({e}), building with existing source");
+            }
+            _ => {}
+        }
     }
 
     let charon_crate_dir = src_dir.join("charon");

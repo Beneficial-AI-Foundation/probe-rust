@@ -36,10 +36,11 @@ pub struct CharonFunInfo {
 
 /// Parse an LLBC JSON file and return Charon function info grouped by match key.
 pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFunInfo>>, String> {
-    let contents =
-        std::fs::read_to_string(llbc_path).map_err(|e| format!("failed to read LLBC file: {e}"))?;
+    let file =
+        std::fs::File::open(llbc_path).map_err(|e| format!("failed to read LLBC file: {e}"))?;
+    let reader = std::io::BufReader::new(file);
     let root: serde_json::Value =
-        serde_json::from_str(&contents).map_err(|e| format!("failed to parse LLBC JSON: {e}"))?;
+        serde_json::from_reader(reader).map_err(|e| format!("failed to parse LLBC JSON: {e}"))?;
 
     let translated = root
         .get("translated")
@@ -226,16 +227,7 @@ fn module_from_code_path(code_path: &str) -> String {
         .replace('/', "::")
 }
 
-/// Strip `Type::` prefix from display names to get the bare function name.
-/// `Scalar::from_bytes_mod_order` -> `from_bytes_mod_order`
-/// `free_function` -> `free_function`
-fn bare_function_name(display_name: &str) -> &str {
-    if let Some(pos) = display_name.rfind("::") {
-        &display_name[pos + 2..]
-    } else {
-        display_name
-    }
-}
+use crate::bare_function_name;
 
 // ---------------------------------------------------------------------------
 // Lookup table builders

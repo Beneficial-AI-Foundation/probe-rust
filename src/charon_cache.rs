@@ -12,37 +12,25 @@ use crate::constants::DATA_DIR;
 use crate::tool_manager::{self, Tool};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use thiserror::Error;
 
 const LLBC_FILE: &str = "charon.llbc";
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum CharonError {
+    #[error("charon not found. {0}")]
     CharonNotFound(String),
+
+    #[error("charon failed: {0}")]
     CharonFailed(String),
+
+    #[error("LLBC file not generated (charon may have failed)")]
     LlbcNotGenerated,
-    CreateDirFailed(std::io::Error),
-}
 
-impl std::fmt::Display for CharonError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CharonError::CharonNotFound(detail) => {
-                write!(f, "charon not found. {detail}")
-            }
-            CharonError::CharonFailed(msg) => {
-                write!(f, "charon failed: {msg}")
-            }
-            CharonError::LlbcNotGenerated => {
-                write!(f, "LLBC file not generated (charon may have failed)")
-            }
-            CharonError::CreateDirFailed(e) => {
-                write!(f, "failed to create data directory: {e}")
-            }
-        }
-    }
+    #[error("failed to create data directory")]
+    CreateDirFailed(#[source] std::io::Error),
 }
-
-impl std::error::Error for CharonError {}
 
 /// Manager for Charon LLBC generation and caching.
 ///
@@ -113,7 +101,7 @@ impl CharonCache {
         let charon_bin = self
             .charon_path
             .as_ref()
-            .expect("check_prerequisites must be called first");
+            .ok_or_else(|| CharonError::CharonNotFound("check_prerequisites not called".into()))?;
 
         let data_dir = self.data_dir();
         if !data_dir.exists() {
