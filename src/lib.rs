@@ -219,24 +219,35 @@ pub fn derive_rust_qualified_name(code_path: &str, display_name: &str) -> Option
         return None;
     }
 
-    let parts: Vec<&str> = code_path.splitn(2, "/src/").collect();
-    if parts.len() != 2 {
+    // SCIP relative paths come in two forms:
+    //   1. "crate-name/src/lib.rs" (multi-crate workspace or external dep)
+    //   2. "src/lib.rs" (single crate, rust-analyzer default)
+    let (crate_name, file_path) = if let Some(pos) = code_path.find("/src/") {
+        let crate_part = &code_path[..pos];
+        let crate_name = crate_part
+            .rsplit('/')
+            .next()
+            .unwrap_or(crate_part)
+            .replace('-', "_");
+        (crate_name, &code_path[pos + 5..])
+    } else if let Some(rest) = code_path.strip_prefix("src/") {
+        (String::new(), rest)
+    } else {
         return None;
-    }
+    };
 
-    let crate_name = parts[0]
-        .rsplit('/')
-        .next()
-        .unwrap_or(parts[0])
-        .replace('-', "_");
-
-    let file_path = parts[1];
     let module_path = file_path
         .trim_end_matches(".rs")
         .trim_end_matches("/mod")
         .replace('/', "::");
 
-    if module_path.is_empty() || module_path == "lib" {
+    if crate_name.is_empty() {
+        if module_path.is_empty() || module_path == "lib" {
+            Some(display_name.to_string())
+        } else {
+            Some(format!("{}::{}", module_path, display_name))
+        }
+    } else if module_path.is_empty() || module_path == "lib" {
         Some(format!("{}::{}", crate_name, display_name))
     } else {
         Some(format!("{}::{}::{}", crate_name, module_path, display_name))
@@ -1330,6 +1341,28 @@ mod tests {
     fn test_derive_rust_qualified_name_lib_root() {
         let rqn = derive_rust_qualified_name("my-crate/src/lib.rs", "init");
         assert_eq!(rqn.unwrap(), "my_crate::init");
+    }
+
+    #[test]
+    fn test_derive_rust_qualified_name_bare_src_prefix() {
+        let rqn = derive_rust_qualified_name("src/lib.rs", "init");
+        assert_eq!(rqn.unwrap(), "init");
+    }
+
+    #[test]
+    fn test_derive_rust_qualified_name_bare_src_nested() {
+        let rqn = derive_rust_qualified_name("src/commands/extract.rs", "cmd_extract");
+        assert_eq!(rqn.unwrap(), "commands::extract::cmd_extract");
+    }
+
+    #[test]
+    fn test_derive_rust_qualified_name_no_src() {
+        assert!(derive_rust_qualified_name("some/path/file.rs", "foo").is_none());
+    }
+
+    #[test]
+    fn test_derive_rust_qualified_name_empty() {
+        assert!(derive_rust_qualified_name("", "foo").is_none());
     }
 
     #[test]
