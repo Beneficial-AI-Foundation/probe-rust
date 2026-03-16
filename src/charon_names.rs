@@ -36,8 +36,8 @@ pub struct CharonFunInfo {
 
 /// Parse an LLBC JSON file and return Charon function info grouped by match key.
 pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFunInfo>>, String> {
-    let contents = std::fs::read_to_string(llbc_path)
-        .map_err(|e| format!("failed to read LLBC file: {e}"))?;
+    let contents =
+        std::fs::read_to_string(llbc_path).map_err(|e| format!("failed to read LLBC file: {e}"))?;
     let root: serde_json::Value =
         serde_json::from_str(&contents).map_err(|e| format!("failed to parse LLBC JSON: {e}"))?;
 

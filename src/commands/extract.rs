@@ -93,8 +93,7 @@ pub fn cmd_extract(
     if stub_count > 0 {
         println!("  ✓ Added {} external function stub(s)", stub_count);
     }
-    let output =
-        output.unwrap_or_else(|| get_default_output_path(&project_path, &metadata, "atoms"));
+    let output = output.unwrap_or_else(|| get_default_output_path(&project_path, &metadata, ""));
 
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent).map_err(|e| ProbeError::file_io(parent, e))?;

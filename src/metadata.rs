@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_default_output_path_atoms() {
+    fn test_get_default_output_path_extract() {
         let meta = ProjectMetadata {
             commit: "abc".to_string(),
             repo: "".to_string(),
@@ -339,10 +339,10 @@ mod tests {
             pkg_name: "my-crate".to_string(),
             pkg_version: "1.0.0".to_string(),
         };
-        let path = get_default_output_path(Path::new("/project"), &meta, "atoms");
+        let path = get_default_output_path(Path::new("/project"), &meta, "");
         assert_eq!(
             path,
-            PathBuf::from("/project/.verilib/probes/rust_my-crate_1.0.0_atoms.json")
+            PathBuf::from("/project/.verilib/probes/rust_my-crate_1.0.0.json")
         );
     }
 

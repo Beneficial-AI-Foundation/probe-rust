@@ -20,7 +20,7 @@ enum Commands {
         /// Path to the Rust project root (must contain Cargo.toml)
         project_path: PathBuf,
 
-        /// Output file path (default: .verilib/probes/rust_<pkg>_<ver>_atoms.json)
+        /// Output file path (default: .verilib/probes/rust_<pkg>_<ver>.json)
         #[arg(short, long)]
         output: Option<PathBuf>,
 
