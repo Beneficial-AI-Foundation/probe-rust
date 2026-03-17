@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn test_unwrap_envelope_with_envelope() {
         let json = serde_json::json!({
-            "schema": "probe-rust/atoms",
+            "schema": "probe-rust/extract",
             "schema-version": "2.0",
             "tool": { "name": "probe-rust", "version": "0.1.0", "command": "extract" },
             "source": {
@@ -392,8 +392,8 @@ mod tests {
             pkg_version: "1.0.0".to_string(),
         };
 
-        let envelope = wrap_in_envelope("probe-rust/atoms", "extract", data.clone(), &meta);
-        assert_eq!(envelope.schema, "probe-rust/atoms");
+        let envelope = wrap_in_envelope("probe-rust/extract", "extract", data.clone(), &meta);
+        assert_eq!(envelope.schema, "probe-rust/extract");
         assert_eq!(envelope.tool.name, "probe-rust");
         assert_eq!(envelope.tool.command, "extract");
         assert_eq!(envelope.source.package, "my-crate");

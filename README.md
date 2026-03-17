@@ -122,7 +122,7 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
 
 ```json
 {
-  "schema": "probe-rust/atoms",
+  "schema": "probe-rust/extract",
   "schema-version": "2.1",
   "tool": { "name": "probe-rust", "version": "0.1.0", "command": "extract" },
   "source": {

@@ -1,5 +1,5 @@
 {
-  "schema": "probe-rust/atoms",
+  "schema": "probe-rust/extract",
   "schema-version": "2.1",
   "tool": {
     "name": "probe-rust",

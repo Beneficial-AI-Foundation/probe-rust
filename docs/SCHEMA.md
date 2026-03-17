@@ -68,7 +68,7 @@ standardized metadata envelope:
 
 ```json
 {
-  "schema": "probe-rust/atoms",
+  "schema": "probe-rust/extract",
   "schema-version": "2.1",
   "tool": {
     "name": "probe-rust",
@@ -91,7 +91,7 @@ standardized metadata envelope:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `schema` | string | Data type identifier: `"probe-rust/atoms"` |
+| `schema` | string | Data type identifier: `"probe-rust/extract"` |
 | `schema-version` | string | Interchange spec version (`"2.1"`) |
 | `tool.name` | string | Always `"probe-rust"` |
 | `tool.version` | string | Semver version of the probe-rust binary |
@@ -106,10 +106,10 @@ standardized metadata envelope:
 
 ---
 
-## 1. `probe-rust/atoms` -- Call Graph Atoms
+## 1. `probe-rust/extract` -- Call Graph Atoms
 
 **Produced by:** `extract`
-**Envelope schema:** `"probe-rust/atoms"`
+**Envelope schema:** `"probe-rust/extract"`
 
 ### Data Shape
 
@@ -297,7 +297,7 @@ probe-rust atoms use the same data shape as probe-verus atoms. Key differences:
 
 | Aspect | probe-rust | probe-verus |
 |--------|-----------|-------------|
-| Envelope `schema` | `"probe-rust/atoms"` | `"probe-verus/atoms"` |
+| Envelope `schema` | `"probe-rust/extract"` | `"probe-verus/atoms"` |
 | `kind` values | Always `"exec"` | `"exec"`, `"proof"`, `"spec"` |
 | `dependencies-with-locations` `location` | Always `"inner"` | `"inner"`, `"precondition"`, `"postcondition"` |
 | `rust-qualified-name` | Optional (with `--with-charon`) | Not present |

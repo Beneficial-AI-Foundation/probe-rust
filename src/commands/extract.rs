@@ -99,7 +99,7 @@ pub fn cmd_extract(
         std::fs::create_dir_all(parent).map_err(|e| ProbeError::file_io(parent, e))?;
     }
 
-    let envelope = wrap_in_envelope("probe-rust/atoms", "extract", &atoms_dict, &metadata);
+    let envelope = wrap_in_envelope("probe-rust/extract", "extract", &atoms_dict, &metadata);
     let json = serde_json::to_string_pretty(&envelope)?;
     std::fs::write(&output, &json).map_err(|e| ProbeError::file_io(&output, e))?;
 
