@@ -18,7 +18,7 @@ probe-rust extract <PROJECT_PATH> [OPTIONS]
 
 | Flag | Short | Description |
 |---|---|---|
-| `--output <PATH>` | `-o` | Override the output file path. Default: `.verilib/probes/rust_<pkg>_<ver>_atoms.json` inside the project directory. |
+| `--output <PATH>` | `-o` | Override the output file path. Default: `.verilib/probes/rust_<pkg>_<ver>.json` inside the project directory. |
 | `--regenerate-scip` | | Force regeneration of the SCIP index, even if a cached version exists in `<project>/data/`. Useful after code changes. |
 | `--with-locations` | | Include a `dependencies-with-locations` array in each atom, recording the source line of every call site. |
 | `--allow-duplicates` | | Continue when duplicate `code_name` keys are detected. The first occurrence is kept and later duplicates are dropped. Without this flag, duplicates cause an error. |
