@@ -2,9 +2,7 @@
 
 Generate compact function call graph data from Rust projects.
 
-`probe-rust` analyzes any standard Rust codebase and produces structured JSON describing every function, its dependencies (callees), source locations, and Rust-qualified names. It is designed for downstream verification and analysis tooling — in particular, the [Beneficial AI Foundation](https://github.com/Beneficial-AI-Foundation)'s verification pipeline, where it feeds into [probe-aeneas](https://github.com/Beneficial-AI-Foundation/probe-aeneas) for Rust-to-Lean translation mapping.
-
-Output follows a versioned envelope format (currently Schema 2.1); see [docs/SCHEMA.md](docs/SCHEMA.md) for the full specification.
+`probe-rust` analyzes any standard Rust codebase and produces structured JSON describing every function, its dependencies (callees), source locations, and Rust-qualified names. It is designed for downstream verification and analysis tooling — in particular, the [Beneficial AI Foundation](https://github.com/Beneficial-AI-Foundation)'s verification pipeline, where it feeds into [probe-aeneas](https://github.com/Beneficial-AI-Foundation/probe-aeneas) for Rust-to-Lean translation mapping. Output follows the Schema 2.1 envelope format; see [docs/SCHEMA.md](docs/SCHEMA.md) for the full specification.
 
 ## Prerequisites
 
@@ -17,18 +15,6 @@ Output follows a versioned envelope format (currently Schema 2.1); see [docs/SCH
 - **scip** CLI — auto-downloadable via `--auto-install`, or install manually from [sourcegraph/scip releases](https://github.com/sourcegraph/scip/releases). Pre-built binaries are available for Linux and macOS only (no Windows).
 
 - **charon** (only when using `--with-charon`) — auto-buildable via `--auto-install` (requires `cargo`), or install from [AeneasVerif/charon](https://github.com/AeneasVerif/charon).
-
-## Quick Start
-
-```bash
-# Install the latest release
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Beneficial-AI-Foundation/probe-rust/releases/latest/download/probe-rust-installer.sh | sh
-
-# Run against a Rust project (downloads scip automatically on first run)
-probe-rust extract /path/to/rust-project --auto-install
-```
-
-`rust-analyzer` must already be installed (see Prerequisites above). The `--auto-install` flag downloads `scip` but does not install `rust-analyzer`.
 
 ## Installation
 
@@ -64,12 +50,26 @@ cd probe-rust
 cargo install --path .
 ```
 
+## Quick Start
+
+```bash
+# Install the latest release
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Beneficial-AI-Foundation/probe-rust/releases/latest/download/probe-rust-installer.sh | sh
+
+# Run against a Rust project (downloads scip automatically on first run)
+probe-rust extract /path/to/rust-project --auto-install
+```
+
+`rust-analyzer` must already be installed (see Prerequisites above). The `--auto-install` flag downloads `scip` but does not install `rust-analyzer`.
+
+Output lands in `.verilib/probes/rust_<pkg>_<ver>.json` by default.
+
 ## Commands
 
 | Command | Description |
-|---|---|
+|---------|-------------|
 | `extract` | Generate function call graph atoms from a Rust project's SCIP index |
-| `callee-crates` | Find which crates a function's callees belong to (post-processing on atoms.json) |
+| `callee-crates` | Find which crates a function's callees belong to |
 | `list-functions` | List all functions in a Rust project by parsing source files |
 
 ### `extract`
@@ -79,40 +79,13 @@ probe-rust extract <PROJECT_PATH> [OPTIONS]
 ```
 
 | Option | Description |
-|---|---|
+|--------|-------------|
 | `-o, --output <PATH>` | Output file path (default: `.verilib/probes/rust_<pkg>_<ver>.json`) |
 | `--regenerate-scip` | Force regeneration of the SCIP index even if cached |
 | `--with-locations` | Include per-call location data in output |
 | `--allow-duplicates` | Continue on duplicate `code_name` entries (first occurrence kept) |
 | `--auto-install` | Automatically download missing tools (`scip`, and `charon` when `--with-charon` is set) |
 | `--with-charon` | Enrich atoms with Charon-derived `rust-qualified-name` fields (for Aeneas integration) |
-
-### `callee-crates`
-
-```bash
-probe-rust callee-crates <FUNCTION> --depth <N> [OPTIONS]
-```
-
-| Option | Description |
-|---|---|
-| `-d, --depth <N>` | Maximum traversal depth (1 = direct callees only) |
-| `-a, --atoms-file <PATH>` | Path to atoms.json (reads from stdin if omitted) |
-| `-o, --output <PATH>` | Output file path (prints to stdout if omitted) |
-| `--exclude-stdlib` | Exclude standard library crates (core, alloc, std) |
-| `--exclude-crates <LIST>` | Exclude specific crates (comma-separated) |
-
-### `list-functions`
-
-```bash
-probe-rust list-functions <PATH> [OPTIONS]
-```
-
-| Option | Description |
-|---|---|
-| `-f, --format <FMT>` | Output format: `text` (default), `json`, or `detailed` |
-| `-o, --output <PATH>` | Write JSON to file |
-| `--exclude-methods` | Exclude trait and impl methods |
-| `--show-visibility` | Show function visibility (pub/private) in detailed output |
 
 For the full command reference with examples, see **[docs/USAGE.md](docs/USAGE.md)**. For the complete JSON schema specification, see **[docs/SCHEMA.md](docs/SCHEMA.md)**.
 
