@@ -1,7 +1,7 @@
 # probe-rust Data Schemas
 
-Version: 2.0
-Date: 2026-03-13
+Version: 2.1
+Date: 2026-03-17
 
 This document specifies the JSON output formats produced by each probe-rust
 subcommand. It complements the language-agnostic
@@ -69,7 +69,7 @@ standardized metadata envelope:
 ```json
 {
   "schema": "probe-rust/atoms",
-  "schema-version": "2.0",
+  "schema-version": "2.1",
   "tool": {
     "name": "probe-rust",
     "version": "0.1.0",
@@ -92,7 +92,7 @@ standardized metadata envelope:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema` | string | Data type identifier: `"probe-rust/atoms"` |
-| `schema-version` | string | Interchange spec version (`"2.0"`) |
+| `schema-version` | string | Interchange spec version (`"2.1"`) |
 | `tool.name` | string | Always `"probe-rust"` |
 | `tool.version` | string | Semver version of the probe-rust binary |
 | `tool.command` | string | Subcommand that produced the file (e.g. `"extract"`) |
@@ -135,7 +135,8 @@ standardized metadata envelope:
     "code-text": { "lines-start": 42, "lines-end": 67 },
     "kind": "exec",
     "language": "rust",
-    "rust-qualified-name": "my_crate::module::MyStruct::method"
+    "rust-qualified-name": "my_crate::module::MyStruct::method",
+    "is-disabled": false
   }
 }
 ```
@@ -153,6 +154,7 @@ standardized metadata envelope:
 | `kind` | DeclKind | yes | Always `"exec"` for standard Rust |
 | `language` | string | yes | Always `"rust"` |
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name. |
+| `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions they did not process. |
 
 ### DependencyWithLocation
 

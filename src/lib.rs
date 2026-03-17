@@ -182,6 +182,8 @@ pub struct AtomWithLines {
         default
     )]
     pub rust_qualified_name: Option<String>,
+    #[serde(rename = "is-disabled", default)]
+    pub is_disabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1165,6 +1167,7 @@ fn convert_to_atoms_with_lines_internal(
                 kind: DeclKind::Exec,
                 language: "rust".to_string(),
                 rust_qualified_name: rqn,
+                is_disabled: false,
             }
         })
         .collect()
@@ -1267,6 +1270,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 kind: DeclKind::Exec,
                 language: "rust".to_string(),
                 rust_qualified_name: None,
+                is_disabled: false,
             },
         );
     }
@@ -1346,6 +1350,7 @@ mod tests {
                 kind: DeclKind::Exec,
                 language: "rust".to_string(),
                 rust_qualified_name: None,
+                is_disabled: false,
             },
         );
 

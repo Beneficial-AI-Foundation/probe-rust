@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- `is-disabled` field on all Rust atoms (always `false` in probe-rust output; downstream tools like probe-aeneas may override). Schema version bumped to 2.1.
 - `callee-crates` command: BFS-traverse a call graph and group callees by crate/version (ported from probe-verus).
 - `list-functions` command: list all functions in a Rust project by parsing source with `syn`, with text/json/detailed output formats.
 - Project documentation: README, usage guide, schema specification, and changelog.

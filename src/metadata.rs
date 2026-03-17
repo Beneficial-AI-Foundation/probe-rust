@@ -108,7 +108,7 @@ pub fn wrap_in_envelope<T: Serialize>(
 ) -> Envelope<T> {
     Envelope {
         schema: schema.to_string(),
-        schema_version: "2.0".to_string(),
+        schema_version: "2.1".to_string(),
         tool: ToolInfo {
             name: TOOL_NAME.to_string(),
             version: TOOL_VERSION.to_string(),
