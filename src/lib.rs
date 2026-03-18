@@ -1088,11 +1088,10 @@ fn convert_to_atoms_with_lines_internal(
                             code_name_contexts
                                 .iter()
                                 .filter(|ctx| {
-                                    callee.type_hints.iter().any(|hint| {
-                                        ctx.type_context
-                                            .iter()
-                                            .any(|t| t.contains(hint) || hint.contains(t))
-                                    })
+                                    callee
+                                        .type_hints
+                                        .iter()
+                                        .any(|hint| ctx.type_context.iter().any(|t| t == hint))
                                 })
                                 .collect()
                         };
@@ -1680,16 +1679,13 @@ mod tests {
                     .filter(|d| d.contains("mul"))
                     .collect();
 
-                // With the C3 bug, substring matching may resolve to both or
-                // to the wrong one. Ideally only the Scalar::mul should match.
-                if mul_deps.len() > 1 {
-                    eprintln!(
-                        "BUG C3 CONFIRMED: disambiguation produced {} mul \
-                         dependencies instead of 1: {:?}",
-                        mul_deps.len(),
-                        mul_deps
-                    );
-                }
+                // C3 fix: exact matching prevents "Scalar" from matching
+                // "EdwardsScalar", so at most 1 mul dependency should appear.
+                assert!(
+                    mul_deps.len() <= 1,
+                    "disambiguation should not produce false matches: got {:?}",
+                    mul_deps
+                );
             }
         }
     }
