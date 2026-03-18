@@ -400,7 +400,16 @@ pub fn build_function_span_map(
 ) -> HashMap<(String, String, usize), SpanInfo> {
     let mut span_map = HashMap::new();
 
-    let canonical_root = project_root.canonicalize().ok();
+    let canonical_root = match project_root.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!(
+                "Warning: cannot canonicalize project root {}: {e}  — skipping path safety checks",
+                project_root.display()
+            );
+            return span_map;
+        }
+    };
 
     for rel_path in relative_paths {
         let full_path = project_root.join(rel_path);
@@ -408,14 +417,12 @@ pub fn build_function_span_map(
             Ok(p) => p,
             Err(_) => continue,
         };
-        if let Some(ref root) = canonical_root {
-            if !canonical.starts_with(root) {
-                eprintln!(
-                    "Warning: SCIP relative_path escapes project root, skipping: {}",
-                    rel_path
-                );
-                continue;
-            }
+        if !canonical.starts_with(&canonical_root) {
+            eprintln!(
+                "Warning: SCIP relative_path escapes project root, skipping: {}",
+                rel_path
+            );
+            continue;
         }
 
         if let Ok(functions) = parse_file_for_spans(&canonical) {

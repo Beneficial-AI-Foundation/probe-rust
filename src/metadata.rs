@@ -468,5 +468,4 @@ mod tests {
         assert_eq!(name, "my-crate");
         assert_eq!(version, "0.3.0");
     }
-
 }

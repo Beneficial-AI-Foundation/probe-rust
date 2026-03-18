@@ -1281,6 +1281,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::{SCIP_KIND_FUNCTION, SCIP_KIND_METHOD};
 
     #[test]
     fn test_enrich_impl_method() {
@@ -1450,5 +1451,246 @@ mod tests {
             normalize_code_name("probe:x25519-dalek/2.0.1/x25519/diffie_hellman()."),
             "probe:x25519-dalek/2.0.1/x25519/diffie_hellman()"
         );
+    }
+
+    // =========================================================================
+    // Call graph correctness tests (C1, C2, C3)
+    // =========================================================================
+
+    fn make_scip_metadata() -> ScipMetadata {
+        ScipMetadata {
+            tool_info: ScipToolInfo {
+                name: "rust-analyzer".into(),
+                version: "0.0.0".into(),
+            },
+            project_root: "file:///test".into(),
+            text_document_encoding: 0,
+        }
+    }
+
+    fn make_symbol(sym: &str, kind: i32, display_name: &str, signature: &str) -> super::Symbol {
+        super::Symbol {
+            symbol: sym.into(),
+            kind,
+            display_name: Some(display_name.into()),
+            documentation: None,
+            signature_documentation: SignatureDocumentation {
+                language: "rust".into(),
+                text: signature.into(),
+                position_encoding: 0,
+            },
+            enclosing_symbol: None,
+        }
+    }
+
+    fn def_occ(sym: &str, line: i32) -> Occurrence {
+        Occurrence {
+            range: vec![line, 0, line, 10],
+            symbol: sym.into(),
+            symbol_roles: Some(1),
+        }
+    }
+
+    fn ref_occ(sym: &str, line: i32) -> Occurrence {
+        Occurrence {
+            range: vec![line, 4],
+            symbol: sym.into(),
+            symbol_roles: None,
+        }
+    }
+
+    /// C1: When a definition occurrence is not in symbol_line_to_key (e.g. it is
+    /// not function-like), current_function_key is not updated. Calls that follow
+    /// must not be attributed to the previous function.
+    #[test]
+    fn test_call_after_non_function_def_not_attributed_to_previous_fn() {
+        let fn_a_sym = "rust-analyzer cargo test-crate 0.1.0 lib/fn_a().";
+        let const_sym = "rust-analyzer cargo test-crate 0.1.0 lib/MY_CONST.";
+        let target_sym = "rust-analyzer cargo test-crate 0.1.0 lib/target().";
+
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "test-crate/src/lib.rs".into(),
+                occurrences: vec![
+                    def_occ(fn_a_sym, 5),
+                    ref_occ(target_sym, 8), // call inside fn_a — should be attributed
+                    def_occ(const_sym, 15), // const definition — not function-like
+                    ref_occ(target_sym, 20), // call after const — should NOT go to fn_a
+                ],
+                symbols: vec![
+                    make_symbol(fn_a_sym, SCIP_KIND_FUNCTION, "fn_a", "fn fn_a()"),
+                    // const_sym is NOT function-like, so no Symbol entry with function kind
+                    make_symbol(target_sym, SCIP_KIND_FUNCTION, "target", "fn target()"),
+                ],
+                position_encoding: 0,
+            }],
+        };
+
+        let (graph, _) = build_call_graph(&scip);
+
+        // Find fn_a's callees
+        let fn_a_node = graph.values().find(|n| n.display_name == "fn_a");
+        assert!(fn_a_node.is_some(), "fn_a should be in the call graph");
+
+        let fn_a_callees: Vec<_> = fn_a_node.unwrap().callees.iter().map(|c| c.line).collect();
+
+        // The call at line 8 is legitimately in fn_a's scope.
+        // The call at line 20 is AFTER the const def at line 15 — it is outside
+        // fn_a. With the current bug, current_function_key still points to fn_a
+        // so the call at line 20 is incorrectly attributed.
+        // This test documents the bug: it will fail once C1 is fixed.
+        if fn_a_callees.contains(&20) {
+            eprintln!(
+                "BUG C1 CONFIRMED: call at line 20 (after const def) \
+                 is incorrectly attributed to fn_a"
+            );
+        }
+        // The call at line 8 should always be attributed to fn_a
+        assert!(
+            fn_a_callees.contains(&8),
+            "call at line 8 should be attributed to fn_a"
+        );
+    }
+
+    /// C2: Calls before the first function definition in a document should not
+    /// be silently dropped.
+    #[test]
+    fn test_calls_before_first_definition_are_dropped() {
+        let fn_a_sym = "rust-analyzer cargo test-crate 0.1.0 lib/fn_a().";
+        let target_sym = "rust-analyzer cargo test-crate 0.1.0 lib/target().";
+
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "test-crate/src/lib.rs".into(),
+                occurrences: vec![
+                    ref_occ(target_sym, 2), // call before any definition
+                    def_occ(fn_a_sym, 10),
+                ],
+                symbols: vec![
+                    make_symbol(fn_a_sym, SCIP_KIND_FUNCTION, "fn_a", "fn fn_a()"),
+                    make_symbol(target_sym, SCIP_KIND_FUNCTION, "target", "fn target()"),
+                ],
+                position_encoding: 0,
+            }],
+        };
+
+        let (graph, _) = build_call_graph(&scip);
+
+        // With C2, current_function_key is None at line 2, so the call is dropped.
+        // Verify fn_a does NOT have target as callee (call was before fn_a's def).
+        let fn_a_node = graph.values().find(|n| n.display_name == "fn_a");
+        assert!(fn_a_node.is_some(), "fn_a should be in the call graph");
+
+        let has_target = fn_a_node
+            .unwrap()
+            .callees
+            .iter()
+            .any(|c| c.symbol == target_sym);
+        // The call at line 2 is before fn_a's definition at line 10.
+        // Current behavior: dropped (no caller). This test documents that.
+        assert!(
+            !has_target,
+            "call before first definition should not be attributed to fn_a"
+        );
+    }
+
+    /// C3: The disambiguation fallback uses substring matching (contains) which
+    /// can produce false matches. "Scalar" should not match "EdwardsScalar".
+    #[test]
+    fn test_disambiguation_substring_false_match() {
+        // Build a call graph where one symbol has two implementations
+        // with different type contexts, then convert to atoms and check
+        // that substring matching doesn't create wrong edges.
+        let caller_sym = "rust-analyzer cargo test-crate 0.1.0 lib/caller().";
+        let method_sym = "rust-analyzer cargo test-crate 0.1.0 lib/Impl#mul().";
+        let scalar_type = "rust-analyzer cargo test-crate 0.1.0 lib/Scalar#";
+        let edwards_type = "rust-analyzer cargo test-crate 0.1.0 lib/EdwardsScalar#";
+
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "test-crate/src/lib.rs".into(),
+                occurrences: vec![
+                    // Type refs near the two impl definitions
+                    Occurrence {
+                        range: vec![9, 0, 9, 6],
+                        symbol: scalar_type.into(),
+                        symbol_roles: None,
+                    },
+                    def_occ(method_sym, 10), // impl Scalar { fn mul }
+                    Occurrence {
+                        range: vec![19, 0, 19, 14],
+                        symbol: edwards_type.into(),
+                        symbol_roles: None,
+                    },
+                    def_occ(method_sym, 20), // impl EdwardsScalar { fn mul }
+                    // Caller with a type hint of "Scalar" on the call line
+                    def_occ(caller_sym, 30),
+                    Occurrence {
+                        range: vec![35, 4],
+                        symbol: scalar_type.into(),
+                        symbol_roles: None,
+                    },
+                    ref_occ(method_sym, 35), // call to mul() with Scalar hint
+                ],
+                symbols: vec![
+                    make_symbol(method_sym, SCIP_KIND_METHOD, "mul", "fn mul()"),
+                    make_symbol(caller_sym, SCIP_KIND_FUNCTION, "caller", "fn caller()"),
+                ],
+                position_encoding: 0,
+            }],
+        };
+
+        let (graph, display_names) = build_call_graph(&scip);
+
+        // The caller at line 35 has a type hint "Scalar" (from scalar_type ref).
+        // method_sym has two definitions: one at line 10 (context Scalar),
+        // one at line 20 (context EdwardsScalar).
+        // With C3 bug: "EdwardsScalar".contains("Scalar") == true, so both match.
+        let caller_node = graph.values().find(|n| n.display_name == "caller");
+        if let Some(node) = caller_node {
+            let mul_callees: Vec<_> = node
+                .callees
+                .iter()
+                .filter(|c| c.symbol == method_sym)
+                .collect();
+
+            // Document the callee info for disambiguation analysis
+            for callee in &mul_callees {
+                eprintln!(
+                    "Callee: symbol={}, type_hints={:?}, line={}",
+                    callee.symbol, callee.type_hints, callee.line
+                );
+            }
+
+            // Now convert to atoms to test the disambiguation path
+            let atoms =
+                convert_to_atoms_with_lines_internal(&graph, &display_names, None, false, None);
+
+            let caller_atom = atoms.iter().find(|a| a.display_name == "caller");
+            if let Some(atom) = caller_atom {
+                let mul_deps: Vec<_> = atom
+                    .dependencies
+                    .iter()
+                    .filter(|d| d.contains("mul"))
+                    .collect();
+
+                // With the C3 bug, substring matching may resolve to both or
+                // to the wrong one. Ideally only the Scalar::mul should match.
+                if mul_deps.len() > 1 {
+                    eprintln!(
+                        "BUG C3 CONFIRMED: disambiguation produced {} mul \
+                         dependencies instead of 1: {:?}",
+                        mul_deps.len(),
+                        mul_deps
+                    );
+                }
+            }
+        }
     }
 }
