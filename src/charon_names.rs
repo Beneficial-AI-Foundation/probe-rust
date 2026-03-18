@@ -32,6 +32,12 @@ pub struct CharonFunInfo {
     pub qualified_name: String,
     /// Match key: `module::bare_fn_name`, e.g. `scalar::from_bytes_mod_order`
     pub match_key: String,
+    /// Source file path from the LLBC span, e.g. `src/scalar.rs`
+    pub file_path: Option<String>,
+    /// 0-based start line from the LLBC span
+    pub line_start: Option<usize>,
+    /// 0-based end line from the LLBC span
+    pub line_end: Option<usize>,
 }
 
 /// Parse an LLBC JSON file and return Charon function info grouped by match key.
@@ -58,7 +64,9 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
     let trait_decl_names = build_trait_decl_name_map(item_names);
     let trait_impl_to_decl = build_trait_impl_to_decl_map(translated);
     let type_decl_names = build_type_decl_name_map(item_names);
-    let trait_impl_self_types = build_trait_impl_self_type_map(translated, &type_decl_names);
+    let trait_impl_type_info = build_trait_impl_type_info_map(translated, &type_decl_names);
+
+    let fun_spans = build_fun_span_map(translated);
 
     let mut result: HashMap<String, Vec<CharonFunInfo>> = HashMap::new();
 
@@ -68,9 +76,10 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
             None => continue,
         };
 
-        if key.get("Fun").is_none() {
-            continue;
-        }
+        let fun_id = match key.get("Fun").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => continue,
+        };
 
         let path_elems = match entry.get("value").and_then(|v| v.as_array()) {
             Some(v) => v,
@@ -82,10 +91,11 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
             &trait_decl_names,
             &trait_impl_to_decl,
             &type_decl_names,
-            &trait_impl_self_types,
+            &trait_impl_type_info,
         );
 
         let match_key = make_match_key_from_charon(&qualified_name, crate_name);
+        let span = fun_spans.get(&fun_id);
 
         result
             .entry(match_key.clone())
@@ -93,6 +103,9 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
             .push(CharonFunInfo {
                 qualified_name,
                 match_key,
+                file_path: span.map(|(f, _, _)| f.clone()),
+                line_start: span.map(|(_, s, _)| *s),
+                line_end: span.map(|(_, _, e)| *e),
             });
     }
 
@@ -108,7 +121,7 @@ fn format_name(
     trait_decl_names: &HashMap<u64, String>,
     trait_impl_to_decl: &HashMap<u64, u64>,
     type_decl_names: &HashMap<u64, String>,
-    trait_impl_self_types: &HashMap<u64, String>,
+    trait_impl_type_info: &HashMap<u64, TraitImplTypeInfo>,
 ) -> String {
     let mut parts = Vec::new();
 
@@ -124,8 +137,13 @@ fn format_name(
                     .and_then(|decl_id| trait_decl_names.get(decl_id))
                     .map(|s| s.as_str())
                     .unwrap_or("?");
-                if let Some(self_type) = trait_impl_self_types.get(&trait_impl_id) {
-                    parts.push(format!("{{{trait_name} for {self_type}}}"));
+                if let Some(info) = trait_impl_type_info.get(&trait_impl_id) {
+                    let trait_with_generics = if info.trait_generics.is_empty() {
+                        trait_name.to_string()
+                    } else {
+                        format!("{}<{}>", trait_name, info.trait_generics.join(", "))
+                    };
+                    parts.push(format!("{{{trait_with_generics} for {}}}", info.self_type));
                 } else {
                     parts.push(format!("{{impl {trait_name}}}"));
                 }
@@ -203,12 +221,20 @@ fn format_type(ty: &serde_json::Value, type_decl_names: &HashMap<u64, String>) -
     None
 }
 
-/// Build a map from TraitImpl def_id to the formatted Self type name.
-/// Extracts `impl_trait.generics.types[0]` from each trait_impl entry.
-fn build_trait_impl_self_type_map(
+/// Formatted trait impl info: Self type + any additional generic parameters.
+struct TraitImplTypeInfo {
+    self_type: String,
+    /// Formatted types[1..] (e.g. Rhs, Output for `Mul<Rhs, Output>`).
+    trait_generics: Vec<String>,
+}
+
+/// Build a map from TraitImpl def_id to the formatted Self type and trait generics.
+/// Extracts `impl_trait.generics.types` from each trait_impl entry:
+///   types[0] = Self type, types[1..] = trait generic parameters.
+fn build_trait_impl_type_info_map(
     translated: &serde_json::Value,
     type_decl_names: &HashMap<u64, String>,
-) -> HashMap<u64, String> {
+) -> HashMap<u64, TraitImplTypeInfo> {
     let mut map = HashMap::new();
     let trait_impls = match translated.get("trait_impls").and_then(|v| v.as_array()) {
         Some(arr) => arr,
@@ -223,18 +249,37 @@ fn build_trait_impl_self_type_map(
             Some(id) => id,
             None => continue,
         };
-        let self_type = ti
+        let types = match ti
             .get("impl_trait")
             .and_then(|it| it.get("generics"))
             .and_then(|g| g.get("types"))
             .and_then(|t| t.as_array())
-            .and_then(|arr| arr.first());
+        {
+            Some(arr) => arr,
+            None => continue,
+        };
 
-        if let Some(ty) = self_type {
-            if let Some(name) = format_type(ty, type_decl_names) {
-                map.insert(def_id, name);
-            }
-        }
+        let self_type = match types
+            .first()
+            .and_then(|ty| format_type(ty, type_decl_names))
+        {
+            Some(name) => name,
+            None => continue,
+        };
+
+        let trait_generics: Vec<String> = types
+            .iter()
+            .skip(1)
+            .filter_map(|ty| format_type(ty, type_decl_names))
+            .collect();
+
+        map.insert(
+            def_id,
+            TraitImplTypeInfo {
+                self_type,
+                trait_generics,
+            },
+        );
     }
 
     map
@@ -335,6 +380,70 @@ fn bare_function_name(display_name: &str) -> &str {
 // Lookup table builders
 // ---------------------------------------------------------------------------
 
+/// Build fun_id -> (file_path, line_start, line_end) from `fun_decls` and `files`.
+fn build_fun_span_map(translated: &serde_json::Value) -> HashMap<u64, (String, usize, usize)> {
+    let mut map = HashMap::new();
+
+    let files = translated
+        .get("files")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let fun_decls = match translated.get("fun_decls").and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return map,
+    };
+
+    for fd in fun_decls {
+        if fd.is_null() {
+            continue;
+        }
+        let def_id = match fd.get("def_id").and_then(|v| v.as_u64()) {
+            Some(id) => id,
+            None => continue,
+        };
+        let span_data = match fd
+            .get("item_meta")
+            .and_then(|m| m.get("span"))
+            .and_then(|s| s.get("data"))
+        {
+            Some(d) => d,
+            None => continue,
+        };
+        let file_id = match span_data.get("file_id").and_then(|v| v.as_u64()) {
+            Some(id) => id as usize,
+            None => continue,
+        };
+        let beg_line = span_data
+            .get("beg")
+            .and_then(|b| b.get("line"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(0) as usize;
+        let end_line = span_data
+            .get("end")
+            .and_then(|b| b.get("line"))
+            .and_then(|l| l.as_u64())
+            .unwrap_or(0) as usize;
+
+        if file_id >= files.len() {
+            continue;
+        }
+        let file_name = files[file_id]
+            .get("name")
+            .and_then(|n| n.get("Local").or_else(|| n.get("Virtual")))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if !file_name.is_empty() {
+            map.insert(def_id, (file_name, beg_line, end_line));
+        }
+    }
+
+    map
+}
+
 fn build_trait_decl_name_map(item_names: &[serde_json::Value]) -> HashMap<u64, String> {
     let mut map = HashMap::new();
     for entry in item_names {
@@ -403,6 +512,58 @@ fn build_trait_impl_to_decl_map(translated: &serde_json::Value) -> HashMap<u64, 
 }
 
 // ---------------------------------------------------------------------------
+// Source-path normalization
+// ---------------------------------------------------------------------------
+
+/// Strip leading package-name component so both
+/// `"curve25519-dalek/src/foo.rs"` and `"src/foo.rs"` become `"src/foo.rs"`.
+fn normalize_source_path(p: &str) -> &str {
+    if let Some(idx) = p.find("/src/") {
+        &p[idx + 1..]
+    } else {
+        p
+    }
+}
+
+/// Pick the Charon candidate whose span best matches the atom's location.
+/// Returns `None` if no candidate has a positive line overlap.
+fn disambiguate_by_span<'a>(
+    candidates: &'a [CharonFunInfo],
+    atom_file: &str,
+    atom_start: usize,
+    atom_end: usize,
+) -> Option<&'a CharonFunInfo> {
+    if atom_start == 0 {
+        return None;
+    }
+
+    let mut best: Option<&CharonFunInfo> = None;
+    let mut best_overlap: i64 = 0;
+
+    for c in candidates {
+        let c_file = match c.file_path.as_deref() {
+            Some(f) => normalize_source_path(f),
+            None => continue,
+        };
+        if c_file != atom_file {
+            continue;
+        }
+        let (c_start, c_end) = match (c.line_start, c.line_end) {
+            (Some(s), Some(e)) if s > 0 => (s, e),
+            _ => continue,
+        };
+        let overlap =
+            std::cmp::min(atom_end, c_end) as i64 - std::cmp::max(atom_start, c_start) as i64;
+        if overlap > best_overlap {
+            best_overlap = overlap;
+            best = Some(c);
+        }
+    }
+
+    best
+}
+
+// ---------------------------------------------------------------------------
 // Enrichment: cross-reference atoms with Charon names
 // ---------------------------------------------------------------------------
 
@@ -437,17 +598,28 @@ pub fn enrich_atoms_with_charon_names(
                 enriched += 1;
             } else {
                 // Multiple Charon functions with the same module::fn_name.
-                // Use the heuristic RQN to pick the best one.
-                let heuristic = atom.rust_qualified_name.as_deref().unwrap_or("");
-                if let Some(best) = candidates.iter().find(|c| {
-                    let simplified = strip_impl_blocks(&c.qualified_name);
-                    simplified == heuristic
-                }) {
+                // Try span-based disambiguation first (most reliable).
+                let norm_atom_path = normalize_source_path(&atom.code_path);
+                if let Some(best) = disambiguate_by_span(
+                    candidates,
+                    norm_atom_path,
+                    atom.code_text.lines_start,
+                    atom.code_text.lines_end,
+                ) {
                     atom.rust_qualified_name = Some(best.qualified_name.clone());
                     enriched += 1;
-                } else if let Some(first) = candidates.first() {
-                    atom.rust_qualified_name = Some(first.qualified_name.clone());
-                    enriched += 1;
+                } else {
+                    // Fallback: try heuristic RQN match.
+                    let heuristic = atom.rust_qualified_name.as_deref().unwrap_or("");
+                    if let Some(best) = candidates.iter().find(|c| {
+                        let simplified = strip_impl_blocks(&c.qualified_name);
+                        simplified == heuristic
+                    }) {
+                        atom.rust_qualified_name = Some(best.qualified_name.clone());
+                        enriched += 1;
+                    }
+                    // If neither works, leave the heuristic RQN unchanged
+                    // rather than picking an arbitrary candidate.
                 }
             }
         }
@@ -574,19 +746,63 @@ mod tests {
         let mut trait_impl_to_decl = HashMap::new();
         trait_impl_to_decl.insert(5u64, 10u64);
 
-        let mut trait_impl_self_types = HashMap::new();
-        trait_impl_self_types.insert(5u64, "my_crate::MyType".to_string());
+        let mut trait_impl_type_info = HashMap::new();
+        trait_impl_type_info.insert(
+            5u64,
+            TraitImplTypeInfo {
+                self_type: "my_crate::MyType".to_string(),
+                trait_generics: vec![],
+            },
+        );
 
         let name = format_name(
             &elems,
             &trait_decl_names,
             &trait_impl_to_decl,
             &HashMap::new(),
-            &trait_impl_self_types,
+            &trait_impl_type_info,
         );
         assert_eq!(
             name,
             "crate::{core::clone::Clone for my_crate::MyType}::method"
+        );
+    }
+
+    #[test]
+    fn test_format_name_with_trait_generics() {
+        let elems: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[{"Ident": ["crate", 0]}, {"Impl": {"Trait": 5}}, {"Ident": ["mul", 0]}]"#,
+        )
+        .unwrap();
+
+        let mut trait_decl_names = HashMap::new();
+        trait_decl_names.insert(10u64, "core::ops::arith::Mul".to_string());
+
+        let mut trait_impl_to_decl = HashMap::new();
+        trait_impl_to_decl.insert(5u64, 10u64);
+
+        let mut trait_impl_type_info = HashMap::new();
+        trait_impl_type_info.insert(
+            5u64,
+            TraitImplTypeInfo {
+                self_type: "my_crate::EdwardsPoint".to_string(),
+                trait_generics: vec![
+                    "&'0 (my_crate::Scalar)".to_string(),
+                    "my_crate::EdwardsPoint".to_string(),
+                ],
+            },
+        );
+
+        let name = format_name(
+            &elems,
+            &trait_decl_names,
+            &trait_impl_to_decl,
+            &HashMap::new(),
+            &trait_impl_type_info,
+        );
+        assert_eq!(
+            name,
+            "crate::{core::ops::arith::Mul<&'0 (my_crate::Scalar), my_crate::EdwardsPoint> for my_crate::EdwardsPoint}::mul"
         );
     }
 
