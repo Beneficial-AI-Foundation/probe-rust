@@ -1,6 +1,6 @@
 //! List-functions command - List all functions in a Rust project.
 
-use probe_rust::{rust_parser, ProbeError, ProbeResult};
+use crate::{rust_parser, ProbeError, ProbeResult};
 use std::path::PathBuf;
 
 /// Output format for function listing.

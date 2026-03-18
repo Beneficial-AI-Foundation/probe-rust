@@ -1,6 +1,6 @@
 //! Extract command - Generate call graph atoms from SCIP indexes.
 
-use probe_rust::{
+use crate::{
     add_external_stubs, build_call_graph,
     charon_cache::CharonCache,
     charon_names, convert_to_atoms_with_parsed_spans, find_duplicate_code_names,
@@ -204,7 +204,7 @@ fn get_scip_json(cache: &mut ScipCache, regenerate: bool) -> ProbeResult<PathBuf
     Ok(path)
 }
 
-fn format_duplicate_report(duplicates: &[probe_rust::DuplicateCodeName]) -> String {
+fn format_duplicate_report(duplicates: &[crate::DuplicateCodeName]) -> String {
     let mut msg = format!(
         "WARNING: Found {} duplicate code_name(s):\n",
         duplicates.len()

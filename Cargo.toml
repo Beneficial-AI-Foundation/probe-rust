@@ -31,6 +31,7 @@ which = "8.0.2"
 sha2 = "0.10.9"
 
 [dev-dependencies]
+probe-extract-check = { path = "../probe/probe-extract-check" }
 tempfile = "3.10"
 
 [profile.release]

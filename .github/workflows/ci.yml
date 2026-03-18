@@ -15,13 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          path: probe-rust
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      
+
       - name: Check formatting
+        working-directory: probe-rust
         run: cargo fmt --all -- --check
 
   clippy:
@@ -29,24 +32,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          path: probe-rust
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Beneficial-AI-Foundation/probe
+          path: probe
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+            probe-rust/target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('probe-rust/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-clippy-
-      
+
       - name: Run clippy
+        working-directory: probe-rust
         run: cargo clippy --all-targets -- -D warnings
 
   test:
@@ -55,23 +66,32 @@ jobs:
     needs: [fmt, clippy]
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          path: probe-rust
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Beneficial-AI-Foundation/probe
+          path: probe
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+            probe-rust/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('probe-rust/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-test-
-      
+
       - name: Build
+        working-directory: probe-rust
         run: cargo build --verbose
-      
-      - name: Run unit tests
-        run: cargo test --lib --verbose
+
+      - name: Run tests
+        working-directory: probe-rust
+        run: cargo test --verbose

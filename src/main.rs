@@ -1,8 +1,7 @@
 use clap::{Parser, Subcommand};
+use probe_rust::commands;
 use std::path::PathBuf;
 use std::process::ExitCode;
-
-mod commands;
 
 #[derive(Parser)]
 #[command(name = "probe-rust")]

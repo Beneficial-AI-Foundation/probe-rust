@@ -4,8 +4,8 @@
 //! depth N and reports which crates the discovered callees belong to,
 //! grouped by crate name and version.
 
-use probe_rust::metadata::unwrap_envelope;
-use probe_rust::{AtomWithLines, ProbeError, ProbeResult};
+use crate::metadata::unwrap_envelope;
+use crate::{AtomWithLines, ProbeError, ProbeResult};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::io::Read;
@@ -252,7 +252,7 @@ pub fn cmd_callee_crates(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_rust::{CodeTextInfo, DeclKind};
+    use crate::{CodeTextInfo, DeclKind};
 
     fn make_atom(name: &str, deps: &[&str]) -> AtomWithLines {
         AtomWithLines {

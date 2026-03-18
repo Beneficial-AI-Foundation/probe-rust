@@ -5,6 +5,7 @@ use std::path::Path;
 
 pub mod charon_cache;
 pub mod charon_names;
+pub mod commands;
 pub mod constants;
 pub mod error;
 pub mod metadata;
