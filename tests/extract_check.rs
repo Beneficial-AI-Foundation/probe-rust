@@ -11,8 +11,8 @@ use std::path::Path;
 #[test]
 fn example_json_structural_check() {
     let json_path = Path::new("examples/rust_curve25519-dalek_4.1.3.json");
-    let envelope = load_extract_json(json_path)
-        .unwrap_or_else(|e| panic!("failed to load example JSON: {e}"));
+    let envelope =
+        load_extract_json(json_path).unwrap_or_else(|e| panic!("failed to load example JSON: {e}"));
 
     // Structural checks only (no project path → no source validation).
     let report = check_all(&envelope, None);
@@ -64,10 +64,7 @@ fn example_json_atoms_have_required_fields() {
             "atom {key} has empty display-name"
         );
         assert!(!atom.kind.is_empty(), "atom {key} has empty kind");
-        assert!(
-            !atom.language.is_empty(),
-            "atom {key} has empty language"
-        );
+        assert!(!atom.language.is_empty(), "atom {key} has empty language");
     }
 }
 

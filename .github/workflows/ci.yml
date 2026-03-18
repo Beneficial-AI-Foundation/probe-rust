@@ -18,6 +18,11 @@ jobs:
         with:
           path: probe-rust
 
+      - uses: actions/checkout@v4
+        with:
+          repository: Beneficial-AI-Foundation/probe
+          path: probe
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
