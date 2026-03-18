@@ -15,8 +15,16 @@ pub fn extract_src_suffix(path: &str) -> &str {
 }
 
 /// Check if two paths match using suffix comparison.
+///
+/// Requires a path-separator boundary (`/` or `\`) so that
+/// `"my_lib.rs"` does not falsely match `"lib.rs"`.
 pub fn paths_match_by_suffix(path1: &str, path2: &str) -> bool {
-    path1.ends_with(path2) || path2.ends_with(path1)
+    fn suffix_match(haystack: &str, needle: &str) -> bool {
+        haystack == needle
+            || haystack.ends_with(&format!("/{}", needle))
+            || haystack.ends_with(&format!("\\{}", needle))
+    }
+    suffix_match(path1, path2) || suffix_match(path2, path1)
 }
 
 /// Match score for path comparison (higher is better).
@@ -108,6 +116,18 @@ mod tests {
         assert!(paths_match_by_suffix("/project/src/lib.rs", "src/lib.rs"));
         assert!(paths_match_by_suffix("src/lib.rs", "/project/src/lib.rs"));
         assert!(!paths_match_by_suffix("/project/src/lib.rs", "src/main.rs"));
+    }
+
+    #[test]
+    fn test_suffix_match_requires_path_boundary() {
+        // Substring match without path boundary must not match
+        assert!(!paths_match_by_suffix("my_lib.rs", "lib.rs"));
+        // Proper path suffix must match
+        assert!(paths_match_by_suffix("src/lib.rs", "lib.rs"));
+        // Exact match must match
+        assert!(paths_match_by_suffix("lib.rs", "lib.rs"));
+        // Suffix that is not at a path boundary must not match
+        assert!(!paths_match_by_suffix("foo/bar.rs", "o/bar.rs"));
     }
 
     #[test]

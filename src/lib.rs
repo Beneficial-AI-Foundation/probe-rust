@@ -888,7 +888,7 @@ fn convert_to_atoms_with_lines_internal(
         .into_iter()
         .map(|node| {
             let lines_start = if !node.range.is_empty() {
-                node.range[0] as usize + 1
+                node.range[0].max(0) as usize + 1
             } else {
                 0
             };
@@ -903,7 +903,7 @@ fn convert_to_atoms_with_lines_internal(
                 .unwrap_or(lines_start)
             } else {
                 match node.range.len() {
-                    4 => node.range[2] as usize + 1,
+                    4 => node.range[2].max(0) as usize + 1,
                     _ => lines_start,
                 }
             };

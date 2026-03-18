@@ -149,6 +149,12 @@ pub fn unwrap_envelope(json: serde_json::Value) -> serde_json::Value {
 // Default output paths
 // =============================================================================
 
+/// Sanitize a string for use in a filename: replace path separators and `..`
+/// so the resulting filename cannot introduce directory traversal.
+fn sanitize_for_filename(s: &str) -> String {
+    s.replace(['/', '\\'], "_").replace("..", "_")
+}
+
 /// Compute the default output path: `.verilib/probes/rust_<pkg>_<ver>[_<suffix>].json`
 pub fn get_default_output_path(
     project_root: &Path,
@@ -166,10 +172,14 @@ pub fn get_default_output_path(
         &metadata.pkg_version
     };
 
-    let filename = if suffix.is_empty() {
-        format!("rust_{}_{}.json", pkg, ver)
+    let safe_pkg = sanitize_for_filename(pkg);
+    let safe_ver = sanitize_for_filename(ver);
+    let safe_suffix = sanitize_for_filename(suffix);
+
+    let filename = if safe_suffix.is_empty() {
+        format!("rust_{}_{}.json", safe_pkg, safe_ver)
     } else {
-        format!("rust_{}_{}_{}.json", pkg, ver, suffix)
+        format!("rust_{}_{}_{}.json", safe_pkg, safe_ver, safe_suffix)
     };
 
     project_root.join(".verilib").join("probes").join(filename)
@@ -206,7 +216,13 @@ fn try_workspace_member_info(
         return None;
     }
     let member_dir = members[0].as_str()?;
-    let member_toml = project_path.join(member_dir).join("Cargo.toml");
+    let member_path = project_path.join(member_dir);
+    let canonical = member_path.canonicalize().ok()?;
+    let project_canonical = project_path.canonicalize().ok()?;
+    if !canonical.starts_with(&project_canonical) {
+        return None;
+    }
+    let member_toml = canonical.join("Cargo.toml");
     let member_content = std::fs::read_to_string(&member_toml).ok()?;
     let member_table: toml::Table = member_content.parse().ok()?;
     let pkg = member_table.get("package")?.as_table()?;
@@ -363,6 +379,32 @@ mod tests {
     }
 
     #[test]
+    fn test_output_path_does_not_escape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_root = tmp.path();
+        let meta = ProjectMetadata {
+            commit: "abc".to_string(),
+            repo: "".to_string(),
+            timestamp: "".to_string(),
+            pkg_name: "../../../etc".to_string(),
+            pkg_version: "passwd".to_string(),
+        };
+        let path = get_default_output_path(project_root, &meta, "");
+        let expected_prefix = project_root.join(".verilib").join("probes");
+        assert!(
+            path.starts_with(&expected_prefix),
+            "output path {:?} must stay under {:?}",
+            path,
+            expected_prefix
+        );
+        assert!(
+            !path.to_string_lossy().contains(".."),
+            "output path {:?} must not contain '..'",
+            path
+        );
+    }
+
+    #[test]
     fn test_find_project_root_at_root() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
@@ -426,4 +468,5 @@ mod tests {
         assert_eq!(name, "my-crate");
         assert_eq!(version, "0.3.0");
     }
+
 }

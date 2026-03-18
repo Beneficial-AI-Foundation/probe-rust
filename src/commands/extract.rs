@@ -80,9 +80,17 @@ pub fn cmd_extract(
         }
     }
 
+    let total_before = atoms.len();
     let mut atoms_dict: BTreeMap<String, AtomWithLines> = BTreeMap::new();
     for atom in atoms {
         atoms_dict.entry(atom.code_name.clone()).or_insert(atom);
+    }
+    let dropped = total_before - atoms_dict.len();
+    if dropped > 0 {
+        eprintln!(
+            "    Dropped {} duplicate atom(s) (first occurrence kept).",
+            dropped
+        );
     }
 
     if with_charon {
