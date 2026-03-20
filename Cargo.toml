@@ -14,7 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["unbounded_depth"] }
+serde_stacker = "0.1"
 syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 quote = "1.0"
@@ -31,7 +32,7 @@ which = "8.0.2"
 sha2 = "0.10.9"
 
 [dev-dependencies]
-probe-extract-check = { path = "../probe/probe-extract-check" }
+probe-extract-check = { git = "https://github.com/Beneficial-AI-Foundation/probe" }
 tempfile = "3.10"
 
 [profile.release]
