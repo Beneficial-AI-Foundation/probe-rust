@@ -97,7 +97,7 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
 {
   "schema": "probe-rust/extract",
   "schema-version": "2.1",
-  "tool": { "name": "probe-rust", "version": "0.1.0", "command": "extract" },
+  "tool": { "name": "probe-rust", "version": "0.2.0", "command": "extract" },
   "source": {
     "repo": "https://github.com/org/project.git",
     "commit": "abc123...",
@@ -134,7 +134,7 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
 
 ## Releases
 
-Releases are managed with [cargo-dist](https://opensource.axo.dev/cargo-dist/) and published automatically when a version tag (e.g. `v0.1.0`) is pushed. Each release includes:
+Releases are managed with [cargo-dist](https://opensource.axo.dev/cargo-dist/) and published automatically when a version tag (e.g. `v0.2.0`) is pushed. Each release includes:
 
 - Pre-built binaries for all supported platforms
 - Shell and PowerShell installer scripts

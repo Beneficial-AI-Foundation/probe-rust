@@ -301,7 +301,7 @@ mod tests {
         let json = serde_json::json!({
             "schema": "probe-rust/extract",
             "schema-version": "2.0",
-            "tool": { "name": "probe-rust", "version": "0.1.0", "command": "extract" },
+            "tool": { "name": "probe-rust", "version": "0.2.0", "command": "extract" },
             "source": {
                 "repo": "https://github.com/org/proj",
                 "commit": "abc123",
