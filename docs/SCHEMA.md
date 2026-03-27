@@ -136,7 +136,8 @@ standardized metadata envelope:
     "kind": "exec",
     "language": "rust",
     "rust-qualified-name": "my_crate::module::MyStruct::method",
-    "is-disabled": false
+    "is-disabled": false,
+    "is-public": true
   }
 }
 ```
@@ -155,6 +156,7 @@ standardized metadata envelope:
 | `language` | string | yes | Always `"rust"` |
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name. |
 | `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions they did not process. |
+| `is-public` | bool | no | `true` if the function is declared `pub` (from Charon LLBC `AttrInfo.public`). Only present when `--with-charon` is used and the atom matched a Charon entry. This is item-level visibility, not crate-level API reachability. |
 
 ### DependencyWithLocation
 
@@ -174,6 +176,7 @@ stub entries with:
 - `code-text`: `{"lines-start": 0, "lines-end": 0}`
 - `dependencies`: empty
 - `rust-qualified-name`: absent
+- `is-public`: absent
 
 ---
 
@@ -301,6 +304,7 @@ probe-rust atoms use the same data shape as probe-verus atoms. Key differences:
 | `kind` values | Always `"exec"` | `"exec"`, `"proof"`, `"spec"` |
 | `dependencies-with-locations` `location` | Always `"inner"` | `"inner"`, `"precondition"`, `"postcondition"` |
 | `rust-qualified-name` | Optional (with `--with-charon`) | Not present |
+| `is-public` | Optional (with `--with-charon`) | Not present |
 
 The `callee-crates` and `list-functions` commands accept atoms.json from
 either tool interchangeably.

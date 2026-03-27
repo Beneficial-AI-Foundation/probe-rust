@@ -38,14 +38,21 @@ pub struct CharonFunInfo {
     pub line_start: Option<usize>,
     /// 0-based end line from the LLBC span
     pub line_end: Option<usize>,
+    /// Whether the function is declared `pub` (from `item_meta.attr_info.public`)
+    pub is_public: Option<bool>,
 }
 
 /// Parse an LLBC JSON file and return Charon function info grouped by match key.
 pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFunInfo>>, String> {
     let contents =
         std::fs::read_to_string(llbc_path).map_err(|e| format!("failed to read LLBC file: {e}"))?;
-    let root: serde_json::Value =
-        serde_json::from_str(&contents).map_err(|e| format!("failed to parse LLBC JSON: {e}"))?;
+    let root: serde_json::Value = {
+        let mut deserializer = serde_json::Deserializer::from_str(&contents);
+        deserializer.disable_recursion_limit();
+        let stacked = serde_stacker::Deserializer::new(&mut deserializer);
+        serde::Deserialize::deserialize(stacked)
+            .map_err(|e| format!("failed to parse LLBC JSON: {e}"))?
+    };
 
     let translated = root
         .get("translated")
@@ -95,7 +102,7 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
         );
 
         let match_key = make_match_key_from_charon(&qualified_name, crate_name);
-        let span = fun_spans.get(&fun_id);
+        let meta = fun_spans.get(&fun_id);
 
         result
             .entry(match_key.clone())
@@ -103,9 +110,10 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
             .push(CharonFunInfo {
                 qualified_name,
                 match_key,
-                file_path: span.map(|(f, _, _)| f.clone()),
-                line_start: span.map(|(_, s, _)| *s),
-                line_end: span.map(|(_, _, e)| *e),
+                file_path: meta.map(|m| m.file_path.clone()),
+                line_start: meta.map(|m| m.line_start),
+                line_end: meta.map(|m| m.line_end),
+                is_public: meta.and_then(|m| m.is_public),
             });
     }
 
@@ -380,8 +388,16 @@ fn bare_function_name(display_name: &str) -> &str {
 // Lookup table builders
 // ---------------------------------------------------------------------------
 
-/// Build fun_id -> (file_path, line_start, line_end) from `fun_decls` and `files`.
-fn build_fun_span_map(translated: &serde_json::Value) -> HashMap<u64, (String, usize, usize)> {
+/// Metadata extracted from a single `fun_decls[]` entry in LLBC.
+struct FunDeclMeta {
+    file_path: String,
+    line_start: usize,
+    line_end: usize,
+    is_public: Option<bool>,
+}
+
+/// Build fun_id -> `FunDeclMeta` from `fun_decls` and `files`.
+fn build_fun_span_map(translated: &serde_json::Value) -> HashMap<u64, FunDeclMeta> {
     let mut map = HashMap::new();
 
     let files = translated
@@ -403,11 +419,11 @@ fn build_fun_span_map(translated: &serde_json::Value) -> HashMap<u64, (String, u
             Some(id) => id,
             None => continue,
         };
-        let span_data = match fd
-            .get("item_meta")
-            .and_then(|m| m.get("span"))
-            .and_then(|s| s.get("data"))
-        {
+        let item_meta = match fd.get("item_meta") {
+            Some(m) => m,
+            None => continue,
+        };
+        let span_data = match item_meta.get("span").and_then(|s| s.get("data")) {
             Some(d) => d,
             None => continue,
         };
@@ -426,6 +442,11 @@ fn build_fun_span_map(translated: &serde_json::Value) -> HashMap<u64, (String, u
             .and_then(|l| l.as_u64())
             .unwrap_or(0) as usize;
 
+        let is_public = item_meta
+            .get("attr_info")
+            .and_then(|a| a.get("public"))
+            .and_then(|v| v.as_bool());
+
         if file_id >= files.len() {
             continue;
         }
@@ -437,7 +458,15 @@ fn build_fun_span_map(translated: &serde_json::Value) -> HashMap<u64, (String, u
             .to_string();
 
         if !file_name.is_empty() {
-            map.insert(def_id, (file_name, beg_line, end_line));
+            map.insert(
+                def_id,
+                FunDeclMeta {
+                    file_path: file_name,
+                    line_start: beg_line,
+                    line_end: end_line,
+                    is_public,
+                },
+            );
         }
     }
 
@@ -595,6 +624,7 @@ pub fn enrich_atoms_with_charon_names(
         if let Some(candidates) = charon_map.get(&match_key) {
             if candidates.len() == 1 {
                 atom.rust_qualified_name = Some(candidates[0].qualified_name.clone());
+                atom.is_public = candidates[0].is_public;
                 enriched += 1;
             } else {
                 // Multiple Charon functions with the same module::fn_name.
@@ -607,6 +637,7 @@ pub fn enrich_atoms_with_charon_names(
                     atom.code_text.lines_end,
                 ) {
                     atom.rust_qualified_name = Some(best.qualified_name.clone());
+                    atom.is_public = best.is_public;
                     enriched += 1;
                 } else {
                     // Fallback: try heuristic RQN match.
@@ -616,6 +647,7 @@ pub fn enrich_atoms_with_charon_names(
                         simplified == heuristic
                     }) {
                         atom.rust_qualified_name = Some(best.qualified_name.clone());
+                        atom.is_public = best.is_public;
                         enriched += 1;
                     }
                     // If neither works, leave the heuristic RQN unchanged
@@ -853,5 +885,331 @@ mod tests {
             format_type(&ty, &type_decl_names),
             Some("&'0 (my_crate::Point)".to_string())
         );
+    }
+
+    #[test]
+    fn test_build_fun_span_map_extracts_visibility() {
+        let llbc: serde_json::Value = serde_json::from_str(r#"{
+            "files": [{"name": {"Local": "src/lib.rs"}}],
+            "fun_decls": [
+                {
+                    "def_id": 0,
+                    "item_meta": {
+                        "span": {"data": {"file_id": 0, "beg": {"line": 10, "col": 0}, "end": {"line": 20, "col": 0}}},
+                        "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                    }
+                },
+                {
+                    "def_id": 1,
+                    "item_meta": {
+                        "span": {"data": {"file_id": 0, "beg": {"line": 30, "col": 0}, "end": {"line": 40, "col": 0}}},
+                        "attr_info": {"attributes": [], "inline": null, "rename": null, "public": false}
+                    }
+                }
+            ]
+        }"#).unwrap();
+
+        let map = build_fun_span_map(&llbc);
+        assert_eq!(map.len(), 2);
+
+        let pub_fn = map.get(&0).unwrap();
+        assert_eq!(pub_fn.is_public, Some(true));
+        assert_eq!(pub_fn.file_path, "src/lib.rs");
+
+        let priv_fn = map.get(&1).unwrap();
+        assert_eq!(priv_fn.is_public, Some(false));
+    }
+
+    #[test]
+    fn test_parse_llbc_names_carries_visibility() {
+        let dir = std::env::temp_dir().join("probe_rust_test_vis");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["public_fn", 0]}]},
+                    {"key": {"Fun": 1}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["private_fn", 0]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 1, "col": 0}, "end": {"line": 5, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    },
+                    {
+                        "def_id": 1,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 10, "col": 0}, "end": {"line": 15, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": false}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/lib.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let charon_map = parse_llbc_names(&llbc_path).unwrap();
+
+        let pub_entries = charon_map.get("public_fn").unwrap();
+        assert_eq!(pub_entries.len(), 1);
+        assert_eq!(pub_entries[0].is_public, Some(true));
+        assert_eq!(pub_entries[0].qualified_name, "my_crate::public_fn");
+
+        let priv_entries = charon_map.get("private_fn").unwrap();
+        assert_eq!(priv_entries.len(), 1);
+        assert_eq!(priv_entries[0].is_public, Some(false));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_enrich_propagates_visibility() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_enrich_vis");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Ident": ["do_stuff", 0]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 5, "col": 0}, "end": {"line": 15, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/module.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/module/do_stuff()".to_string(),
+            crate::AtomWithLines {
+                display_name: "do_stuff".to_string(),
+                code_name: "probe:my-crate/1.0/module/do_stuff()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "module".to_string(),
+                code_path: "src/module.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 5,
+                    lines_end: 15,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                is_public: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 1);
+
+        let atom = atoms.get("probe:my-crate/1.0/module/do_stuff()").unwrap();
+        assert_eq!(atom.is_public, Some(true));
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("my_crate::module::do_stuff")
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_enrich_span_disambiguation_carries_visibility() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_span_disambig_vis");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Ident": ["do_stuff", 0]}]},
+                    {"key": {"Fun": 1}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Ident": ["do_stuff", 1]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 5, "col": 0}, "end": {"line": 15, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    },
+                    {
+                        "def_id": 1,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 30, "col": 0}, "end": {"line": 40, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": false}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/module.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/module/do_stuff()".to_string(),
+            crate::AtomWithLines {
+                display_name: "do_stuff".to_string(),
+                code_name: "probe:my-crate/1.0/module/do_stuff()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "module".to_string(),
+                code_path: "src/module.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 31,
+                    lines_end: 39,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                is_public: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 1);
+
+        let atom = atoms.get("probe:my-crate/1.0/module/do_stuff()").unwrap();
+        assert_eq!(
+            atom.is_public,
+            Some(false),
+            "span disambiguation should pick the private candidate (lines 30-40)"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_enrich_skips_stubs_preserves_none() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_stub_vis");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [],
+                "trait_impls": [],
+                "fun_decls": [],
+                "files": []
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:core/some_fn()".to_string(),
+            crate::AtomWithLines {
+                display_name: "some_fn".to_string(),
+                code_name: "probe:core/some_fn()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "".to_string(),
+                code_path: "".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 0,
+                    lines_end: 0,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                is_public: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 0, "stubs should not be enriched");
+
+        let atom = atoms.get("probe:core/some_fn()").unwrap();
+        assert_eq!(atom.is_public, None, "stubs should retain is_public: None");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_serde_roundtrip_is_public() {
+        let atom = crate::AtomWithLines {
+            display_name: "func".to_string(),
+            code_name: "probe:c/1.0/m/func()".to_string(),
+            dependencies: std::collections::BTreeSet::new(),
+            dependencies_with_locations: Vec::new(),
+            code_module: "m".to_string(),
+            code_path: "src/m.rs".to_string(),
+            code_text: crate::CodeTextInfo {
+                lines_start: 1,
+                lines_end: 10,
+            },
+            kind: crate::DeclKind::Exec,
+            language: "rust".to_string(),
+            rust_qualified_name: None,
+            is_disabled: false,
+            is_public: Some(true),
+        };
+
+        let json = serde_json::to_value(&atom).unwrap();
+        assert_eq!(json.get("is-public"), Some(&serde_json::json!(true)));
+        assert!(
+            json.get("rust-qualified-name").is_none(),
+            "None fields should be omitted"
+        );
+
+        let atom_none = crate::AtomWithLines {
+            is_public: None,
+            ..crate::AtomWithLines {
+                display_name: "func2".to_string(),
+                code_name: "probe:c/1.0/m/func2()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "m".to_string(),
+                code_path: "src/m.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 1,
+                    lines_end: 10,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                is_public: None,
+            }
+        };
+
+        let json_none = serde_json::to_value(&atom_none).unwrap();
+        assert!(
+            json_none.get("is-public").is_none(),
+            "None is_public should be omitted from JSON"
+        );
+
+        let roundtripped: crate::AtomWithLines = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(roundtripped.is_public, Some(true));
     }
 }

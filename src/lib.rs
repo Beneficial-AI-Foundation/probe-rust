@@ -185,6 +185,8 @@ pub struct AtomWithLines {
     pub rust_qualified_name: Option<String>,
     #[serde(rename = "is-disabled", default)]
     pub is_disabled: bool,
+    #[serde(rename = "is-public", skip_serializing_if = "Option::is_none", default)]
+    pub is_public: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1168,6 +1170,7 @@ fn convert_to_atoms_with_lines_internal(
                 language: "rust".to_string(),
                 rust_qualified_name: rqn,
                 is_disabled: false,
+                is_public: None,
             }
         })
         .collect()
@@ -1271,6 +1274,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                is_public: None,
             },
         );
     }
@@ -1352,6 +1356,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                is_public: None,
             },
         );
 

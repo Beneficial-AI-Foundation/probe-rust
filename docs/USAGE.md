@@ -23,7 +23,7 @@ probe-rust extract <PROJECT_PATH> [OPTIONS]
 | `--with-locations` | | Include a `dependencies-with-locations` array in each atom, recording the source line of every call site. |
 | `--allow-duplicates` | | Continue when duplicate `code_name` keys are detected. The first occurrence is kept and later duplicates are dropped. Without this flag, duplicates cause an error. |
 | `--auto-install` | | Automatically download missing external tools. Downloads `scip` from GitHub releases. When combined with `--with-charon`, also builds `charon` from source. Tools are installed to `~/.probe-rust/tools/`. |
-| `--with-charon` | | Run Charon to enrich atoms with Aeneas-compatible `rust-qualified-name` fields. Only needed for projects integrating with Aeneas. Requires `charon` to be installed or `--auto-install` to be set. |
+| `--with-charon` | | Run Charon to enrich atoms with Aeneas-compatible `rust-qualified-name` and `is-public` fields. Only needed for projects integrating with Aeneas. Requires `charon` to be installed or `--auto-install` to be set. |
 
 ### Examples
 
@@ -257,6 +257,7 @@ The `extract` command produces a JSON file wrapped in a Schema 2.0 metadata enve
 | `kind` | Always `"exec"` for standard Rust functions. |
 | `language` | Always `"rust"`. |
 | `rust-qualified-name` | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used and Charon enrichment succeeds, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name is used. |
+| `is-public` | (Only with `--with-charon`) `true` if the function is declared `pub`. This is item-level visibility from Charon LLBC, not crate-level API reachability. |
 
 ### External Stubs
 
@@ -292,7 +293,7 @@ rustup component add rust-analyzer
 
 ### charon (opt-in)
 
-[Charon](https://github.com/AeneasVerif/charon) is used to derive Aeneas-compatible `rust-qualified-name` fields. It is only needed for projects that integrate with [Aeneas](https://github.com/AeneasVerif/aeneas) and is activated with the `--with-charon` flag. Charon is a rustc driver built from source with a matching nightly toolchain.
+[Charon](https://github.com/AeneasVerif/charon) is used to derive Aeneas-compatible `rust-qualified-name` and `is-public` fields. It is only needed for projects that integrate with [Aeneas](https://github.com/AeneasVerif/aeneas) and is activated with the `--with-charon` flag. Charon is a rustc driver built from source with a matching nightly toolchain.
 
 **Resolution order (when `--with-charon` is passed):**
 
