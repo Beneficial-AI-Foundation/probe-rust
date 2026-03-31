@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-03-31
+
+### Fixed
+- **Charon enrichment for nested functions**: inner functions (e.g. `step_2` defined inside `fn decompress()`) now match their Charon LLBC names via a `code_module`-based fallback key. Previously the match key was built from `code_path` only, missing parent-function scoping that Charon includes in its `Name` path.
+
+### Changed
+- **Refactored Charon candidate matching**: extracted `resolve_charon_candidate` helper from `enrich_atoms_with_charon_names` to avoid duplicating the 1-candidate / span-disambiguation / heuristic-RQN logic across primary and fallback key paths.
+
 ## [0.2.0] - 2026-03-27
 
 ### Added

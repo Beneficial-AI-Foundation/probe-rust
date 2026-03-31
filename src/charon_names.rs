@@ -323,6 +323,26 @@ fn make_match_key_from_atom(code_path: &str, display_name: &str) -> String {
     }
 }
 
+/// Build a fallback match key from `code_module` (which captures parent
+/// function scoping that `code_path` alone cannot express).
+///
+/// Returns `None` when `code_module` is empty, refers to an external dep
+/// (starts with `/`), or contains special characters from impl/generic
+/// scopes (`<`, `>`, `(`) that don't correspond to Charon path segments.
+fn make_match_key_from_code_module(code_module: &str, display_name: &str) -> Option<String> {
+    if code_module.is_empty()
+        || code_module.starts_with('/')
+        || code_module.contains('<')
+        || code_module.contains('>')
+        || code_module.contains('(')
+    {
+        return None;
+    }
+    let module = code_module.replace('/', "::");
+    let bare_fn = bare_function_name(display_name);
+    Some(format!("{module}::{bare_fn}"))
+}
+
 /// Strip `{...}::` blocks from a path, e.g.
 /// `scalar::{impl core::clone::Clone}::clone` -> `scalar::clone`
 fn strip_impl_blocks(s: &str) -> String {
@@ -596,8 +616,39 @@ fn disambiguate_by_span<'a>(
 // Enrichment: cross-reference atoms with Charon names
 // ---------------------------------------------------------------------------
 
+/// Try to resolve a single Charon candidate from `candidates`, using span
+/// disambiguation and heuristic RQN matching as tiebreakers.
+///
+/// Returns the best `CharonFunInfo` or `None` if resolution fails.
+fn resolve_charon_candidate<'a>(
+    candidates: &'a [CharonFunInfo],
+    atom: &crate::AtomWithLines,
+) -> Option<&'a CharonFunInfo> {
+    if candidates.len() == 1 {
+        return Some(&candidates[0]);
+    }
+    let norm_atom_path = normalize_source_path(&atom.code_path);
+    if let Some(best) = disambiguate_by_span(
+        candidates,
+        norm_atom_path,
+        atom.code_text.lines_start,
+        atom.code_text.lines_end,
+    ) {
+        return Some(best);
+    }
+    let heuristic = atom.rust_qualified_name.as_deref().unwrap_or("");
+    candidates.iter().find(|c| {
+        let simplified = strip_impl_blocks(&c.qualified_name);
+        simplified == heuristic
+    })
+}
+
 /// Enrich atoms by matching their `code_path` + `display_name` against
 /// Charon LLBC names. Returns the number of atoms enriched.
+///
+/// Uses a two-key strategy: first tries `code_path`-based match key, then
+/// falls back to `code_module`-based key which captures parent-function
+/// nesting (e.g. `decompress::step_2`) that file paths cannot express.
 pub fn enrich_atoms_with_charon_names(
     atoms: &mut std::collections::BTreeMap<String, crate::AtomWithLines>,
     llbc_path: &Path,
@@ -621,38 +672,20 @@ pub fn enrich_atoms_with_charon_names(
 
         let match_key = make_match_key_from_atom(&atom.code_path, &atom.display_name);
 
-        if let Some(candidates) = charon_map.get(&match_key) {
-            if candidates.len() == 1 {
-                atom.rust_qualified_name = Some(candidates[0].qualified_name.clone());
-                atom.is_public = candidates[0].is_public;
+        let candidates = charon_map.get(&match_key).or_else(|| {
+            let module_key =
+                make_match_key_from_code_module(&atom.code_module, &atom.display_name)?;
+            if module_key == match_key {
+                return None;
+            }
+            charon_map.get(&module_key)
+        });
+
+        if let Some(candidates) = candidates {
+            if let Some(best) = resolve_charon_candidate(candidates, atom) {
+                atom.rust_qualified_name = Some(best.qualified_name.clone());
+                atom.is_public = best.is_public;
                 enriched += 1;
-            } else {
-                // Multiple Charon functions with the same module::fn_name.
-                // Try span-based disambiguation first (most reliable).
-                let norm_atom_path = normalize_source_path(&atom.code_path);
-                if let Some(best) = disambiguate_by_span(
-                    candidates,
-                    norm_atom_path,
-                    atom.code_text.lines_start,
-                    atom.code_text.lines_end,
-                ) {
-                    atom.rust_qualified_name = Some(best.qualified_name.clone());
-                    atom.is_public = best.is_public;
-                    enriched += 1;
-                } else {
-                    // Fallback: try heuristic RQN match.
-                    let heuristic = atom.rust_qualified_name.as_deref().unwrap_or("");
-                    if let Some(best) = candidates.iter().find(|c| {
-                        let simplified = strip_impl_blocks(&c.qualified_name);
-                        simplified == heuristic
-                    }) {
-                        atom.rust_qualified_name = Some(best.qualified_name.clone());
-                        atom.is_public = best.is_public;
-                        enriched += 1;
-                    }
-                    // If neither works, leave the heuristic RQN unchanged
-                    // rather than picking an arbitrary candidate.
-                }
             }
         }
     }
@@ -1151,6 +1184,109 @@ mod tests {
 
         let atom = atoms.get("probe:core/some_fn()").unwrap();
         assert_eq!(atom.is_public, None, "stubs should retain is_public: None");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_make_match_key_from_code_module() {
+        assert_eq!(
+            make_match_key_from_code_module("ristretto/decompress", "step_2"),
+            Some("ristretto::decompress::step_2".to_string())
+        );
+        assert_eq!(
+            make_match_key_from_code_module("scalar", "batch_invert"),
+            Some("scalar::batch_invert".to_string())
+        );
+        assert_eq!(
+            make_match_key_from_code_module("", "step_2"),
+            None,
+            "empty code_module should return None"
+        );
+        assert_eq!(
+            make_match_key_from_code_module("/github.com/rust-lang/core/iter", "next"),
+            None,
+            "external dep paths should return None"
+        );
+        assert_eq!(
+            make_match_key_from_code_module("backend/serial/u64/field/impl<&[u8;", "from_bytes"),
+            None,
+            "impl-scoped code_module should return None"
+        );
+    }
+
+    #[test]
+    fn test_enrich_nested_function_via_code_module_fallback() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_nested_fn_fallback");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Charon LLBC: step_2 is nested under decompress in the name path.
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [
+                        {"Ident": ["my_crate", 0]},
+                        {"Ident": ["ristretto", 0]},
+                        {"Ident": ["decompress", 0]},
+                        {"Ident": ["step_2", 0]}
+                    ]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 297, "col": 0}, "end": {"line": 342, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": false}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/ristretto.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/ristretto/decompress/step_2()".to_string(),
+            crate::AtomWithLines {
+                display_name: "step_2".to_string(),
+                code_name: "probe:my-crate/1.0/ristretto/decompress/step_2()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "ristretto/decompress".to_string(),
+                code_path: "src/ristretto.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 297,
+                    lines_end: 342,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: Some("my_crate::ristretto::step_2".to_string()),
+                is_disabled: false,
+                is_public: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(
+            count, 1,
+            "nested function should match via code_module fallback"
+        );
+
+        let atom = atoms
+            .get("probe:my-crate/1.0/ristretto/decompress/step_2()")
+            .unwrap();
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("my_crate::ristretto::decompress::step_2"),
+            "should get the full Charon qualified name including parent fn"
+        );
+        assert_eq!(atom.is_public, Some(false));
 
         std::fs::remove_dir_all(&dir).ok();
     }
