@@ -96,6 +96,17 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+
+    /// Install or check status of external tools (rust-analyzer, scip).
+    ///
+    /// Resolves and installs scip into ~/.probe-rust/tools/.
+    /// rust-analyzer must be installed via rustup; setup checks its status
+    /// and provides installation instructions if missing.
+    Setup {
+        /// Show installation status instead of installing
+        #[arg(long)]
+        status: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -141,6 +152,7 @@ fn main() -> ExitCode {
             show_visibility,
             output,
         } => commands::cmd_list_functions(path, format, exclude_methods, show_visibility, output),
+        Commands::Setup { status } => commands::cmd_setup(status),
     };
 
     match result {

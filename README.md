@@ -56,11 +56,14 @@ cargo install --path .
 # Install the latest release
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Beneficial-AI-Foundation/probe-rust/releases/latest/download/probe-rust-installer.sh | sh
 
-# Run against a Rust project (downloads scip automatically on first run)
-probe-rust extract /path/to/rust-project --auto-install
+# Install external tools (downloads scip, checks rust-analyzer)
+probe-rust setup
+
+# Run against a Rust project
+probe-rust extract /path/to/rust-project
 ```
 
-`rust-analyzer` must already be installed (see Prerequisites above). The `--auto-install` flag downloads `scip` but does not install `rust-analyzer`.
+`rust-analyzer` must already be installed (see Prerequisites above). Alternatively, instead of running `setup` first, you can use `--auto-install` on the `extract` command to download `scip` on the fly.
 
 Output lands in `.verilib/probes/rust_<pkg>_<ver>.json` by default.
 
@@ -68,6 +71,7 @@ Output lands in `.verilib/probes/rust_<pkg>_<ver>.json` by default.
 
 | Command | Description |
 |---------|-------------|
+| `setup` | Install or check status of external tools (rust-analyzer, scip) |
 | `extract` | Generate function call graph atoms from a Rust project's SCIP index |
 | `callee-crates` | Find which crates a function's callees belong to |
 | `list-functions` | List all functions in a Rust project by parsing source files |
@@ -97,7 +101,7 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
 {
   "schema": "probe-rust/extract",
   "schema-version": "2.1",
-  "tool": { "name": "probe-rust", "version": "0.2.0", "command": "extract" },
+  "tool": { "name": "probe-rust", "version": "0.3.0", "command": "extract" },
   "source": {
     "repo": "https://github.com/org/project.git",
     "commit": "abc123...",

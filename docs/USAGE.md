@@ -2,6 +2,41 @@
 
 ## Commands
 
+### `setup`
+
+Install or check status of external tools (rust-analyzer, scip).
+
+```
+probe-rust setup [--status]
+```
+
+Downloads scip into `~/.probe-rust/tools/` if not already present. Checks
+whether rust-analyzer is available and prints installation instructions if
+missing (rust-analyzer must be installed via `rustup component add
+rust-analyzer`).
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--status` | Show which tools are installed and their locations, without installing anything. |
+
+**Examples:**
+
+```bash
+# Install all tools
+probe-rust setup
+
+# Check installation status
+probe-rust setup --status
+```
+
+Running `setup` is recommended before first use, especially in CI or Docker
+environments. Alternatively, `extract --auto-install` will download scip on
+the fly if missing.
+
+---
+
 ### `extract`
 
 Generate function call graph atoms from a Rust project.
@@ -212,7 +247,7 @@ The `extract` command produces a JSON file wrapped in a Schema 2.0 metadata enve
   "schema-version": "2.1",
   "tool": {
     "name": "probe-rust",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "command": "extract"
   },
   "source": {

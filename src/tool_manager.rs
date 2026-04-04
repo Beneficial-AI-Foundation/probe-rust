@@ -497,6 +497,71 @@ pub fn build_charon() -> Result<PathBuf, ToolError> {
     Ok(charon_path)
 }
 
+// ---------------------------------------------------------------------------
+// Setup helpers (used by commands::setup)
+// ---------------------------------------------------------------------------
+
+fn status_line(name: &str, result: &Result<PathBuf, ToolError>, note: &str) {
+    match result {
+        Ok(p) => eprintln!("  {name:<16} {}", p.display()),
+        Err(_) => eprintln!("  {name:<16} missing{note}"),
+    }
+}
+
+/// Print a human-readable status table for all managed tools.
+pub fn print_status() {
+    let dir = tools_dir().unwrap_or_else(|| PathBuf::from("<unknown>"));
+
+    eprintln!();
+    eprintln!("Managed tools directory: {}", dir.display());
+    eprintln!();
+
+    let ra = resolve_tool(Tool::RustAnalyzer);
+    let scip = resolve_tool(Tool::Scip);
+
+    status_line(
+        "rust-analyzer",
+        &ra,
+        " (install via: rustup component add rust-analyzer)",
+    );
+    status_line("scip", &scip, "");
+    eprintln!();
+}
+
+/// Install all managed tools. Returns `(errors, warnings)`.
+///
+/// - **scip**: downloaded if not already present. Failure → error.
+/// - **rust-analyzer**: checked only (must be installed via rustup).
+///   Missing → warning with install instructions.
+pub fn install_all() -> (Vec<String>, Vec<String>) {
+    let mut errors: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    // scip
+    match resolve_tool(Tool::Scip) {
+        Ok(p) => eprintln!("scip: already available at {}", p.display()),
+        Err(_) => {
+            if let Err(e) = download_scip() {
+                errors.push(format!("scip: {e}"));
+            }
+        }
+    }
+
+    // rust-analyzer (check only)
+    match resolve_tool(Tool::RustAnalyzer) {
+        Ok(p) => eprintln!("rust-analyzer: available at {}", p.display()),
+        Err(_) => {
+            warnings.push(
+                "rust-analyzer not found. Install it with:\n  \
+                 rustup component add rust-analyzer"
+                    .to_string(),
+            );
+        }
+    }
+
+    (errors, warnings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

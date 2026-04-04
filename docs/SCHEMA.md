@@ -72,7 +72,7 @@ standardized metadata envelope:
   "schema-version": "2.1",
   "tool": {
     "name": "probe-rust",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "command": "extract"
   },
   "source": {

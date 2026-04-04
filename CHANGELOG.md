@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-04
+
+### Added
+- **`setup` command**: installs scip and verifies rust-analyzer availability.
+  Downloads scip into `~/.probe-rust/tools/`; checks whether rust-analyzer
+  is installed and provides instructions if missing (must be installed via
+  `rustup component add rust-analyzer`). Use `--status` to inspect without
+  installing.
+
 ## [0.2.1] - 2026-03-31
 
 ### Fixed
@@ -69,6 +78,8 @@ Initial release.
 - CI pipeline with formatting, clippy, and unit test checks.
 - Release automation via cargo-dist for Linux, macOS, and Windows binaries.
 
-[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/releases/tag/v0.1.0
