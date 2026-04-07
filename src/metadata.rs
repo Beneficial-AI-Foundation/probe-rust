@@ -10,7 +10,7 @@ use std::process::Command;
 
 const TOOL_NAME: &str = "probe-rust";
 const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const SCHEMA_VERSION: &str = "2.2";
+pub const SCHEMA_VERSION: &str = "2.3";
 
 // =============================================================================
 // Envelope types

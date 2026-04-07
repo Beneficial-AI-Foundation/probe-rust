@@ -12,11 +12,11 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **BFS (Breadth-First Search)** — The traversal strategy used by the `callee-crates` command to walk the call graph from a starting function and group callees by crate.
 
-**Binary-only crate** — A Cargo package that has no `[lib]` target (only `[[bin]]` targets). Public API detection is skipped for binary-only crates since `cargo public-api` only works on libraries. See [P12](properties.md), [library crate](#library-crate).
+**Binary-only crate** — A Cargo package that has no `[lib]` target (only `[[bin]]` targets). All atoms are marked `is-public-api: false` since binaries have no public API surface. See [P12](properties.md), [library crate](#library-crate).
 
-**Call attribution** — The process of assigning callee references to their enclosing function. Done by walking SCIP [occurrences](#occurrence) in lexical order and tracking the current [function-like definition](#function-like-definition). See [P8](properties.md).
+**Call attribution** — The process of assigning [callee references](#callee-reference) to their enclosing function. Done by walking SCIP [occurrences](#occurrence) in lexical order and tracking the current [function-like definition](#function-like-definition). See [P8](properties.md).
 
-**Cargo public-api** — External tool (`cargo-public-api`) that reports the public API surface of a Rust [library crate](#library-crate) by analyzing rustdoc JSON. Requires a nightly toolchain.
+**Callee reference** — An [occurrence](#occurrence) that references a called symbol (as opposed to a definition). During [call attribution](#call-attribution), callee references are assigned to the enclosing [function-like definition](#function-like-definition). See [P8](properties.md).
 
 **Charon** — External tool that compiles Rust into LLBC (Low-Level Borrow Calculus) and produces precise qualified names and visibility information. Optional in probe-rust (`--with-charon`). Failure is non-fatal ([P15](properties.md)). Requires a nightly toolchain.
 
@@ -44,9 +44,11 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **is-public** — Boolean field on [atoms](#atom) indicating whether the function's SCIP signature starts with an unrestricted `pub` prefix. Derived from `signature_documentation.text`. Does not indicate public API membership. See [P10](properties.md).
 
-**is-public-api** — Optional boolean field with three-way semantics: `true` = confirmed in public API ([RQN](#rqn-rust-qualified-name) matched in `cargo public-api` output), `false` = not public API (item has non-public visibility), absent/`null` = uncertain (`pub` item whose RQN could not be matched due to re-exports, aliases, or macro-generated types). See [P11](properties.md).
+**is-public-api** — Boolean field indicating whether a function is reachable from the crate root. Derived from SCIP module-chain visibility walk: `true` = direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain; `false` = non-public function or non-public ancestor module. Absent/`null` only for [external stubs](#external-stub). See [P11](properties.md).
 
-**Library crate** — A Cargo package that has a `[lib]` target. Required for [cargo public-api](#cargo-public-api) to function. See [P12](properties.md), [binary-only crate](#binary-only-crate).
+**Module visibility map** — A `HashMap<String, bool>` built from SCIP module symbols (kind 29) during `build_call_graph`. Maps module path descriptors (e.g. `"edwards/"`) to whether the module is unrestricted `pub`. Used by `classify_public_api` to walk ancestor module chains. See [P11](properties.md).
+
+**Library crate** — A Cargo package that has a `[lib]` target. Functions in library crates can be public API; [binary-only crates](#binary-only-crate) always have `is-public-api: false`. See [P12](properties.md).
 
 **Occurrence** — A SCIP data element representing a reference to or definition of a symbol at a specific source location. Has `range`, `symbol`, and `symbol_roles` fields.
 
@@ -55,6 +57,8 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 **Ralph Loop** — The development quality loop: implement, audit (three auditor skills), fix, repeat until clean, then run tests. See [kb/index.md](../index.md).
 
 **RQN (Rust Qualified Name)** — The `rust-qualified-name` field on [atoms](#atom). A `::` separated path like `crate_name::module::Type::method`. Derived heuristically from file path + [display name](#display-name), or precisely from [Charon](#charon) LLBC when `--with-charon` is used.
+
+**SCIP document** — A document entry in the [SCIP](#scip-source-code-intelligence-protocol) index, corresponding to a single source file. Contains [occurrences](#occurrence) and [symbol](#scip-source-code-intelligence-protocol) definitions. Each document has its own occurrence stream walked during [call attribution](#call-attribution).
 
 **SCIP (Source Code Intelligence Protocol)** — The intermediate representation generated by rust-analyzer. A binary format (`index.scip`) converted to JSON (`index.scip.json`) by the `scip` CLI tool. Contains documents, symbol definitions, [occurrences](#occurrence), and metadata.
 

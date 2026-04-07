@@ -10,5 +10,4 @@
 
 External references:
 
-- [Schema 2.0 specification](../../docs/SCHEMA.md) — envelope format, atom fields, versioning
-- [Public API limitations](../../docs/PUBLIC_API_LIMITATIONS.md) — unmatched entries analysis
+- [Schema 2.0 specification](../../docs/SCHEMA.md) — envelope format, atom fields, versioning, `is-public-api` limitations

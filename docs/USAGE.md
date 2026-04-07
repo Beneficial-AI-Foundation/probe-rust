@@ -244,7 +244,7 @@ The `extract` command produces a JSON file wrapped in a Schema 2.0 metadata enve
 ```json
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.1",
+  "schema-version": "2.3",
   "tool": {
     "name": "probe-rust",
     "version": "0.3.0",

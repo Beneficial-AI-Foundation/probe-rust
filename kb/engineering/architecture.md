@@ -27,14 +27,16 @@ commands/extract.rs (orchestration)
   |
   |-- 2. scip_cache::generate_scip_index()              [P14]
   |      rust-analyzer + scip CLI -> index.scip -> index.scip.json
-  |      Cached in <project>/data/; --regenerate-scip also clears public-API cache
+  |      Cached in <project>/data/
   |
-  |-- 3. lib.rs pipeline                                [P7, P8, P9, P10, P16]
+  |-- 3. lib.rs pipeline                                [P7, P8, P9, P10, P11, P16]
   |      parse_scip_json()          Parse SCIP JSON into ScipIndex
   |        -> build_call_graph()    Walk documents/symbols/occurrences
   |             -> FunctionNode map + symbol_to_display_name map
+  |             -> module_visibility map (SCIP module-chain walk)
   |        -> convert_to_atoms_with_parsed_spans()
   |             rust_parser (syn)   Parse .rs files for function body spans
+  |             classify_public_api()  is-public-api from module chain  [P11, P12]
   |             -> AtomWithLines map                    [P3, P5, P6]
   |
   |-- 4. find_duplicate_code_names() + dedupe into BTreeMap  [P2]
@@ -45,12 +47,7 @@ commands/extract.rs (orchestration)
   |-- 6. add_external_stubs()                           [P4]
   |      Creates stub atoms for referenced-but-undefined functions
   |
-  |-- 7. public_api module                              [P11, P12]
-  |      cargo-public-api -> parse -> enrich_atoms_with_public_api()
-  |      Sets is-public-api using three-way logic
-  |      Skipped for binary-only crates
-  |
-  |-- 8. metadata::wrap_in_envelope()                   [P1, P13]
+  |-- 7. metadata::wrap_in_envelope()                   [P1, P13]
   |      Gathers git/cargo metadata, wraps atoms in Schema 2.0 envelope
   |
   v
@@ -83,12 +80,6 @@ Provides precise Rust qualified names and item visibility via LLBC analysis. Fai
 
 **Files**: `charon_cache.rs`, `charon_names.rs`
 
-### cargo-public-api (optional, external)
-
-Detects the crate's public API surface. Requires nightly toolchain. Output cached in `<project>/data/public-api.txt`.
-
-**Files**: `public_api.rs`
-
 ### Metadata / envelope (internal)
 
 Gathers project metadata (git commit, repo URL, package info) and wraps atoms in the Schema 2.0 envelope.
@@ -120,7 +111,6 @@ src/
   rust_parser.rs       syn-based function span parsing
   scip_cache.rs        SCIP index generation and caching
   tool_manager.rs      Auto-download for scip CLI tool
-  public_api.rs        cargo-public-api integration
   charon_cache.rs      Charon tool management and caching
   charon_names.rs      Charon LLBC name enrichment
   commands/
@@ -137,8 +127,6 @@ src/
 | rust-analyzer | Yes | No (must be on PATH or via rustup) | SCIP index generation |
 | scip CLI | Yes | Yes (`--auto-install`) | Convert index.scip to JSON |
 | Charon | No (`--with-charon`) | Yes (`--auto-install`) | Precise RQN and visibility (requires nightly) |
-| cargo-public-api | No (runs automatically for lib crates) | Yes (auto-installed) | Public API surface detection (requires nightly) |
-| Nightly Rust | No (only for Charon and cargo-public-api) | Yes (`--auto-install`) | Required by Charon and cargo-public-api |
 
 ## Data flow
 
@@ -153,18 +141,18 @@ rust-analyzer ──> index.scip ──> scip CLI ──> index.scip.json
                                                     |
                                                     v
                                             build_call_graph()
+                                              + module_visibility_map
                                                     |
                               .rs files ──> syn ──> span_map
                                                     |
                                                     v
                                     convert_to_atoms_with_parsed_spans()
+                                      + classify_public_api() per atom
                                                     |
                                                     v
                                             BTreeMap<code-name, AtomWithLines>
                                                     |
                           [Charon LLBC] ──> enrich RQN + is-public
-                                                    |
-                     [cargo public-api] ──> enrich is-public-api
                                                     |
                                                     v
                                         Schema 2.0 envelope JSON

@@ -1,56 +1,89 @@
 ---
 auditor: ambiguity-auditor
 date: 2026-04-07
-status: 0 critical, 3 warnings, 1 info
+status: 2 critical, 7 warnings, 4 info
 ---
-
-## Re-audit scope
-
-Follow-up after fixes to P11/glossary, Charon tooling table, SCHEMA cross-references, glossary completeness, architecture property citations, and known-issue cross-links. Sources reviewed: `kb/index.md`, `kb/engineering/index.md`, `kb/engineering/properties.md`, `kb/engineering/architecture.md`, `kb/engineering/glossary.md`, `docs/SCHEMA.md` (spot-check: `docs/PUBLIC_API_LIMITATIONS.md` for `is-public-api` wording).
-
-## Resolution of previous findings
-
-| Prior ID | Topic | Verdict |
-|----------|--------|---------|
-| C1 | P11 `is-public-api: false` meant “not in public API” | **Resolved.** P11 table: `false` = not `pub`; uncertain = absent/`null`. Glossary matches. Aligns with SCHEMA §1 field reference (three-way semantics). |
-| W1 | Charon nightly missing from architecture tools table | **Resolved.** External tools table includes Charon with nightly; dedicated nightly row present. |
-| W2 | Code-name glossary should reference SCHEMA | **Resolved.** Code-name entry links to SCHEMA Code-Name Format. |
-| W3 | `is-public-api` glossary vs P11 | **Resolved.** |
-| W4 / W6 | Missing glossary entries (incl. binary/library crate) | **Resolved.** FunctionNode, ScipIndex, BFS, syn, base code-name, disambiguation, function-like definition, library/binary crate entries present. |
-| W5 | Architecture pipeline should cite property IDs | **Resolved.** Extract pipeline annotates steps with P1–P16 (including grouped P3/P5/P6, P7–P10/P16, etc.). |
-| W7 | Cross-references (properties ↔ glossary, C1–C3 ↔ P8/P9) | **Resolved.** C1–C3 link to glossary anchors and P8/P9. |
-| I2 | Charon nightly wording too vague | **Resolved.** Charon subsection states a nightly toolchain compatible with Charon’s upstream requirements. |
-
-**All previous critical and warning items from that list are resolved.**
 
 ## Critical
 
-(none)
+### [C1] Glossary charter violated — terms in `properties.md` without definitions
+
+- **Location**: `kb/engineering/glossary.md` (charter, line 5); `kb/engineering/properties.md` § P8, known issues C1–C2
+- **Issue**: The glossary states that every domain term used in the KB must be defined there. `properties.md` uses **SCIP document** (P8: “in a SCIP document”) and **callee references** (“callee references are attributed…”, C1/C2). Neither appears as a glossary entry. **Dependencies** describes the output edge set, not an occurrence-level “callee reference” during SCIP walking, so it does not subsume the term.
+- **Recommendation**: Add glossary entries (e.g. **SCIP document** — a document entry in the SCIP index with its own occurrence stream; **Callee reference** — an occurrence that references a called symbol, attributed via P8). Link them from P8 and from **Occurrence** / **Call attribution**.
+
+### [C2] Broken engineering index link — `PUBLIC_API_LIMITATIONS.md` missing
+
+- **Location**: `kb/engineering/index.md` → “Public API limitations” → `../../docs/PUBLIC_API_LIMITATIONS.md`
+- **Issue**: That path does not exist under `docs/` (only `SCHEMA.md` and `USAGE.md`). The link is dead and the title still suggests a standalone public-API doc, which is easy to misread after the `cargo-public-api` removal.
+- **Recommendation**: Update `engineering/index.md` to point at `docs/SCHEMA.md` (e.g. § “Limitations: `is-public-api`”) or restore/rename a short limitations doc aligned with the SCIP module walk. Remove the broken path.
 
 ## Warnings
 
-### [W1] `is-public-api: null` wording vs omitted JSON field
+### [W1] `is-public` described imprecisely in SCHEMA vs P10
 
-- **Location**: `kb/engineering/properties.md` (P12: “All atoms get `is-public-api: null`”), `docs/PUBLIC_API_LIMITATIONS.md` (match statistics row), informally in P11 table (“absent (`null`)”).
-- **Issue**: `AtomWithLines` uses `Option<bool>` with `serde` `skip_serializing_if = "Option::is_none"`, so uncertain / skipped states produce **no** `is-public-api` key in JSON, not a literal `null` value. SCHEMA binary-only text correctly says “absent”; the field reference uses “absent/null” for consumers, which is easy to misread as requiring a JSON null.
-- **Recommendation**: In P12 and other KB text, prefer “field omitted” or “absent from JSON” as the canonical on-wire description; keep “logical null / `None`” only when talking about the Rust type or consumer normalization. Optionally align PUBLIC_API_LIMITATIONS statistics wording with the same convention.
+- **Location**: `docs/SCHEMA.md` (field reference for `is-public`); `kb/engineering/properties.md` § P10
+- **Issue**: SCHEMA says “`true` if the function is declared `pub`”, which readers may interpret as any `pub` qualifier (e.g. `pub(crate)`). P10 restricts to signature starting with `pub` where the next character is not `(`, excluding restricted visibility forms.
+- **Recommendation**: Align SCHEMA wording with P10 (unrestricted / “plain” `pub` vs `pub(restricted)`), or add a single sentence pointing to the exact rule in the KB.
 
-### [W2] SCHEMA `is-public` description vs P10
+### [W2] P11 mixes “absent” and “null” for external stubs
 
-- **Location**: `docs/SCHEMA.md` §1 field reference (`is-public`), `kb/engineering/properties.md` (P10).
-- **Issue**: SCHEMA says `true` if the function is “declared `pub`”. P10 is stricter: signature must start with `pub` and the next character must not be `(`, excluding `pub(crate)` and similar from counting as unrestricted `pub`.
-- **Recommendation**: Add one sentence to SCHEMA cross-referencing P10 / heuristic, or inline the `pub` / `pub(` nuance so implementers are not misled.
+- **Location**: `kb/engineering/properties.md` § P11; `docs/SCHEMA.md` (external stubs + field reference)
+- **Issue**: P11’s table uses “absent (`null`)” for stubs. SCHEMA describes omitted fields for stubs. In JSON these are different representations; downstream guidance should pick one or explicitly state “omitted or null” only if both are valid.
+- **Recommendation**: Match the serialized form (`serde` typically omits `Option::None`) in P11 and point to SCHEMA; remove “null” if the wire format never emits it.
 
-### [W3] “Lexical order” vs “range order” for occurrence walks
+### [W3] Vague toolchain requirement for Charon
 
-- **Location**: `kb/engineering/glossary.md` (**Call attribution**), `kb/engineering/properties.md` (P8).
-- **Issue**: Glossary says occurrences are walked in “lexical order”; P8 says “range order”. `lib.rs` (`process_occurrences`) sorts occurrences by SCIP `range` (line, column), which is not the same wording and could be read as a contradiction.
-- **Recommendation**: Change the glossary to “range order” (or “ascending SCIP range order”) to match P8 and the implementation.
+- **Location**: `kb/engineering/architecture.md` § “Charon (optional, external)”
+- **Issue**: Phrase “nightly toolchain compatible with Charon’s upstream requirements” does not specify how to verify compatibility (pinned version, repo link, or probe-rust flag docs).
+- **Recommendation**: Replace with a concrete pointer (e.g. Charon install doc URL or “same nightly as `charon --version` in CI”) or defer to `USAGE.md` with a link.
+
+### [W4] Missing cross-references — `is-public-api` limitations
+
+- **Location**: `kb/engineering/properties.md` § P11–P12; `kb/engineering/architecture.md` extract pipeline
+- **Issue**: `docs/SCHEMA.md` documents re-export and trait-impl heuristic limitations for `is-public-api`. The KB properties state the happy-path rule but do not link to those limitations, so readers may treat P11 as complete.
+- **Recommendation**: Add a short note under P11 (or a “See also”) linking to `docs/SCHEMA.md` § “Limitations: `is-public-api`”.
+
+### [W5] Property coverage gap — `dependencies-with-locations`
+
+- **Location**: `docs/SCHEMA.md` § `probe-rust/extract`; `kb/engineering/properties.md` (P1–P16)
+- **Issue**: SCHEMA defines `dependencies-with-locations` and `--with-locations`; no invariant names sorting, presence rules, or determinism for that structure.
+- **Recommendation**: Add a small property (or extend P5) for location-augmented output: ordering, required fields, and when the array is present.
+
+### [W6] Stale auditor outputs under `kb/reports/`
+
+- **Location**: `kb/reports/quality-report.md`, `kb/reports/test-report.md`
+- **Issue**: Reports still reference `src/public_api.rs`, `cargo public-api`, three-way `is-public-api`, and `enrich_atoms_with_public_api`, which conflict with the current SCIP module walk and deleted module. They read as current truth but are outdated relative to P11/P12 and `architecture.md`.
+- **Recommendation**: Regenerate reports after updating `.cursor/rules/auditors/*.md`, or archive/delete stale reports with a note until re-run.
+
+### [W7] Stale `.cursor` auditor rules contradict the KB
+
+- **Location**: `.cursor/rules/auditors/code-quality-auditor.md` (P6, P11); `.cursor/rules/auditors/test-quality-auditor.md` (test paths)
+- **Issue**: Code-quality auditor asks to verify `normalize_code_name` is used in the main pipeline; `properties.md` P6 states it is **not** called there. It still describes P11 as “three-way” / `enrich_atoms_with_public_api`. Test-quality auditor lists `src/public_api.rs` as a test location.
+- **Recommendation**: Update auditor markdown to match P6, P11 (binary SCIP classification + P12), and actual test modules so future audits do not reintroduce wrong expectations.
 
 ## Info
 
-### [I1] Section sign in glossary visible text
+### [I1] Changelog dates cluster on one day
 
-- **Location**: `kb/engineering/glossary.md`, **Code-name** entry (link label to SCHEMA).
-- **Issue**: The label uses `§`, which some viewers render poorly.
-- **Recommendation**: Replace with plain text, e.g. “Code-Name Format (SCHEMA.md)”.
+- **Location**: `docs/SCHEMA.md` changelog (2.2 and 2.3 both `2026-04-07`)
+- **Issue**: Historically accurate or not, same-day minor bumps can confuse readers about ordering.
+- **Recommendation**: If 2.2 shipped earlier, use its real date; otherwise a one-line note that both landed in the same release train is enough.
+
+### [I2] `code-path` only implied, not glossed
+
+- **Location**: `kb/engineering/properties.md` P4; `kb/engineering/glossary.md` (**External stub**)
+- **Issue**: Non-stub atoms’ `code-path` semantics (relative path rules) are not defined in the glossary; only the empty stub case is mentioned.
+- **Recommendation**: Optional one-line glossary entry or a pointer to SCHEMA field reference.
+
+### [I3] “Module visibility map” / module-chain walk unnamed in glossary
+
+- **Location**: `kb/engineering/architecture.md` (pipeline, data flow); `kb/engineering/glossary.md` (**is-public-api**)
+- **Issue**: Architecture names `module_visibility` / “module chain” as a pipeline artifact; glossary explains outcome on atoms but not the named internal map/concept.
+- **Recommendation**: Add **Module visibility map** (or alias) under **is-public-api** or as its own entry, linking to P11 and SCHEMA limitations.
+
+### [I4] `kb/index.md` status still “draft”
+
+- **Location**: `kb/index.md` front matter
+- **Issue**: KB content is detailed and referenced as source of truth; “draft” may understate maturity for external readers.
+- **Recommendation**: Bump status when the team agrees the KB is stable, or clarify what “draft” means (e.g. reports subdirectory only).

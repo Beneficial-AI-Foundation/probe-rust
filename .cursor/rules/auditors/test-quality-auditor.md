@@ -11,7 +11,6 @@ Verify test coverage against KB properties and identify testing gaps.
 
 Find tests in:
 - `src/lib.rs` (inline `#[cfg(test)]` module)
-- `src/public_api.rs` (inline tests)
 - `src/metadata.rs` (inline tests)
 - `src/charon_names.rs` (inline tests)
 - `src/charon_cache.rs` (inline tests)
@@ -27,10 +26,9 @@ Find tests in:
 - **Every property (P1-P16) has a corresponding test** — or is explicitly flagged as untested
 - **Known issues (C1-C3) have regression tests** — tests should document the current behavior and expected fix
 - **Edge cases from SCHEMA.md are tested** — stubs, empty projects, binary-only crates, workspace projects
-- **Visibility logic tested** — `is_signature_public` edge cases, three-way `is-public-api` logic, trait impl methods
+- **Visibility logic tested** — `is_signature_public` edge cases, `classify_public_api` module-chain walk, trait impl detection, `is_library_crate`
 - **Disambiguation tested** — type context matching, `@line` fallback, substring false-match risk (C3)
 - **SCIP format compatibility** — both old (`Type#Trait`) and new (`impl#[Type]`) formats tested for `enrich_display_name`
-- **Parser edge cases** — lifetime prefixes, bare `&` references, generic parameters in `extract_fn_qualified_name`
 
 ### Impact analysis
 

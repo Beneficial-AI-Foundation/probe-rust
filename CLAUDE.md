@@ -80,6 +80,7 @@ src/
 
 - **rust-analyzer**: Must be installed (via `rustup component add rust-analyzer` or on PATH)
 - **scip CLI**: Auto-downloadable via `--auto-install` flag
+- **Charon** (optional): Auto-downloadable via `--auto-install --with-charon` (requires nightly)
 
 ## Knowledge Base
 

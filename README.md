@@ -100,7 +100,7 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
 ```json
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.1",
+  "schema-version": "2.3",
   "tool": { "name": "probe-rust", "version": "0.3.0", "command": "extract" },
   "source": {
     "repo": "https://github.com/org/project.git",

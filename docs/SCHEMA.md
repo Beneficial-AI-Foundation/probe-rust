@@ -1,6 +1,6 @@
 # probe-rust Data Schemas
 
-Version: 2.2
+Version: 2.3
 Date: 2026-04-07
 
 This document specifies the JSON output formats produced by each probe-rust
@@ -69,10 +69,10 @@ standardized metadata envelope:
 ```json
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.2",
+  "schema-version": "2.3",
   "tool": {
     "name": "probe-rust",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "command": "extract"
   },
   "source": {
@@ -92,7 +92,7 @@ standardized metadata envelope:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema` | string | Data type identifier: `"probe-rust/extract"` |
-| `schema-version` | string | Interchange spec version (`"2.2"`) |
+| `schema-version` | string | Interchange spec version (`"2.3"`) |
 | `tool.name` | string | Always `"probe-rust"` |
 | `tool.version` | string | Semver version of the probe-rust binary |
 | `tool.command` | string | Subcommand that produced the file (e.g. `"extract"`) |
@@ -158,7 +158,7 @@ standardized metadata envelope:
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name. |
 | `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions they did not process. |
 | `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used, the Charon-derived value takes precedence. This is item-level visibility, not crate-level API reachability. |
-| `is-public-api` | bool | no | Three-way semantics: `true` = confirmed in the crate's public API (reachable from the crate root, as determined by `cargo public-api`); `false` = confirmed NOT in the public API (function is not `pub`); absent/null = uncertain (function is `pub` but could not be confirmed in the public API output, e.g. due to re-exports) or detection was skipped. Absent for external stubs and binary-only crates. See **Limitations** below. |
+| `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. Derived from SCIP module-chain visibility walk (no external tools required). See **Limitations** below. |
 
 ### DependencyWithLocation
 
@@ -181,16 +181,20 @@ stub entries with:
 - `is-public`: absent
 - `is-public-api`: absent
 
-### Limitations: `is-public-api` and Re-exports
+### Limitations: `is-public-api`
 
-`cargo public-api` reports functions using their rustdoc path, which reflects
-`pub use` re-export locations. probe-rust atoms use the definition path. When
-a function is re-exported (e.g. `pub use internal::helper` makes it available
-as `my_crate::helper`), the paths may not match. In such cases, `is-public-api`
-is `null` (uncertain) rather than `false`, to avoid false negatives.
+`is-public-api` is determined by walking the SCIP module visibility chain.
+This is accurate for most cases but has known limitations:
 
-For binary-only crates (no `[lib]` target), `is-public-api` is always absent
-since binaries have no public API surface.
+- **Re-exports**: A function defined in a private module but re-exported via
+  `pub use` from a public module will be classified as `false` because the
+  definition module is not public. In practice, this is rare for function
+  definitions (most re-exports are for types, not functions).
+- **Trait impl heuristic**: Trait impl methods are classified as public API if
+  the implementing type is in a public module chain. This may produce a false
+  positive if a private same-crate trait is implemented on a public type (rare).
+- **Binary-only crates**: All atoms are `is-public-api: false` since binaries
+  have no public API surface.
 
 ---
 
@@ -308,6 +312,10 @@ major version.
 
 ### Changelog
 
+- **2.3** (2026-04-07): Replaced `cargo-public-api` integration with SCIP
+  module-chain visibility walk. `is-public-api` is now always present for
+  internal atoms (binary `true`/`false`), no uncertain bucket. No external
+  tools or nightly toolchain required.
 - **2.2** (2026-04-07): Added `is-public-api` field. Changed `is-public` to
   always be present for internal atoms (derived from SCIP signature visibility),
   no longer requires `--with-charon`.
@@ -326,7 +334,7 @@ probe-rust atoms use the same data shape as probe-verus atoms. Key differences:
 | `dependencies-with-locations` `location` | Always `"inner"` | `"inner"`, `"precondition"`, `"postcondition"` |
 | `rust-qualified-name` | Optional (with `--with-charon`) | Not present |
 | `is-public` | Always for internal atoms (from SCIP); `--with-charon` overrides | Not present |
-| `is-public-api` | Optional (requires `cargo-public-api` + nightly) | Not present |
+| `is-public-api` | Always for internal atoms (from SCIP module walk) | Not present |
 
 The `callee-crates` and `list-functions` commands accept atoms.json from
 either tool interchangeably.

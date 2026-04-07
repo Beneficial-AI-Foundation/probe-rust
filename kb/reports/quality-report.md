@@ -1,86 +1,81 @@
 ---
 auditor: code-quality-auditor
 date: 2026-04-07
-status: 0 critical, 0 warnings, 2 info
-re_audit: true
-previous_critical_resolved:
-  - CRI-1 (P3 non-deterministic dependencies-with-locations)
+status: 0 critical, 4 warnings, 3 info
 ---
-
-## Executive summary
-
-Re-audit after documented fixes. **All previous critical findings are resolved.** Implementation matches KB properties P1–P16 for the spots checked; `SCHEMA_VERSION` matches `docs/SCHEMA.md`. No new critical or warning issues against `kb/engineering/properties.md` or `architecture.md`.
-
-## Verified fixes (this re-audit)
-
-### CRI-1 / P3 — `dependencies-with-locations` determinism
-
-- **Status**: Resolved.
-- **Evidence**: In `lib.rs`, after building `dependencies_with_locations`, the vector is sorted with `.sort_by(|a, b| a.line.cmp(&b.line).then(a.code_name.cmp(&b.code_name)))` (approximately lines 1210–1211). `dependencies` remains `BTreeSet<String>` (P5).
-
-### WRN-1 / P14 — `--regenerate-scip` and public-API cache
-
-- **Status**: Documented and implemented consistently.
-- **Evidence**: `properties.md` P14 states that `--regenerate-scip` forces SCIP regeneration and invalidates use of the cached `cargo public-api` output (`data/public-api.txt`). `commands/extract.rs` passes `regenerate_scip` into `public_api::collect_public_api`, which skips the cache when `regenerate` is `true` and re-runs `cargo public-api`, then overwrites the cache. `architecture.md` step 2 notes the same coupling.
-
-### WRN-2 / P6 — Trailing-dot normalization call sites
-
-- **Status**: KB updated; code matches.
-- **Evidence**: `properties.md` P6 documents normalization in `symbol_to_code_name` and `symbol_to_code_name_full` (plus standalone `normalize_code_name` for tests). `lib.rs` uses those paths for code-name construction and callee resolution (e.g. `symbol_to_code_name` / `symbol_to_code_name_full` at disambiguation and dependency edges).
-
-### WRN-5 — `SCHEMA_VERSION` constant
-
-- **Status**: Resolved.
-- **Evidence**: `metadata.rs` defines `pub const SCHEMA_VERSION: &str = "2.2"` and `wrap_in_envelope` sets `schema_version: SCHEMA_VERSION.to_string()`. `docs/SCHEMA.md` header is `Version: 2.2`.
-
-## Property checklist (P1–P16)
-
-| ID | Result | Notes |
-|----|--------|--------|
-| P1 | Pass | `wrap_in_envelope("probe-rust/extract", ...)`; schema version from `SCHEMA_VERSION` matches docs. |
-| P2 | Pass | Duplicates via `find_duplicate_code_names`; output `BTreeMap<String, AtomWithLines>`. |
-| P3 | Pass | Atoms map `BTreeSet` deps; `dependencies-with-locations` explicitly sorted (fixes prior CRI). |
-| P4 | Pass | `add_external_stubs`: empty `code_path`, `{0,0}` lines, empty deps and locations. |
-| P5 | Pass | `AtomWithLines::dependencies: BTreeSet<String>`. |
-| P6 | Pass | Normalization embedded per KB in `symbol_to_code_name` / `symbol_to_code_name_full`. |
-| P7 | Pass | `constants.rs` `is_function_like_kind`: kinds 6, 17, 26, 80 only. |
-| P8 | Pass | `populate_call_relationships`: occurrences sorted by range; `current_function_key` from `symbol_line_to_key` (function-like defs only). C1/C2 remain documented limitations. |
-| P9 | Pass | Disambiguation pipeline present (`make_unique_key`, type context, line fallback); C3 documented. |
-| P10 | Pass | `is_signature_public`: `pub` not followed by `(`. |
-| P11 | Pass | `enrich_atoms_with_public_api`: public set match → `true`; `is_public == Some(true)` and no match → uncertain; else `false`; stubs skipped. |
-| P12 | Pass | `is_library_crate`; `enrich_with_public_api` returns early for binary-only crates. |
-| P13 | Pass | `sanitize_for_filename` strips `..` and path separators; tests include `test_output_path_does_not_escape`. |
-| P14 | Pass | SCIP under `<project>/data/`; regenerate flag wired to public API collection as above. |
-| P15 | Not deep-scanned | Charon path: failures logged as warnings in `extract.rs` (spot-check). |
-| P16 | Pass | `enrich_display_name` / `extract_bracket_type`: old `#` and new `impl#[Type]` formats. |
-
-## Architecture & glossary
-
-- **architecture.md**: Extract pipeline steps and file map align with `commands/extract.rs`, `lib.rs`, `scip_cache.rs`, `public_api.rs`, `metadata.rs`.
-- **glossary.md**: Terms used in reviewed sections are consistent with code (no contradiction found in this pass).
-
-## Known issues (C1–C3)
-
-Still present by design; documented in `properties.md` with associated tests named in KB. Not regressions.
-
-## Info
-
-### [I1] P3 “Where” could mention `dependencies-with-locations` sort
-
-- **Location**: `kb/engineering/properties.md` P3
-- **Issue**: P3 points at `BTreeMap`/`BTreeSet` but does not cite the explicit `sort_by(line, code_name)` on `dependencies-with-locations`.
-- **Recommendation**: Optionally extend the **Where** line to include `lib.rs` (`convert_to_atoms_with_lines_internal`, sort on `dependencies_with_locations`) for readers tracing determinism.
-
-### [I2] Code-quality auditor skill P6 step vs KB
-
-- **Location**: `.cursor/rules/auditors/code-quality-auditor.md` (P6 bullet)
-- **Issue**: Skill text still says to verify `normalize_code_name` is called on code-names and deps; KB P6 states normalization is embedded in `symbol_to_code_name` / `symbol_to_code_name_full`.
-- **Recommendation**: Update the auditor skill P6 bullet to match KB wording to avoid false positives on future audits.
 
 ## Critical
 
-*(none)*
+_(None.)_
 
 ## Warnings
 
-*(none)*
+### [W1] P3 — Possible non-determinism in span fallback
+
+**Property**: P3 requires the same SCIP input and source files to yield the same JSON; KB cites `BTreeMap` / `BTreeSet` for the atoms map and dependencies.
+
+**Evidence**: `convert_to_atoms_with_parsed_spans` builds `relative_paths` via `collect::<HashSet<_>>().into_iter().collect()`, so file processing order for `build_function_span_map` is not stable across runs. More importantly, `rust_parser::get_function_end_line` uses exact `HashMap::get` first, then falls back to iterating `span_map.iter()` (a `HashMap`). When multiple parsed spans match the containment rule (same file, same bare name, SCIP start line inside more than one span), which match wins depends on hash iteration order.
+
+**Impact**: Edge cases only; typical projects hit the exact key path. Still a gap vs strict deterministic-output intent.
+
+**Where**: `src/lib.rs` (`convert_to_atoms_with_parsed_spans`), `src/rust_parser.rs` (`get_function_end_line`).
+
+### [W2] User-facing docs still describe `cargo-public-api` and old schema
+
+**Check**: Documentation staleness; no stale nightly / `cargo-public-api` requirement for `is-public-api`.
+
+**Evidence**: `CHANGELOG.md` still documents `cargo public-api`, `public_api` module, three-way `is-public-api`, and schema **2.2**. `README.md` and `docs/USAGE.md` still show envelope example with `"schema-version": "2.1"`. None of these reflect Schema **2.3** or the SCIP module-chain approach in `lib.rs`.
+
+**Where**: `CHANGELOG.md`, `README.md`, `docs/USAGE.md`.
+
+### [W3] Process / KB reports and auditor rules reference removed `public_api`
+
+**Check**: No references to deleted `public_api.rs`; P14 no stale public-api cache.
+
+**Evidence**: `src/commands/mod.rs` and the tree contain **no** `public_api` module or `src/public_api.rs`. `commands/extract.rs` and `scip_cache.rs` do **not** mention `public-api.txt` or a public-api cache — P14 coupling to a second artifact is gone.
+
+**Stale artifacts** (still mention `public_api`, `cargo public-api`, or old P11 behavior): `.cursor/rules/auditors/code-quality-auditor.md`, `.cursor/rules/auditors/test-quality-auditor.md`, `kb/reports/test-report.md`, and the previous content of this file. They mislead future audits and the Ralph loop until updated.
+
+### [W4] Schema doc example `tool.version` behind crate version
+
+**Evidence**: `docs/SCHEMA.md` envelope example uses `"version": "0.3.0"` for `probe-rust`; `Cargo.toml` has `version = "0.4.0"`. `schema-version` **2.3** is consistent with `metadata::SCHEMA_VERSION` and the doc header.
+
+## Info
+
+### [I1] Duplicate `is_signature_public` evaluation per atom
+
+**Evidence**: In `convert_to_atoms_with_lines_internal`, `is_signature_public(&data.node.signature_text)` is called twice when building each `AtomWithLines` (for `is_public` and for `classify_public_api`). Harmless; could bind once for clarity.
+
+**Where**: `src/lib.rs`.
+
+### [I2] CLAUDE.md project structure omits Charon modules
+
+**Evidence**: `kb/engineering/architecture.md` lists `charon_cache.rs` and `charon_names.rs` under `src/`; root `CLAUDE.md` “Project Structure” block does not. Not wrong about `is-public-api`, but slightly out of sync with the file map.
+
+### [I3] “Absent / null” wording vs serde
+
+**Evidence**: P11 / glossary describe external stubs as `is-public-api` absent or `null`. `AtomWithLines` uses `skip_serializing_if = "Option::is_none"`, so JSON omits the field rather than emitting `null`. Consumers are unaffected; wording is mildly imprecise.
+
+---
+
+## Property checklist (focused)
+
+| ID | Result | Notes |
+|----|--------|--------|
+| **P1** | Pass | `metadata::SCHEMA_VERSION` is `"2.3"`; matches `docs/SCHEMA.md` Version and examples. |
+| **P11** | Pass | `classify_public_api`: empty `code_path` → `None`; non-library → `Some(false)`; `is_public && is_module_chain_public` → `Some(true)`; `is_trait_impl_symbol && is_module_chain_public` → `Some(true)`; else `Some(false)`. Aligns with `properties.md` and tests in `lib.rs`. |
+| **P12** | Pass | `is_library_crate` reads `[lib]` in `Cargo.toml` or `src/lib.rs`; `extract::cmd_extract` passes `is_library` into `convert_to_atoms_with_parsed_spans`. |
+| **P3** | Partial | Serialized atoms: `BTreeMap` keys, `BTreeSet` dependencies — OK. Internal `HashMap`/`HashSet` remain on the pipeline; see [W1]. |
+| **P14** | Pass | SCIP cache only (`data/`, `index.scip`, `index.scip.json`); no `public-api` cache in implementation. |
+
+## Architecture
+
+| Check | Result |
+|--------|--------|
+| Pipeline vs `architecture.md` | Pass — `extract.rs`: validate → SCIP → `parse_scip_json` → `build_call_graph` (with `module_visibility`) → `convert_to_atoms_with_parsed_spans` → dedupe → optional Charon → `add_external_stubs` → `wrap_in_envelope`. |
+| Data flow diagram | Pass — matches `build_call_graph` 3-tuple and `classify_public_api` inside conversion. |
+| `public_api.rs` | Pass — module removed; no `mod public_api` or imports. |
+
+## Files reviewed
+
+`kb/engineering/properties.md`, `kb/engineering/architecture.md`, `kb/engineering/glossary.md`, `docs/SCHEMA.md`, `src/lib.rs`, `src/constants.rs`, `src/metadata.rs`, `src/commands/extract.rs`, `CLAUDE.md`, plus targeted reads of `src/rust_parser.rs`, `src/scip_cache.rs`, `src/commands/mod.rs`, `Cargo.toml`.

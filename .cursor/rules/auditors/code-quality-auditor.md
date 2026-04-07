@@ -21,8 +21,8 @@ Check the implementation against KB-defined properties and architectural constra
 - **P8 (Call attribution)**: Verify occurrence walk logic and `current_function_key` behavior
 - **P9 (Disambiguation order)**: Verify priority chain: type context -> `<Type>` embed -> `@line` fallback
 - **P10 (is-public from SCIP)**: Verify `is_signature_public` logic matches the property definition
-- **P11 (is-public-api three-way)**: Verify three-way logic in `enrich_atoms_with_public_api`; confirm trait impls are checked against public API set
-- **P12 (Binary crate skip)**: Verify `is_library_crate` detection and skip behavior
+- **P11 (is-public-api from SCIP module walk)**: Verify `classify_public_api` returns correct values for pub/private functions, trait impls, external stubs, and binary crates using module visibility map
+- **P12 (Binary crate detection)**: Verify `is_library_crate` detection and `classify_public_api` marks all atoms `false` for binary crates
 - **P13 (Path sanitization)**: Verify output paths cannot contain `..` or path separators
 - **P14 (SCIP caching)**: Verify cache paths and `--regenerate-scip` flag behavior
 - **P15 (Charon non-fatal)**: Verify Charon failure produces warning, not error

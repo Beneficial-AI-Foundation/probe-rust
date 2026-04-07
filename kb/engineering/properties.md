@@ -8,7 +8,7 @@ Every property here must hold in the implementation. If a property is violated, 
 
 ### P1 — Envelope
 
-The `extract` command wraps output in a Schema 2.0 envelope with `schema: "probe-rust/extract"`. The `schema-version` field must match the version in `docs/SCHEMA.md`. Currently `"2.2"`.
+The `extract` command wraps output in a Schema 2.0 envelope with `schema: "probe-rust/extract"`. The `schema-version` field must match the version in `docs/SCHEMA.md`. Currently `"2.3"`.
 
 **Where**: `metadata.rs` (`wrap_in_envelope`, `SCHEMA_VERSION`), `commands/extract.rs`.
 
@@ -88,25 +88,23 @@ Charon can override this value when `--with-charon` is used.
 
 **Where**: `lib.rs` (`is_signature_public`).
 
-### P11 — is-public-api three-way
+### P11 — is-public-api from SCIP module walk
 
-`is-public-api` uses three-way semantics:
+`is-public-api` is binary (`true` / `false`) for all internal atoms. Derived from SCIP data at call-graph build time — no external tools required.
 
 | Value | Meaning |
 |-------|---------|
-| `true` | Confirmed: RQN found in `cargo public-api` output |
-| `false` | Not public API: item is not `pub` (non-public visibility) |
-| absent (`null`) | Uncertain: item is `pub` but RQN could not be matched against `cargo public-api` output (re-exports, aliases, macro-generated types) |
+| `true` | Function is reachable from the crate root: either a direct `pub` function with all ancestor modules `pub`, or a trait impl method whose implementing type is in a public module chain |
+| `false` | Not public API: function is non-public, or at least one ancestor module is non-public |
+| absent (`null`) | External stubs only (no code-path to analyze) |
 
-Trait impl methods (no `pub` in signature) are checked against the public API set before falling back to `is-public`.
+**Where**: `lib.rs` (`build_module_visibility_map`, `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`).
 
-**Where**: `public_api.rs` (`enrich_atoms_with_public_api`).
+### P12 — Binary crate detection
 
-### P12 — Binary crate skip
+For crates without a `[lib]` target (binary-only), all atoms are marked `is-public-api: false` since binaries have no public API surface.
 
-Public API detection is skipped entirely for crates without a `[lib]` target (binary-only). All atoms get `is-public-api: null`.
-
-**Where**: `public_api.rs` (`is_library_crate`), `commands/extract.rs` (`enrich_with_public_api`).
+**Where**: `lib.rs` (`is_library_crate`, `classify_public_api`).
 
 ## Infrastructure properties
 
@@ -118,9 +116,9 @@ Output paths under `.verilib/probes/` are constructed from package name and vers
 
 ### P14 — SCIP caching
 
-Generated SCIP data (`index.scip`, `index.scip.json`) is cached in `<project>/data/`. The `--regenerate-scip` flag forces re-generation of both SCIP data and the `cargo public-api` cache (`data/public-api.txt`). Stale cache does not cause incorrect output — it causes stale output.
+Generated SCIP data (`index.scip`, `index.scip.json`) is cached in `<project>/data/`. The `--regenerate-scip` flag forces re-generation. Stale cache does not cause incorrect output — it causes stale output.
 
-**Where**: `scip_cache.rs`, `commands/extract.rs` (passes `regenerate_scip` to `public_api::collect_public_api`).
+**Where**: `scip_cache.rs`, `commands/extract.rs`.
 
 ### P15 — Charon non-fatal
 
