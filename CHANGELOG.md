@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-07
+
+### Added
+- **`is-public-api` field** on all atoms: three-way semantics (`true` = confirmed in public API, `false` = non-public visibility, absent = uncertain). Determined by cross-referencing with `cargo public-api` output. Automatically runs for library crates; skipped for binary-only crates.
+- **`is-public` field from SCIP**: item-level `pub` visibility now derived from SCIP `signature_documentation.text` (always present for internal atoms, no longer requires `--with-charon`).
+- **`public_api` module** (`src/public_api.rs`): `cargo-public-api` integration, output parsing, caching, and three-way enrichment logic.
+- **Knowledge Base** (`kb/`): engineering properties (P1-P16), architecture, glossary, and auditor report templates.
+- **Auditor skills** (`.cursor/rules/auditors/`): ambiguity, code quality, and test quality auditors for the Ralph Loop development workflow.
+- **New tests**: `find_duplicate_code_names` (P2), Charon non-fatal fallback (P15).
+- **`SCHEMA_VERSION` constant** in `metadata.rs` for maintainability.
+- Documentation: `docs/PUBLIC_API_LIMITATIONS.md` analyzing unmatched public API entries.
+
+### Changed
+- **Schema version** bumped from 2.1 to **2.2** to reflect the new `is-public-api` field.
+- **Display name enrichment** now handles both old (`Type#Trait#method`) and new (`impl#[Type][Trait]method`) SCIP symbol formats from rust-analyzer.
+- **`CLAUDE.md`** updated with KB references and Ralph Loop workflow.
+
+### Fixed
+- **Deterministic output** (P3): `dependencies-with-locations` array is now sorted by `(line, code_name)` to avoid non-deterministic iteration over `HashSet<CalleeInfo>`.
+- **Lifetime/reference prefix parsing**: `extract_fn_qualified_name` correctly strips `&'a Type::method` and `&Type::method` prefixes from `cargo public-api` output.
+- **Trait impl public API matching**: trait implementation methods (no `pub` in SCIP signature) are now correctly matched against the public API set.
+
 ## [0.3.0] - 2026-04-04
 
 ### Added
@@ -78,7 +100,8 @@ Initial release.
 - CI pipeline with formatting, clippy, and unit test checks.
 - Release automation via cargo-dist for Linux, macOS, and Windows binaries.
 
-[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.1.0...v0.2.0

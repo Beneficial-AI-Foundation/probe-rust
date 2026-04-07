@@ -10,6 +10,7 @@ use std::process::Command;
 
 const TOOL_NAME: &str = "probe-rust";
 const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const SCHEMA_VERSION: &str = "2.2";
 
 // =============================================================================
 // Envelope types
@@ -108,7 +109,7 @@ pub fn wrap_in_envelope<T: Serialize>(
 ) -> Envelope<T> {
     Envelope {
         schema: schema.to_string(),
-        schema_version: "2.1".to_string(),
+        schema_version: SCHEMA_VERSION.to_string(),
         tool: ToolInfo {
             name: TOOL_NAME.to_string(),
             version: TOOL_VERSION.to_string(),

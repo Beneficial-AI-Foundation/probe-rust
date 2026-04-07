@@ -1050,6 +1050,7 @@ mod tests {
                 rust_qualified_name: None,
                 is_disabled: false,
                 is_public: None,
+                is_public_api: None,
             },
         );
 
@@ -1122,6 +1123,7 @@ mod tests {
                 rust_qualified_name: None,
                 is_disabled: false,
                 is_public: None,
+                is_public_api: None,
             },
         );
 
@@ -1176,6 +1178,7 @@ mod tests {
                 rust_qualified_name: None,
                 is_disabled: false,
                 is_public: None,
+                is_public_api: None,
             },
         );
 
@@ -1269,6 +1272,7 @@ mod tests {
                 rust_qualified_name: Some("my_crate::ristretto::step_2".to_string()),
                 is_disabled: false,
                 is_public: None,
+                is_public_api: None,
             },
         );
 
@@ -1309,6 +1313,7 @@ mod tests {
             rust_qualified_name: None,
             is_disabled: false,
             is_public: Some(true),
+            is_public_api: None,
         };
 
         let json = serde_json::to_value(&atom).unwrap();
@@ -1316,6 +1321,10 @@ mod tests {
         assert!(
             json.get("rust-qualified-name").is_none(),
             "None fields should be omitted"
+        );
+        assert!(
+            json.get("is-public-api").is_none(),
+            "None is_public_api should be omitted from JSON"
         );
 
         let atom_none = crate::AtomWithLines {
@@ -1336,6 +1345,7 @@ mod tests {
                 rust_qualified_name: None,
                 is_disabled: false,
                 is_public: None,
+                is_public_api: None,
             }
         };
 
@@ -1347,5 +1357,45 @@ mod tests {
 
         let roundtripped: crate::AtomWithLines = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(roundtripped.is_public, Some(true));
+        assert_eq!(roundtripped.is_public_api, None);
+    }
+
+    /// P15: Charon LLBC parse failure returns Err and atoms retain heuristic RQN
+    #[test]
+    fn test_charon_failure_is_non_fatal() {
+        let mut atoms = std::collections::BTreeMap::new();
+        atoms.insert(
+            "probe:crate/0.1.0/mod/foo()".to_string(),
+            crate::AtomWithLines {
+                display_name: "foo".to_string(),
+                code_name: "probe:crate/0.1.0/mod/foo()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "mod".to_string(),
+                code_path: "src/mod.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 1,
+                    lines_end: 10,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: Some("crate::mod::foo".to_string()),
+                is_disabled: false,
+                is_public: Some(true),
+                is_public_api: None,
+            },
+        );
+
+        let bad_path = std::path::PathBuf::from("/nonexistent/path/llbc.json");
+        let result = enrich_atoms_with_charon_names(&mut atoms, &bad_path, false);
+
+        assert!(result.is_err(), "bad LLBC path should return Err");
+
+        let atom = atoms.get("probe:crate/0.1.0/mod/foo()").unwrap();
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("crate::mod::foo"),
+            "heuristic RQN should be preserved on Charon failure"
+        );
     }
 }

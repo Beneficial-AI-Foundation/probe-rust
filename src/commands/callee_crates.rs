@@ -271,6 +271,7 @@ mod tests {
             rust_qualified_name: None,
             is_disabled: false,
             is_public: None,
+            is_public_api: None,
         }
     }
 

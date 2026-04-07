@@ -1,7 +1,7 @@
 # probe-rust Data Schemas
 
-Version: 2.1
-Date: 2026-03-17
+Version: 2.2
+Date: 2026-04-07
 
 This document specifies the JSON output formats produced by each probe-rust
 subcommand. It complements the language-agnostic
@@ -69,7 +69,7 @@ standardized metadata envelope:
 ```json
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.1",
+  "schema-version": "2.2",
   "tool": {
     "name": "probe-rust",
     "version": "0.3.0",
@@ -92,7 +92,7 @@ standardized metadata envelope:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema` | string | Data type identifier: `"probe-rust/extract"` |
-| `schema-version` | string | Interchange spec version (`"2.1"`) |
+| `schema-version` | string | Interchange spec version (`"2.2"`) |
 | `tool.name` | string | Always `"probe-rust"` |
 | `tool.version` | string | Semver version of the probe-rust binary |
 | `tool.command` | string | Subcommand that produced the file (e.g. `"extract"`) |
@@ -137,7 +137,8 @@ standardized metadata envelope:
     "language": "rust",
     "rust-qualified-name": "my_crate::module::MyStruct::method",
     "is-disabled": false,
-    "is-public": true
+    "is-public": true,
+    "is-public-api": true
   }
 }
 ```
@@ -156,7 +157,8 @@ standardized metadata envelope:
 | `language` | string | yes | Always `"rust"` |
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name. |
 | `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions they did not process. |
-| `is-public` | bool | no | `true` if the function is declared `pub` (from Charon LLBC `AttrInfo.public`). Only present when `--with-charon` is used and the atom matched a Charon entry. This is item-level visibility, not crate-level API reachability. |
+| `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used, the Charon-derived value takes precedence. This is item-level visibility, not crate-level API reachability. |
+| `is-public-api` | bool | no | Three-way semantics: `true` = confirmed in the crate's public API (reachable from the crate root, as determined by `cargo public-api`); `false` = confirmed NOT in the public API (function is not `pub`); absent/null = uncertain (function is `pub` but could not be confirmed in the public API output, e.g. due to re-exports) or detection was skipped. Absent for external stubs and binary-only crates. See **Limitations** below. |
 
 ### DependencyWithLocation
 
@@ -177,6 +179,18 @@ stub entries with:
 - `dependencies`: empty
 - `rust-qualified-name`: absent
 - `is-public`: absent
+- `is-public-api`: absent
+
+### Limitations: `is-public-api` and Re-exports
+
+`cargo public-api` reports functions using their rustdoc path, which reflects
+`pub use` re-export locations. probe-rust atoms use the definition path. When
+a function is re-exported (e.g. `pub use internal::helper` makes it available
+as `my_crate::helper`), the paths may not match. In such cases, `is-public-api`
+is `null` (uncertain) rather than `false`, to avoid false negatives.
+
+For binary-only crates (no `[lib]` target), `is-public-api` is always absent
+since binaries have no public API surface.
 
 ---
 
@@ -285,12 +299,19 @@ stub entries with:
 
 ## Schema Evolution
 
-When adding new optional fields, increment the minor version (`2.0` -> `2.1`).
+When adding new optional fields, increment the minor version (`2.1` -> `2.2`).
 When changing required fields or their semantics, increment the major version
 (`2.0` -> `3.0`).
 
 Consumers should check `schema-version` and reject files with an unsupported
 major version.
+
+### Changelog
+
+- **2.2** (2026-04-07): Added `is-public-api` field. Changed `is-public` to
+  always be present for internal atoms (derived from SCIP signature visibility),
+  no longer requires `--with-charon`.
+- **2.1** (2026-03-17): Added `is-public` field (Charon-only).
 
 ---
 
@@ -304,7 +325,8 @@ probe-rust atoms use the same data shape as probe-verus atoms. Key differences:
 | `kind` values | Always `"exec"` | `"exec"`, `"proof"`, `"spec"` |
 | `dependencies-with-locations` `location` | Always `"inner"` | `"inner"`, `"precondition"`, `"postcondition"` |
 | `rust-qualified-name` | Optional (with `--with-charon`) | Not present |
-| `is-public` | Optional (with `--with-charon`) | Not present |
+| `is-public` | Always for internal atoms (from SCIP); `--with-charon` overrides | Not present |
+| `is-public-api` | Optional (requires `cargo-public-api` + nightly) | Not present |
 
 The `callee-crates` and `list-functions` commands accept atoms.json from
 either tool interchangeably.

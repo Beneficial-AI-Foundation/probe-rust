@@ -5,7 +5,7 @@ use crate::{
     charon_cache::CharonCache,
     charon_names, convert_to_atoms_with_parsed_spans, find_duplicate_code_names,
     metadata::{gather_metadata, get_default_output_path, wrap_in_envelope},
-    parse_scip_json,
+    parse_scip_json, public_api,
     scip_cache::ScipCache,
     AtomWithLines, ProbeError, ProbeResult,
 };
@@ -101,6 +101,15 @@ pub fn cmd_extract(
     if stub_count > 0 {
         println!("  ✓ Added {} external function stub(s)", stub_count);
     }
+
+    enrich_with_public_api(
+        &project_path,
+        auto_install,
+        regenerate_scip,
+        &mut atoms_dict,
+        &metadata.pkg_name,
+    );
+
     let output = output.unwrap_or_else(|| get_default_output_path(&project_path, &metadata, ""));
 
     if let Some(parent) = output.parent() {
@@ -263,6 +272,50 @@ fn enrich_with_charon(
         Err(e) => {
             eprintln!("  ⚠ Charon LLBC parsing failed: {e}");
             eprintln!("    rust-qualified-name will use heuristic");
+        }
+    }
+}
+
+fn enrich_with_public_api(
+    project_path: &Path,
+    auto_install: bool,
+    regenerate: bool,
+    atoms_dict: &mut BTreeMap<String, AtomWithLines>,
+    pkg_name: &str,
+) {
+    if !public_api::is_library_crate(project_path) {
+        println!();
+        println!("Skipping public API detection (binary-only crate, no library target).");
+        return;
+    }
+
+    println!();
+    println!("Detecting public API surface via cargo-public-api...");
+
+    if let Err(e) = public_api::ensure_nightly_toolchain(auto_install) {
+        eprintln!("  ⚠ Public API detection skipped: {e}");
+        return;
+    }
+
+    if let Err(e) = public_api::ensure_cargo_public_api(auto_install) {
+        eprintln!("  ⚠ Public API detection skipped: {e}");
+        return;
+    }
+
+    match public_api::collect_public_api(project_path, pkg_name, regenerate) {
+        Ok(public_names) => {
+            println!("  ✓ Found {} public API function(s)", public_names.len());
+
+            let (confirmed, not_public, uncertain) =
+                public_api::enrich_atoms_with_public_api(atoms_dict, &public_names, pkg_name);
+            println!(
+                "  ✓ is-public-api: {} confirmed, {} not public, {} uncertain",
+                confirmed, not_public, uncertain
+            );
+        }
+        Err(e) => {
+            eprintln!("  ⚠ Public API detection failed: {e}");
+            eprintln!("    is-public-api will be absent from output");
         }
     }
 }

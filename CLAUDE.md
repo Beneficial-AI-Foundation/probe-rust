@@ -81,6 +81,27 @@ src/
 - **rust-analyzer**: Must be installed (via `rustup component add rust-analyzer` or on PATH)
 - **scip CLI**: Auto-downloadable via `--auto-install` flag
 
+## Knowledge Base
+
+This repo has a KB in `kb/` that documents invariants, architecture, and terminology. The KB is the source of truth — if code disagrees with the KB, the code is wrong.
+
+Key files:
+- `kb/engineering/properties.md` — numbered invariants P1-P16, known issues C1-C3
+- `kb/engineering/architecture.md` — pipeline, components, data flow
+- `kb/engineering/glossary.md` — domain terms
+
+## Development Loop (Ralph Loop)
+
+For every non-trivial implementation task:
+1. Implement the change
+2. Run all auditor skills (`.cursor/rules/auditors/`)
+3. Read audit reports in `kb/reports/`
+4. Fix every issue found
+5. Repeat steps 2-4 until all auditors pass clean
+6. Run `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`
+
+For trivial changes (typo fixes, comment updates, dependency bumps), just run the validation suite.
+
 ## Before Committing
 
 Always run fmt and clippy before committing:

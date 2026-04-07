@@ -10,6 +10,7 @@ pub mod constants;
 pub mod error;
 pub mod metadata;
 pub mod path_utils;
+pub mod public_api;
 pub mod rust_parser;
 pub mod scip_cache;
 pub mod tool_manager;
@@ -154,6 +155,21 @@ fn default_language() -> String {
     "rust".to_string()
 }
 
+/// Check whether a SCIP signature represents a fully-public item.
+///
+/// Returns `true` for `pub fn`, `pub unsafe fn`, `pub async fn`, etc.
+/// Returns `false` for `fn`, `pub(crate) fn`, `pub(super) fn`, and similar.
+#[must_use]
+pub fn is_signature_public(sig: &str) -> bool {
+    let trimmed = sig.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("pub") {
+        // "pub(" means restricted visibility: pub(crate), pub(super), pub(in ...)
+        !rest.starts_with('(')
+    } else {
+        false
+    }
+}
+
 /// Output format: Atom with line numbers
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AtomWithLines {
@@ -187,6 +203,12 @@ pub struct AtomWithLines {
     pub is_disabled: bool,
     #[serde(rename = "is-public", skip_serializing_if = "Option::is_none", default)]
     pub is_public: Option<bool>,
+    #[serde(
+        rename = "is-public-api",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub is_public_api: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,6 +307,10 @@ pub fn bare_function_name(name: &str) -> &str {
 }
 
 /// For impl methods, prepend the Self type to produce "Type::method" display names.
+///
+/// Handles two SCIP symbol formats:
+///   Old: `Type#Trait<&Type>#method().`  → self_type = "Type"
+///   New: `impl#[Type][Trait]method().`  → self_type extracted from first bracket
 fn enrich_display_name(scip_symbol: &str, base_display_name: &str) -> String {
     let s = scip_symbol
         .strip_prefix(SCIP_SYMBOL_PREFIX)
@@ -296,13 +322,45 @@ fn enrich_display_name(scip_symbol: &str, base_display_name: &str) -> String {
     let path_part = parts[2].trim_end_matches('.');
     let last_segment = path_part.rsplit('/').next().unwrap_or(path_part);
     if let Some(hash_pos) = last_segment.find('#') {
-        let self_type = &last_segment[..hash_pos];
-        let self_type = self_type.strip_prefix('&').unwrap_or(self_type);
-        if !self_type.is_empty() {
+        let prefix = &last_segment[..hash_pos];
+        let after_hash = &last_segment[hash_pos + 1..];
+
+        if prefix == "impl" || prefix == "`impl`" {
+            if let Some(self_type) = extract_bracket_type(after_hash) {
+                return format!("{}::{}", self_type, base_display_name);
+            }
+        }
+
+        let self_type = prefix.strip_prefix('&').unwrap_or(prefix);
+        if !self_type.is_empty() && self_type != "impl" {
             return format!("{}::{}", self_type, base_display_name);
         }
     }
     base_display_name.to_string()
+}
+
+/// Extract the first `[TypeName]` from a bracketed SCIP symbol suffix.
+///
+/// Input like `[CompressedEdwardsY][ConstantTimeEq]ct_eq()` → `"CompressedEdwardsY"`.
+/// Strips lifetime prefixes (`&'a `) and backtick quoting.
+fn extract_bracket_type(s: &str) -> Option<String> {
+    if !s.starts_with('[') {
+        return None;
+    }
+    let close = s.find(']')?;
+    let inner = &s[1..close];
+    let inner = inner.trim_matches('`');
+    let inner = inner.strip_prefix('&').unwrap_or(inner);
+    let inner = if let Some(space_pos) = inner.find(' ') {
+        &inner[space_pos + 1..]
+    } else {
+        inner
+    };
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner.to_string())
+    }
 }
 
 /// Extract the base function/method name from a raw SCIP symbol.
@@ -1149,6 +1207,9 @@ fn convert_to_atoms_with_lines_internal(
                 }
             }
 
+            dependencies_with_locations
+                .sort_by(|a, b| a.line.cmp(&b.line).then(a.code_name.cmp(&b.code_name)));
+
             let code_module = extract_code_module(&code_name);
             let rqn = derive_rust_qualified_name(
                 &data.node.relative_path,
@@ -1170,7 +1231,8 @@ fn convert_to_atoms_with_lines_internal(
                 language: "rust".to_string(),
                 rust_qualified_name: rqn,
                 is_disabled: false,
-                is_public: None,
+                is_public: Some(is_signature_public(&data.node.signature_text)),
+                is_public_api: None,
             }
         })
         .collect()
@@ -1275,6 +1337,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 rust_qualified_name: None,
                 is_disabled: false,
                 is_public: None,
+                is_public_api: None,
             },
         );
     }
@@ -1287,13 +1350,38 @@ mod tests {
     use crate::constants::{SCIP_KIND_FUNCTION, SCIP_KIND_METHOD};
 
     #[test]
-    fn test_enrich_impl_method() {
+    fn test_enrich_impl_method_old_format() {
         let symbol =
             "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/CompressedEdwardsY#ConstantTimeEq<&CompressedEdwardsY>#ct_eq().";
         assert_eq!(
             enrich_display_name(symbol, "ct_eq"),
             "CompressedEdwardsY::ct_eq"
         );
+    }
+
+    #[test]
+    fn test_enrich_impl_method_new_format() {
+        let symbol = "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/impl#[CompressedEdwardsY][ConstantTimeEq]ct_eq().";
+        assert_eq!(
+            enrich_display_name(symbol, "ct_eq"),
+            "CompressedEdwardsY::ct_eq"
+        );
+    }
+
+    #[test]
+    fn test_enrich_impl_inherent_new_format() {
+        let symbol =
+            "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/impl#[EdwardsPoint]compress().";
+        assert_eq!(
+            enrich_display_name(symbol, "compress"),
+            "EdwardsPoint::compress"
+        );
+    }
+
+    #[test]
+    fn test_enrich_impl_lifetime_new_format() {
+        let symbol = "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/impl#[`&'a EdwardsPoint`][`Add<&'b EdwardsPoint>`]add().";
+        assert_eq!(enrich_display_name(symbol, "add"), "EdwardsPoint::add");
     }
 
     #[test]
@@ -1357,6 +1445,7 @@ mod tests {
                 rust_qualified_name: None,
                 is_disabled: false,
                 is_public: None,
+                is_public_api: None,
             },
         );
 
@@ -1692,6 +1781,99 @@ mod tests {
                     mul_deps
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_is_signature_public_basic() {
+        assert!(is_signature_public("pub fn foo()"));
+        assert!(!is_signature_public("fn foo()"));
+    }
+
+    #[test]
+    fn test_is_signature_public_qualifiers() {
+        assert!(is_signature_public("pub unsafe fn danger()"));
+        assert!(is_signature_public("pub async fn do_thing()"));
+        assert!(is_signature_public("pub const fn compute()"));
+        assert!(is_signature_public("pub extern \"C\" fn ffi()"));
+        assert!(is_signature_public("pub const unsafe fn wow()"));
+    }
+
+    #[test]
+    fn test_is_signature_public_restricted() {
+        assert!(!is_signature_public("pub(crate) fn internal()"));
+        assert!(!is_signature_public("pub(super) fn parent_only()"));
+        assert!(!is_signature_public("pub(in crate::module) fn scoped()"));
+    }
+
+    #[test]
+    fn test_is_signature_public_no_prefix() {
+        assert!(!is_signature_public("fn private()"));
+        assert!(!is_signature_public("unsafe fn raw()"));
+        assert!(!is_signature_public("async fn task()"));
+        assert!(!is_signature_public("const fn value()"));
+    }
+
+    #[test]
+    fn test_is_signature_public_whitespace() {
+        assert!(is_signature_public("  pub fn indented()"));
+        assert!(!is_signature_public("  fn also_indented()"));
+    }
+
+    #[test]
+    fn test_find_duplicate_code_names_none() {
+        let atoms = vec![
+            make_stub_atom("probe:crate/0.1.0/a/foo()"),
+            make_stub_atom("probe:crate/0.1.0/b/bar()"),
+        ];
+        let dupes = find_duplicate_code_names(&atoms);
+        assert!(dupes.is_empty());
+    }
+
+    #[test]
+    fn test_find_duplicate_code_names_detects_duplicates() {
+        let atoms = vec![
+            make_stub_atom("probe:crate/0.1.0/a/foo()"),
+            make_stub_atom("probe:crate/0.1.0/a/foo()"),
+            make_stub_atom("probe:crate/0.1.0/b/bar()"),
+        ];
+        let dupes = find_duplicate_code_names(&atoms);
+        assert_eq!(dupes.len(), 1);
+        assert_eq!(dupes[0].code_name, "probe:crate/0.1.0/a/foo()");
+        assert_eq!(dupes[0].occurrences.len(), 2);
+    }
+
+    #[test]
+    fn test_find_duplicate_code_names_multiple_groups() {
+        let atoms = vec![
+            make_stub_atom("probe:crate/0.1.0/a/foo()"),
+            make_stub_atom("probe:crate/0.1.0/a/foo()"),
+            make_stub_atom("probe:crate/0.1.0/b/bar()"),
+            make_stub_atom("probe:crate/0.1.0/b/bar()"),
+            make_stub_atom("probe:crate/0.1.0/c/unique()"),
+        ];
+        let dupes = find_duplicate_code_names(&atoms);
+        assert_eq!(dupes.len(), 2);
+    }
+
+    fn make_stub_atom(code_name: &str) -> AtomWithLines {
+        AtomWithLines {
+            display_name: "stub".to_string(),
+            code_name: code_name.to_string(),
+            dependencies: BTreeSet::new(),
+            dependencies_with_locations: Vec::new(),
+            code_module: String::new(),
+            code_path: String::new(),
+            code_text: CodeTextInfo {
+                lines_start: 0,
+                lines_end: 0,
+            },
+            kind: DeclKind::Exec,
+            language: "rust".to_string(),
+            rust_qualified_name: None,
+            is_disabled: false,
+            is_public: None,
+            is_public_api: None,
         }
     }
 }
