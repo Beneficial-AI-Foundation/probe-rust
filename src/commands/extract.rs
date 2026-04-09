@@ -117,26 +117,35 @@ pub fn cmd_extract(
         );
     }
 
-    let public_api_count = atoms_dict
-        .values()
-        .filter(|a| a.is_public_api == Some(true))
-        .count();
     if is_library {
+        let public_count = atoms_dict
+            .values()
+            .filter(|a| a.is_public == Some(true))
+            .count();
+        let non_public_count = atoms_dict
+            .values()
+            .filter(|a| a.is_public == Some(false))
+            .count();
         println!(
-            "  ✓ is-public-api: {} public, {} not public{}",
-            public_api_count,
-            atoms_dict
+            "  ✓ is-public: {} public, {} not public (SCIP module-chain walk)",
+            public_count, non_public_count
+        );
+        if with_public_api {
+            let api_true = atoms_dict
+                .values()
+                .filter(|a| a.is_public_api == Some(true))
+                .count();
+            let api_false = atoms_dict
                 .values()
                 .filter(|a| a.is_public_api == Some(false))
-                .count(),
-            if with_public_api {
-                " (cargo-public-api override)"
-            } else {
-                ""
-            }
-        );
+                .count();
+            println!(
+                "  ✓ is-public-api: {} in public API, {} not (cargo-public-api)",
+                api_true, api_false
+            );
+        }
     } else {
-        println!("  ℹ Binary-only crate — all atoms marked is-public-api: false");
+        println!("  ℹ Binary-only crate — is-public: false for all atoms");
     }
 
     let output = output.unwrap_or_else(|| get_default_output_path(&project_path, &metadata, ""));
@@ -313,32 +322,35 @@ fn enrich_with_public_api(
     pkg_name: &str,
 ) {
     println!();
-    println!("Overriding is-public-api via cargo-public-api (RQN matching)...");
+    println!("Setting is-public-api via cargo-public-api (RQN matching)...");
 
     if let Err(e) = public_api::ensure_nightly_toolchain(auto_install) {
-        eprintln!("  ⚠ Public API override skipped: {e}");
+        eprintln!("  ⚠ cargo-public-api skipped: {e}");
         return;
     }
 
     if let Err(e) = public_api::ensure_cargo_public_api(auto_install) {
-        eprintln!("  ⚠ Public API override skipped: {e}");
+        eprintln!("  ⚠ cargo-public-api skipped: {e}");
         return;
     }
 
     match public_api::collect_public_api(project_path, pkg_name, regenerate) {
         Ok(public_names) => {
-            println!("  ✓ Found {} public API function(s)", public_names.len());
+            println!(
+                "  ✓ cargo-public-api found {} public function(s)",
+                public_names.len()
+            );
 
-            let (overridden_true, overridden_false) =
+            let (set_true, set_false) =
                 public_api::enrich_atoms_with_public_api(atoms_dict, &public_names);
             println!(
-                "  ✓ Overrode is-public-api: {} true, {} false",
-                overridden_true, overridden_false
+                "  ✓ is-public-api: {} true, {} false",
+                set_true, set_false
             );
         }
         Err(e) => {
-            eprintln!("  ⚠ Public API override failed: {e}");
-            eprintln!("    is-public-api will use SCIP module-chain walk values");
+            eprintln!("  ⚠ cargo-public-api failed: {e}");
+            eprintln!("    is-public-api will remain unset");
         }
     }
 }

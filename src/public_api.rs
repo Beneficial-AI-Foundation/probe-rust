@@ -297,39 +297,100 @@ pub fn collect_public_api(
 }
 
 // =============================================================================
+// RQN normalization
+// =============================================================================
+
+/// Normalize a Charon-derived RQN to the flat format used by `cargo-public-api`.
+///
+/// Charon encodes impl blocks with braces:
+///   - Inherent: `mod::{full::path::Type}::method`
+///   - Trait:    `mod::{Trait for full::path::Type}::method`
+///
+/// `cargo-public-api` uses the flat form for both: `full::path::Type::method`.
+///
+/// Additionally, reference-self types `&'N (Type)` are unwrapped to just `Type`,
+/// since `cargo-public-api` strips the `&'a` prefix from reference impls.
+///
+/// Returns the original string unchanged when no braces are present.
+pub fn normalize_rqn_for_public_api(rqn: &str) -> String {
+    let Some(open) = rqn.find('{') else {
+        return rqn.to_string();
+    };
+    let Some(close) = rqn.find('}') else {
+        return rqn.to_string();
+    };
+
+    let inside = &rqn[open + 1..close];
+    let suffix = &rqn[close + 1..]; // e.g. "::method"
+
+    // Trait impl: "{TraitPath for TypePath}" → take TypePath
+    // Inherent:   "{TypePath}" → take as-is
+    let type_path = if let Some(pos) = inside.find(" for ") {
+        &inside[pos + 5..]
+    } else {
+        inside
+    };
+
+    let result = format!("{type_path}{suffix}");
+    unwrap_ref_type(&result)
+}
+
+/// Strip a leading `&'N (...)` wrapper from a normalized RQN.
+///
+/// Charon represents reference-self impls as `&'1 (crate::Type)::method`.
+/// `cargo-public-api` strips the `&` prefix, yielding `crate::Type::method`.
+fn unwrap_ref_type(s: &str) -> String {
+    if !s.starts_with("&'") {
+        return s.to_string();
+    }
+    // Find the opening paren after the lifetime: "&'N ("
+    let Some(paren_open) = s.find('(') else {
+        return s.to_string();
+    };
+    // Find the matching close paren
+    let Some(paren_close) = s.rfind(')') else {
+        return s.to_string();
+    };
+    let inner = &s[paren_open + 1..paren_close];
+    let after = &s[paren_close + 1..];
+    format!("{inner}{after}")
+}
+
+// =============================================================================
 // RQN-based enrichment
 // =============================================================================
 
-/// Override `is-public-api` for all atoms that have a `rust-qualified-name`.
+/// Set `is-public-api` for all atoms that have a `rust-qualified-name`.
 ///
 /// For each atom:
 /// - If `rust-qualified-name` is `None` (external stubs) → leave `is-public-api` unchanged
-/// - If RQN is in `public_names` → `is-public-api = Some(true)`
+/// - If RQN (or its normalized form) is in `public_names` → `is-public-api = Some(true)`
 /// - Otherwise → `is-public-api = Some(false)`
 ///
-/// Returns `(overridden_true, overridden_false)` counts.
+/// Returns `(set_true, set_false)` counts.
 pub fn enrich_atoms_with_public_api(
     atoms: &mut BTreeMap<String, AtomWithLines>,
     public_names: &HashSet<String>,
 ) -> (usize, usize) {
-    let mut overridden_true = 0;
-    let mut overridden_false = 0;
+    let mut set_true = 0;
+    let mut set_false = 0;
 
     for atom in atoms.values_mut() {
         let Some(rqn) = &atom.rust_qualified_name else {
             continue;
         };
 
-        if public_names.contains(rqn) {
+        let normalized = normalize_rqn_for_public_api(rqn);
+        if public_names.contains(rqn) || public_names.contains(&normalized) {
             atom.is_public_api = Some(true);
-            overridden_true += 1;
+            set_true += 1;
         } else {
             atom.is_public_api = Some(false);
-            overridden_false += 1;
+            set_false += 1;
         }
     }
 
-    (overridden_true, overridden_false)
+    (set_true, set_false)
 }
 
 // =============================================================================
@@ -494,55 +555,131 @@ pub fn my_crate::real_function()
         assert!(!is_blanket_impl("my_crate::MyType::Display::fmt"));
     }
 
+    // ---- normalize_rqn_for_public_api ----
+
+    #[test]
+    fn test_normalize_no_braces() {
+        assert_eq!(
+            normalize_rqn_for_public_api("c::m::free_fn"),
+            "c::m::free_fn"
+        );
+    }
+
+    #[test]
+    fn test_normalize_inherent_impl() {
+        assert_eq!(
+            normalize_rqn_for_public_api("c::edwards::{c::edwards::EdwardsPoint}::compress"),
+            "c::edwards::EdwardsPoint::compress"
+        );
+    }
+
+    #[test]
+    fn test_normalize_trait_impl() {
+        assert_eq!(
+            normalize_rqn_for_public_api(
+                "c::edwards::{subtle::ConstantTimeEq for c::edwards::EdwardsPoint}::ct_eq"
+            ),
+            "c::edwards::EdwardsPoint::ct_eq"
+        );
+    }
+
+    #[test]
+    fn test_normalize_generic_trait_impl() {
+        // Reference-self impl: unwraps &'1 (...) to just the inner type
+        assert_eq!(
+            normalize_rqn_for_public_api(
+                "c::edwards::{core::ops::arith::Add<&'0 (c::edwards::EdwardsPoint), c::edwards::EdwardsPoint> for &'1 (c::edwards::EdwardsPoint)}::add"
+            ),
+            "c::edwards::EdwardsPoint::add"
+        );
+    }
+
+    #[test]
+    fn test_normalize_ref_neg() {
+        assert_eq!(
+            normalize_rqn_for_public_api(
+                "c::edwards::{core::ops::arith::Neg<c::edwards::EdwardsPoint> for &'0 (c::edwards::EdwardsPoint)}::neg"
+            ),
+            "c::edwards::EdwardsPoint::neg"
+        );
+    }
+
     // ---- enrich_atoms_with_public_api ----
 
     #[test]
-    fn test_enrich_rqn_based() {
+    fn test_enrich_direct_match() {
         let mut atoms = BTreeMap::new();
-
-        // Atom with RQN in public set → true
         atoms.insert(
             "probe:c/1.0/m/public_fn()".to_string(),
             make_atom("public_fn", "src/m.rs", Some("c::m::public_fn")),
         );
-
-        // Atom with RQN not in public set → false
         atoms.insert(
             "probe:c/1.0/m/private_fn()".to_string(),
             make_atom("private_fn", "src/m.rs", Some("c::m::private_fn")),
         );
-
-        // External stub (no RQN) → unchanged (None)
         atoms.insert(
             "probe:ext/1.0/lib/ext_fn()".to_string(),
             make_atom("ext_fn", "", None),
         );
 
-        // Trait impl with RQN in public set → true
-        atoms.insert(
-            "probe:c/1.0/m/MyType.ct_eq()".to_string(),
-            make_atom("MyType::ct_eq", "src/m.rs", Some("c::m::MyType::ct_eq")),
-        );
+        let public_names: HashSet<String> =
+            ["c::m::public_fn"].iter().map(|s| s.to_string()).collect();
 
-        let public_names: HashSet<String> = ["c::m::public_fn", "c::m::MyType::ct_eq"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &public_names);
 
-        let (overridden_true, overridden_false) =
-            enrich_atoms_with_public_api(&mut atoms, &public_names);
-
-        assert_eq!(overridden_true, 2);
-        assert_eq!(overridden_false, 1);
-
+        assert_eq!(set_true, 1);
+        assert_eq!(set_false, 1);
         assert_eq!(atoms["probe:c/1.0/m/public_fn()"].is_public_api, Some(true));
         assert_eq!(
             atoms["probe:c/1.0/m/private_fn()"].is_public_api,
             Some(false)
         );
         assert_eq!(atoms["probe:ext/1.0/lib/ext_fn()"].is_public_api, None);
+    }
+
+    #[test]
+    fn test_enrich_normalized_match() {
+        let mut atoms = BTreeMap::new();
+
+        // Charon RQN with braces
+        atoms.insert(
+            "probe:c/1.0/edwards/compress()".to_string(),
+            make_atom(
+                "compress",
+                "src/edwards.rs",
+                Some("c::edwards::{c::edwards::EdwardsPoint}::compress"),
+            ),
+        );
+
+        // Trait impl Charon RQN
+        atoms.insert(
+            "probe:c/1.0/edwards/ct_eq()".to_string(),
+            make_atom(
+                "ct_eq",
+                "src/edwards.rs",
+                Some("c::edwards::{subtle::ConstantTimeEq for c::edwards::EdwardsPoint}::ct_eq"),
+            ),
+        );
+
+        // cargo-public-api uses flat format
+        let public_names: HashSet<String> = [
+            "c::edwards::EdwardsPoint::compress",
+            "c::edwards::EdwardsPoint::ct_eq",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &public_names);
+
+        assert_eq!(set_true, 2);
+        assert_eq!(set_false, 0);
         assert_eq!(
-            atoms["probe:c/1.0/m/MyType.ct_eq()"].is_public_api,
+            atoms["probe:c/1.0/edwards/compress()"].is_public_api,
+            Some(true)
+        );
+        assert_eq!(
+            atoms["probe:c/1.0/edwards/ct_eq()"].is_public_api,
             Some(true)
         );
     }

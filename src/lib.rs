@@ -1061,8 +1061,8 @@ fn convert_to_atoms_with_lines_internal(
     span_map: Option<&HashMap<(String, String, usize), rust_parser::SpanInfo>>,
     with_locations: bool,
     pkg_name: Option<&str>,
-    module_visibility: &HashMap<String, bool>,
-    is_library: bool,
+    _module_visibility: &HashMap<String, bool>,
+    _is_library: bool,
 ) -> Vec<AtomWithLines> {
     // === Phase 1: Compute line ranges and base code_names for all nodes ===
     struct NodeData<'a> {
@@ -1368,13 +1368,7 @@ fn convert_to_atoms_with_lines_internal(
                 rust_qualified_name: rqn,
                 is_disabled: false,
                 is_public: Some(sig_public),
-                is_public_api: classify_public_api(
-                    &data.node.symbol,
-                    sig_public,
-                    &data.node.relative_path,
-                    module_visibility,
-                    is_library,
-                ),
+                is_public_api: None,
             }
         })
         .collect()
