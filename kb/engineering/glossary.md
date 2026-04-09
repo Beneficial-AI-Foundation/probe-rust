@@ -1,6 +1,6 @@
 # Glossary
 
-- **last-updated**: 2026-04-07
+- **last-updated**: 2026-04-09
 
 Every domain term used in the KB must be defined here. Terms are listed alphabetically.
 
@@ -12,7 +12,11 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **BFS (Breadth-First Search)** — The traversal strategy used by the `callee-crates` command to walk the call graph from a starting function and group callees by crate.
 
+**Blanket impl** — A standard library trait implementation automatically provided for all types (e.g. `Into`, `TryFrom`, `Borrow`). `cargo public-api` output includes blanket impl entries that have no corresponding [atoms](#atom) in the call graph. These are filtered out during `--with-public-api` processing. See [P11](properties.md), `public_api.rs` (`BLANKET_IMPL_TRAITS`).
+
 **Binary-only crate** — A Cargo package that has no `[lib]` target (only `[[bin]]` targets). All atoms are marked `is-public-api: false` since binaries have no public API surface. See [P12](properties.md), [library crate](#library-crate).
+
+**cargo-public-api** — External tool that lists a crate's public API surface by running `rustdoc` and parsing the output. Invoked via `cargo public-api -sss -p <pkg>`. Requires a nightly Rust toolchain. Used by `--with-public-api` to override [is-public-api](#is-public-api) values via [RQN](#rqn-rust-qualified-name) matching. See [P11](properties.md), [P17](properties.md), `public_api.rs`.
 
 **Call attribution** — The process of assigning [callee references](#callee-reference) to their enclosing function. Done by walking SCIP [occurrences](#occurrence) in lexical order and tracking the current [function-like definition](#function-like-definition). See [P8](properties.md).
 
@@ -44,7 +48,7 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **is-public** — Boolean field on [atoms](#atom) indicating whether the function's SCIP signature starts with an unrestricted `pub` prefix. Derived from `signature_documentation.text`. Does not indicate public API membership. See [P10](properties.md).
 
-**is-public-api** — Boolean field indicating whether a function is reachable from the crate root. Derived from SCIP module-chain visibility walk: `true` = direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain; `false` = non-public function or non-public ancestor module. Absent/`null` only for [external stubs](#external-stub). See [P11](properties.md).
+**is-public-api** — Boolean field indicating whether a function is reachable from the crate root. By default, derived from SCIP module-chain visibility walk: `true` = direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain; `false` = non-public function or non-public ancestor module. Absent/`null` only for [external stubs](#external-stub). When `--with-public-api` is used, overridden for atoms with a [RQN](#rqn-rust-qualified-name) by matching against [cargo-public-api](#cargo-public-api) output. See [P11](properties.md), [P17](properties.md).
 
 **Module visibility map** — A `HashMap<String, bool>` built from SCIP module symbols (kind 29) during `build_call_graph`. Maps module path descriptors (e.g. `"edwards/"`) to whether the module is unrestricted `pub`. Used by `classify_public_api` to walk ancestor module chains. See [P11](properties.md).
 

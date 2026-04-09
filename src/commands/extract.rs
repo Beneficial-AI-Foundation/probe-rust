@@ -5,7 +5,7 @@ use crate::{
     charon_cache::CharonCache,
     charon_names, convert_to_atoms_with_parsed_spans, find_duplicate_code_names, is_library_crate,
     metadata::{gather_metadata, get_default_output_path, wrap_in_envelope},
-    parse_scip_json,
+    parse_scip_json, public_api,
     scip_cache::ScipCache,
     AtomWithLines, ProbeError, ProbeResult,
 };
@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// Execute the extract command.
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_extract(
     project_path: PathBuf,
     output: Option<PathBuf>,
@@ -21,6 +22,7 @@ pub fn cmd_extract(
     allow_duplicates: bool,
     auto_install: bool,
     with_charon: bool,
+    with_public_api: bool,
 ) -> ProbeResult<()> {
     println!("═══════════════════════════════════════════════════════════");
     println!("  Probe Rust - Extract: Generate Call Graph Data");
@@ -105,18 +107,33 @@ pub fn cmd_extract(
         println!("  ✓ Added {} external function stub(s)", stub_count);
     }
 
+    if with_public_api {
+        enrich_with_public_api(
+            &project_path,
+            auto_install,
+            regenerate_scip,
+            &mut atoms_dict,
+            &metadata.pkg_name,
+        );
+    }
+
     let public_api_count = atoms_dict
         .values()
         .filter(|a| a.is_public_api == Some(true))
         .count();
     if is_library {
         println!(
-            "  ✓ is-public-api: {} public, {} not public",
+            "  ✓ is-public-api: {} public, {} not public{}",
             public_api_count,
             atoms_dict
                 .values()
                 .filter(|a| a.is_public_api == Some(false))
-                .count()
+                .count(),
+            if with_public_api {
+                " (cargo-public-api override)"
+            } else {
+                ""
+            }
         );
     } else {
         println!("  ℹ Binary-only crate — all atoms marked is-public-api: false");
@@ -284,6 +301,44 @@ fn enrich_with_charon(
         Err(e) => {
             eprintln!("  ⚠ Charon LLBC parsing failed: {e}");
             eprintln!("    rust-qualified-name will use heuristic");
+        }
+    }
+}
+
+fn enrich_with_public_api(
+    project_path: &Path,
+    auto_install: bool,
+    regenerate: bool,
+    atoms_dict: &mut BTreeMap<String, AtomWithLines>,
+    pkg_name: &str,
+) {
+    println!();
+    println!("Overriding is-public-api via cargo-public-api (RQN matching)...");
+
+    if let Err(e) = public_api::ensure_nightly_toolchain(auto_install) {
+        eprintln!("  ⚠ Public API override skipped: {e}");
+        return;
+    }
+
+    if let Err(e) = public_api::ensure_cargo_public_api(auto_install) {
+        eprintln!("  ⚠ Public API override skipped: {e}");
+        return;
+    }
+
+    match public_api::collect_public_api(project_path, pkg_name, regenerate) {
+        Ok(public_names) => {
+            println!("  ✓ Found {} public API function(s)", public_names.len());
+
+            let (overridden_true, overridden_false) =
+                public_api::enrich_atoms_with_public_api(atoms_dict, &public_names);
+            println!(
+                "  ✓ Overrode is-public-api: {} true, {} false",
+                overridden_true, overridden_false
+            );
+        }
+        Err(e) => {
+            eprintln!("  ⚠ Public API override failed: {e}");
+            eprintln!("    is-public-api will use SCIP module-chain walk values");
         }
     }
 }

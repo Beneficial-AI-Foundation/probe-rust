@@ -90,6 +90,7 @@ fn live_extract_structural_check() {
         false,
         true,
         false,
+        false,
     )
     .expect("probe-rust extract failed");
 

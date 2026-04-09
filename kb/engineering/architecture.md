@@ -1,6 +1,6 @@
 # Architecture
 
-- **last-updated**: 2026-04-07
+- **last-updated**: 2026-04-09
 
 ## Overview
 
@@ -47,7 +47,11 @@ commands/extract.rs (orchestration)
   |-- 6. add_external_stubs()                           [P4]
   |      Creates stub atoms for referenced-but-undefined functions
   |
-  |-- 7. metadata::wrap_in_envelope()                   [P1, P13]
+  |-- 7. [optional] public_api (--with-public-api)      [P11, P17]
+  |      Runs cargo public-api, overrides is-public-api via RQN matching
+  |      Cached in <project>/data/public-api.txt            [P14]
+  |
+  |-- 8. metadata::wrap_in_envelope()                   [P1, P13]
   |      Gathers git/cargo metadata, wraps atoms in Schema 2.0 envelope
   |
   v
@@ -80,6 +84,12 @@ Provides precise Rust qualified names and item visibility via LLBC analysis. Fai
 
 **Files**: `charon_cache.rs`, `charon_names.rs`
 
+### Public API override (optional, external)
+
+Overrides `is-public-api` using `cargo-public-api` output matched via `rust-qualified-name` (RQN). Requires nightly toolchain and `cargo-public-api`. Failure is non-fatal ([P17](../engineering/properties.md#p17--public-api-override-non-fatal)). Activated with `--with-public-api`.
+
+**Files**: `public_api.rs`
+
 ### Metadata / envelope (internal)
 
 Gathers project metadata (git commit, repo URL, package info) and wraps atoms in the Schema 2.0 envelope.
@@ -111,6 +121,7 @@ src/
   rust_parser.rs       syn-based function span parsing
   scip_cache.rs        SCIP index generation and caching
   tool_manager.rs      Auto-download for scip CLI tool
+  public_api.rs        cargo-public-api integration, RQN matching
   charon_cache.rs      Charon tool management and caching
   charon_names.rs      Charon LLBC name enrichment
   commands/
@@ -127,6 +138,7 @@ src/
 | rust-analyzer | Yes | No (must be on PATH or via rustup) | SCIP index generation |
 | scip CLI | Yes | Yes (`--auto-install`) | Convert index.scip to JSON |
 | Charon | No (`--with-charon`) | Yes (`--auto-install`) | Precise RQN and visibility (requires nightly) |
+| cargo-public-api | No (`--with-public-api`) | Yes (`--auto-install`) | Ground-truth public API surface from rustdoc (requires nightly) |
 
 ## Data flow
 
@@ -153,6 +165,8 @@ rust-analyzer ──> index.scip ──> scip CLI ──> index.scip.json
                                             BTreeMap<code-name, AtomWithLines>
                                                     |
                           [Charon LLBC] ──> enrich RQN + is-public
+                                                    |
+                      [cargo public-api] ──> override is-public-api via RQN
                                                     |
                                                     v
                                         Schema 2.0 envelope JSON

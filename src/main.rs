@@ -35,13 +35,18 @@ enum Commands {
         #[arg(long)]
         allow_duplicates: bool,
 
-        /// Automatically download missing tools (scip, and charon when --with-charon is set)
+        /// Automatically download missing tools (scip; charon when --with-charon; cargo-public-api and nightly when --with-public-api)
         #[arg(long)]
         auto_install: bool,
 
         /// Enrich atoms with Charon-derived rust-qualified-names (for Aeneas integration)
         #[arg(long)]
         with_charon: bool,
+
+        /// Override is-public-api using cargo-public-api (RQN-based matching).
+        /// Requires nightly toolchain and cargo-public-api (use --auto-install).
+        #[arg(long)]
+        with_public_api: bool,
     },
 
     /// Find which crates a function's callees belong to
@@ -121,6 +126,7 @@ fn main() -> ExitCode {
             allow_duplicates,
             auto_install,
             with_charon,
+            with_public_api,
         } => commands::cmd_extract(
             project_path,
             output,
@@ -129,6 +135,7 @@ fn main() -> ExitCode {
             allow_duplicates,
             auto_install,
             with_charon,
+            with_public_api,
         ),
         Commands::CalleeCrates {
             function,

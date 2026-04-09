@@ -10,6 +10,7 @@ pub mod constants;
 pub mod error;
 pub mod metadata;
 pub mod path_utils;
+pub mod public_api;
 pub mod rust_parser;
 pub mod scip_cache;
 pub mod tool_manager;

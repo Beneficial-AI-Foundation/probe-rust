@@ -158,7 +158,7 @@ standardized metadata envelope:
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name. |
 | `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions they did not process. |
 | `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used, the Charon-derived value takes precedence. This is item-level visibility, not crate-level API reachability. |
-| `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. Derived from SCIP module-chain visibility walk (no external tools required). See **Limitations** below. |
+| `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. By default derived from SCIP module-chain visibility walk (no external tools required). When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name` (RQN). See **Limitations** below. |
 
 ### DependencyWithLocation
 
@@ -183,6 +183,8 @@ stub entries with:
 
 ### Limitations: `is-public-api`
 
+#### Default (SCIP module-chain walk)
+
 `is-public-api` is determined by walking the SCIP module visibility chain.
 This is accurate for most cases but has known limitations:
 
@@ -195,6 +197,19 @@ This is accurate for most cases but has known limitations:
   positive if a private same-crate trait is implemented on a public type (rare).
 - **Binary-only crates**: All atoms are `is-public-api: false` since binaries
   have no public API surface.
+
+#### With `--with-public-api` (cargo-public-api override)
+
+When `--with-public-api` is used, `is-public-api` is overridden for all atoms
+that have a `rust-qualified-name` (RQN). Matching is RQN-based: each atom's RQN
+is checked against the set of qualified names parsed from `cargo public-api -sss`
+output. This provides ground-truth public API surface from `rustdoc`.
+
+- Standard blanket impl entries (`Into`, `TryFrom`, `TryInto`, `Borrow`,
+  `BorrowMut`, `Any`, `ToOwned`, `CloneInto`, `From`) are filtered from the
+  `cargo public-api` output since they have no corresponding atoms.
+- Requires nightly toolchain and `cargo-public-api` (use `--auto-install`).
+- External stubs (no RQN) are unaffected — `is-public-api` stays absent.
 
 ---
 
@@ -315,7 +330,10 @@ major version.
 - **2.3** (2026-04-07): Replaced `cargo-public-api` integration with SCIP
   module-chain visibility walk. `is-public-api` is now always present for
   internal atoms (binary `true`/`false`), no uncertain bucket. No external
-  tools or nightly toolchain required.
+  tools or nightly toolchain required. *Updated 2026-04-09:* re-added
+  `cargo-public-api` as an opt-in override (`--with-public-api`). Uses
+  RQN-based matching; SCIP walk remains the zero-dependency default. No
+  schema change (same fields and types).
 - **2.2** (2026-04-07): Added `is-public-api` field. Changed `is-public` to
   always be present for internal atoms (derived from SCIP signature visibility),
   no longer requires `--with-charon`.
@@ -334,7 +352,7 @@ probe-rust atoms use the same data shape as probe-verus atoms. Key differences:
 | `dependencies-with-locations` `location` | Always `"inner"` | `"inner"`, `"precondition"`, `"postcondition"` |
 | `rust-qualified-name` | Optional (with `--with-charon`) | Not present |
 | `is-public` | Always for internal atoms (from SCIP); `--with-charon` overrides | Not present |
-| `is-public-api` | Always for internal atoms (from SCIP module walk) | Not present |
+| `is-public-api` | Always for internal atoms (SCIP module walk; optionally overridden via `--with-public-api`) | Not present |
 
 The `callee-crates` and `list-functions` commands accept atoms.json from
 either tool interchangeably.

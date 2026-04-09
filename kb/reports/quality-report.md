@@ -1,81 +1,69 @@
 ---
 auditor: code-quality-auditor
-date: 2026-04-07
-status: 0 critical, 4 warnings, 3 info
+pass: second
+date: 2026-04-09
+status: 0 critical, 0 warnings, 7 info
 ---
 
 ## Critical
 
 _(None.)_
 
-## Warnings
-
-### [W1] P3 — Possible non-determinism in span fallback
-
-**Property**: P3 requires the same SCIP input and source files to yield the same JSON; KB cites `BTreeMap` / `BTreeSet` for the atoms map and dependencies.
-
-**Evidence**: `convert_to_atoms_with_parsed_spans` builds `relative_paths` via `collect::<HashSet<_>>().into_iter().collect()`, so file processing order for `build_function_span_map` is not stable across runs. More importantly, `rust_parser::get_function_end_line` uses exact `HashMap::get` first, then falls back to iterating `span_map.iter()` (a `HashMap`). When multiple parsed spans match the containment rule (same file, same bare name, SCIP start line inside more than one span), which match wins depends on hash iteration order.
-
-**Impact**: Edge cases only; typical projects hit the exact key path. Still a gap vs strict deterministic-output intent.
-
-**Where**: `src/lib.rs` (`convert_to_atoms_with_parsed_spans`), `src/rust_parser.rs` (`get_function_end_line`).
-
-### [W2] User-facing docs still describe `cargo-public-api` and old schema
-
-**Check**: Documentation staleness; no stale nightly / `cargo-public-api` requirement for `is-public-api`.
-
-**Evidence**: `CHANGELOG.md` still documents `cargo public-api`, `public_api` module, three-way `is-public-api`, and schema **2.2**. `README.md` and `docs/USAGE.md` still show envelope example with `"schema-version": "2.1"`. None of these reflect Schema **2.3** or the SCIP module-chain approach in `lib.rs`.
-
-**Where**: `CHANGELOG.md`, `README.md`, `docs/USAGE.md`.
-
-### [W3] Process / KB reports and auditor rules reference removed `public_api`
-
-**Check**: No references to deleted `public_api.rs`; P14 no stale public-api cache.
-
-**Evidence**: `src/commands/mod.rs` and the tree contain **no** `public_api` module or `src/public_api.rs`. `commands/extract.rs` and `scip_cache.rs` do **not** mention `public-api.txt` or a public-api cache — P14 coupling to a second artifact is gone.
-
-**Stale artifacts** (still mention `public_api`, `cargo public-api`, or old P11 behavior): `.cursor/rules/auditors/code-quality-auditor.md`, `.cursor/rules/auditors/test-quality-auditor.md`, `kb/reports/test-report.md`, and the previous content of this file. They mislead future audits and the Ralph loop until updated.
-
-### [W4] Schema doc example `tool.version` behind crate version
-
-**Evidence**: `docs/SCHEMA.md` envelope example uses `"version": "0.3.0"` for `probe-rust`; `Cargo.toml` has `version = "0.4.0"`. `schema-version` **2.3** is consistent with `metadata::SCHEMA_VERSION` and the doc header.
-
-## Info
-
-### [I1] Duplicate `is_signature_public` evaluation per atom
-
-**Evidence**: In `convert_to_atoms_with_lines_internal`, `is_signature_public(&data.node.signature_text)` is called twice when building each `AtomWithLines` (for `is_public` and for `classify_public_api`). Harmless; could bind once for clarity.
-
-**Where**: `src/lib.rs`.
-
-### [I2] CLAUDE.md project structure omits Charon modules
-
-**Evidence**: `kb/engineering/architecture.md` lists `charon_cache.rs` and `charon_names.rs` under `src/`; root `CLAUDE.md` “Project Structure” block does not. Not wrong about `is-public-api`, but slightly out of sync with the file map.
-
-### [I3] “Absent / null” wording vs serde
-
-**Evidence**: P11 / glossary describe external stubs as `is-public-api` absent or `null`. `AtomWithLines` uses `skip_serializing_if = "Option::is_none"`, so JSON omits the field rather than emitting `null`. Consumers are unaffected; wording is mildly imprecise.
+`metadata::SCHEMA_VERSION`, `docs/SCHEMA.md` header and examples, and P1 all agree on **2.3**. The implementation matches the KB for the default SCIP `is-public-api` path, optional `--with-public-api` enrichment (`src/public_api.rs`, `commands/extract.rs`), caching (**P14**), and non-fatal failure (**P17**).
 
 ---
 
-## Property checklist (focused)
+## Warnings
 
-| ID | Result | Notes |
-|----|--------|--------|
-| **P1** | Pass | `metadata::SCHEMA_VERSION` is `"2.3"`; matches `docs/SCHEMA.md` Version and examples. |
-| **P11** | Pass | `classify_public_api`: empty `code_path` → `None`; non-library → `Some(false)`; `is_public && is_module_chain_public` → `Some(true)`; `is_trait_impl_symbol && is_module_chain_public` → `Some(true)`; else `Some(false)`. Aligns with `properties.md` and tests in `lib.rs`. |
-| **P12** | Pass | `is_library_crate` reads `[lib]` in `Cargo.toml` or `src/lib.rs`; `extract::cmd_extract` passes `is_library` into `convert_to_atoms_with_parsed_spans`. |
-| **P3** | Partial | Serialized atoms: `BTreeMap` keys, `BTreeSet` dependencies — OK. Internal `HashMap`/`HashSet` remain on the pipeline; see [W1]. |
-| **P14** | Pass | SCIP cache only (`data/`, `index.scip`, `index.scip.json`); no `public-api` cache in implementation. |
+_(None.)_
 
-## Architecture
+### First-pass warnings — verified resolved
 
-| Check | Result |
-|--------|--------|
-| Pipeline vs `architecture.md` | Pass — `extract.rs`: validate → SCIP → `parse_scip_json` → `build_call_graph` (with `module_visibility`) → `convert_to_atoms_with_parsed_spans` → dedupe → optional Charon → `add_external_stubs` → `wrap_in_envelope`. |
-| Data flow diagram | Pass — matches `build_call_graph` 3-tuple and `classify_public_api` inside conversion. |
-| `public_api.rs` | Pass — module removed; no `mod public_api` or imports. |
+| ID | Topic | Verification |
+|----|--------|--------------|
+| W1 | Schema drift in SCHEMA.md | Changelog no longer asserts a 2.4 bump; addendum under 2.3 states no schema change. |
+| W2 | P11 omitting override | P11 covers default + `--with-public-api`; **Where** includes `public_api.rs` and `extract.rs`. |
+| W3 | Glossary **is-public-api** | Entry documents default walk and optional override; links P11/P17. |
+| W4 | Architecture | Pipeline step 7, `public_api.rs` in source map, component section, tools table, data-flow node. |
+| W5 | P14 / `public-api.txt` | P14 documents cache path and `--regenerate-scip` invalidation. |
+| I4 | `main.rs` `--auto-install` help | Line 38 mentions `cargo-public-api` and nightly with `--with-public-api`. |
+| I5–I6 | USAGE examples / cargo-public-api section | “With all options” includes `--with-public-api`; dedicated opt-in subsection documents resolution, nightly, cache, and continuation on errors. |
 
-## Files reviewed
+---
 
-`kb/engineering/properties.md`, `kb/engineering/architecture.md`, `kb/engineering/glossary.md`, `docs/SCHEMA.md`, `src/lib.rs`, `src/constants.rs`, `src/metadata.rs`, `src/commands/extract.rs`, `CLAUDE.md`, plus targeted reads of `src/rust_parser.rs`, `src/scip_cache.rs`, `src/commands/mod.rs`, `Cargo.toml`.
+## Info
+
+### [I1] Integration test gap for `--with-public-api` (accepted)
+
+- **Location**: `src/public_api.rs` unit tests; `tests/extract_check.rs` (`live_extract_structural_check` uses `with_public_api: false` only)
+- **Note**: **Accepted gap** — full extract + `cargo public-api` needs nightly and the external tool; CI-friendly coverage is the `public_api` unit suite plus manual or ignored runs. No code defect.
+
+### [I2] P3 / `HashSet` in `public_api`
+
+- **Location**: `public_api.rs` membership sets during enrichment
+- **Note**: Sets are not serialized; atom map remains `BTreeMap`. Satisfies P3 for output paths.
+
+### [I3] P15-style symmetry with P17
+
+- **Location**: `commands/extract.rs` `enrich_with_public_api`
+- **Note**: Missing nightly, missing `cargo-public-api`, or `collect_public_api` error warns and returns or falls through without aborting extract; aligns with P17 and Charon-style optional enrichment.
+
+### [I4] Known issues C1–C3
+
+- **Location**: `properties.md` Known issues
+- **Note**: Unchanged by this feature; no action required for this audit.
+
+### [I5] Enrichment order: stubs then public API
+
+- **Location**: `extract.rs` — `add_external_stubs` then `enrich_with_public_api`
+- **Note**: Stubs without RQN are skipped by design; consistent with `docs/SCHEMA.md`.
+
+### [I6] `USAGE.md` vs P17 wording
+
+- **Location**: `docs/USAGE.md` § cargo-public-api — “override step will fail” when tools missing
+- **Note**: Extract still succeeds; optional clarity improvement in docs only (see ambiguity report I3).
+
+### [I7] Example / fixture schema-version lag
+
+- **Location**: `examples/rust_curve25519-dalek_4.1.3.json` still shows `schema-version` **2.2** (historical sample)
+- **Note**: Does not affect code; update example when regenerating artifacts if strict doc-example parity is desired.

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-09
+
+### Added
+- **`--with-public-api` flag** on `extract`: opt-in override of `is-public-api` using `cargo-public-api` output matched via `rust-qualified-name` (RQN). Provides ground-truth public API surface from `rustdoc` for cross-tool alignment (probe-rust ↔ probe-verus ↔ probe-aeneas). SCIP module-chain walk remains the zero-dependency default.
+- **`src/public_api.rs`**: `cargo-public-api` integration with RQN-based matching, blanket impl filtering (`Into`, `TryFrom`, `TryInto`, `Borrow`, `BorrowMut`, `Any`, `ToOwned`, `CloneInto`, `From`), output caching in `<project>/data/public-api.txt`, nightly toolchain and tool auto-install support.
+- **Property P17** (public-API override non-fatal): `--with-public-api` failure preserves SCIP-walk values and never aborts the pipeline, analogous to P15 for Charon.
+- **14 new unit tests** for RQN extraction (lifetime prefixes, generics, restricted visibility), blanket impl filtering, and enrichment logic.
+- **`cargo-public-api (opt-in)`** section in `docs/USAGE.md` documenting resolution, nightly requirement, caching, and failure behavior.
+
+### Changed
+- **`docs/SCHEMA.md`**: `is-public-api` field description updated to mention optional `--with-public-api` override. Limitations section expanded with `--with-public-api` subsection.
+- **Knowledge Base**: P11 updated for optional override semantics, P14 expanded with `public-api.txt` cache, architecture/glossary updated with new module and terms.
+
 ## [0.5.0] - 2026-04-07
 
 ### Changed
@@ -112,7 +125,8 @@ Initial release.
 - CI pipeline with formatting, clippy, and unit test checks.
 - Release automation via cargo-dist for Linux, macOS, and Windows binaries.
 
-[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.2.1...v0.3.0

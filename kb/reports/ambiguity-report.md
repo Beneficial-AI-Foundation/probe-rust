@@ -1,89 +1,61 @@
 ---
 auditor: ambiguity-auditor
-date: 2026-04-07
-status: 2 critical, 7 warnings, 4 info
+pass: second
+date: 2026-04-09
+status: 0 critical, 0 warnings, 3 info
 ---
 
 ## Critical
 
-### [C1] Glossary charter violated — terms in `properties.md` without definitions
+_(None.)_
 
-- **Location**: `kb/engineering/glossary.md` (charter, line 5); `kb/engineering/properties.md` § P8, known issues C1–C2
-- **Issue**: The glossary states that every domain term used in the KB must be defined there. `properties.md` uses **SCIP document** (P8: “in a SCIP document”) and **callee references** (“callee references are attributed…”, C1/C2). Neither appears as a glossary entry. **Dependencies** describes the output edge set, not an occurrence-level “callee reference” during SCIP walking, so it does not subsume the term.
-- **Recommendation**: Add glossary entries (e.g. **SCIP document** — a document entry in the SCIP index with its own occurrence stream; **Callee reference** — an occurrence that references a called symbol, attributed via P8). Link them from P8 and from **Occurrence** / **Call attribution**.
+### First-pass items — verified resolved
 
-### [C2] Broken engineering index link — `PUBLIC_API_LIMITATIONS.md` missing
+- **Schema version contradiction (first-pass C1)** — `docs/SCHEMA.md` header, envelope examples, field table, and changelog are aligned on **2.3**. The 2.3 changelog entry includes a **2026-04-09 addendum** for `--with-public-api` as a behavioral option with **no schema change**. This matches `kb/engineering/properties.md` § P1 and `src/metadata.rs` (`SCHEMA_VERSION = "2.3"`).
 
-- **Location**: `kb/engineering/index.md` → “Public API limitations” → `../../docs/PUBLIC_API_LIMITATIONS.md`
-- **Issue**: That path does not exist under `docs/` (only `SCHEMA.md` and `USAGE.md`). The link is dead and the title still suggests a standalone public-API doc, which is easy to misread after the `cargo-public-api` removal.
-- **Recommendation**: Update `engineering/index.md` to point at `docs/SCHEMA.md` (e.g. § “Limitations: `is-public-api`”) or restore/rename a short limitations doc aligned with the SCIP module walk. Remove the broken path.
+- **P11 vs optional `cargo-public-api` (first-pass C2)** — `properties.md` § P11 now documents the **default** SCIP module-chain walk (no extra tools) and the **optional** `--with-public-api` override (RQN matching, non-fatal fallback via P17). `glossary.md` **is-public-api** matches. No remaining contradiction between KB and shipped behavior for this feature.
+
+---
 
 ## Warnings
 
-### [W1] `is-public` described imprecisely in SCHEMA vs P10
+_(None.)_
 
-- **Location**: `docs/SCHEMA.md` (field reference for `is-public`); `kb/engineering/properties.md` § P10
-- **Issue**: SCHEMA says “`true` if the function is declared `pub`”, which readers may interpret as any `pub` qualifier (e.g. `pub(crate)`). P10 restricts to signature starting with `pub` where the next character is not `(`, excluding restricted visibility forms.
-- **Recommendation**: Align SCHEMA wording with P10 (unrestricted / “plain” `pub` vs `pub(restricted)`), or add a single sentence pointing to the exact rule in the KB.
+### First-pass warnings — verified resolved
 
-### [W2] P11 mixes “absent” and “null” for external stubs
+| First-pass ID | Resolution |
+|----------------|------------|
+| W1 Architecture | Extract pipeline step 7, source map, component boundary “Public API override”, external tools row, and data-flow node for `cargo public-api` are present in `architecture.md`. |
+| W2 Missing invariant | **P17** documents public-API override non-fatal behavior (analogous to P15). |
+| W3 Glossary gaps | **blanket impl**, **cargo-public-api**, and updated **is-public-api** are defined. |
+| W4 P14 | P14 documents `public-api.txt` cache and `--regenerate-scip` coupling. |
+| W5 USAGE intro | External tools intro states two **required** tools and optional enrichment. |
+| W6 `main.rs` help | `--auto-install` documents `cargo-public-api` and nightly when `--with-public-api`. |
+| W7 Stale reports | Superseded by this second-pass report set. |
+| I1 “With all options” | Example includes `--with-public-api`. |
+| I2 KB `last-updated` | `properties.md`, `architecture.md`, and `glossary.md` show **2026-04-09**. |
 
-- **Location**: `kb/engineering/properties.md` § P11; `docs/SCHEMA.md` (external stubs + field reference)
-- **Issue**: P11’s table uses “absent (`null`)” for stubs. SCHEMA describes omitted fields for stubs. In JSON these are different representations; downstream guidance should pick one or explicitly state “omitted or null” only if both are valid.
-- **Recommendation**: Match the serialized form (`serde` typically omits `Option::None`) in P11 and point to SCHEMA; remove “null” if the wire format never emits it.
-
-### [W3] Vague toolchain requirement for Charon
-
-- **Location**: `kb/engineering/architecture.md` § “Charon (optional, external)”
-- **Issue**: Phrase “nightly toolchain compatible with Charon’s upstream requirements” does not specify how to verify compatibility (pinned version, repo link, or probe-rust flag docs).
-- **Recommendation**: Replace with a concrete pointer (e.g. Charon install doc URL or “same nightly as `charon --version` in CI”) or defer to `USAGE.md` with a link.
-
-### [W4] Missing cross-references — `is-public-api` limitations
-
-- **Location**: `kb/engineering/properties.md` § P11–P12; `kb/engineering/architecture.md` extract pipeline
-- **Issue**: `docs/SCHEMA.md` documents re-export and trait-impl heuristic limitations for `is-public-api`. The KB properties state the happy-path rule but do not link to those limitations, so readers may treat P11 as complete.
-- **Recommendation**: Add a short note under P11 (or a “See also”) linking to `docs/SCHEMA.md` § “Limitations: `is-public-api`”.
-
-### [W5] Property coverage gap — `dependencies-with-locations`
-
-- **Location**: `docs/SCHEMA.md` § `probe-rust/extract`; `kb/engineering/properties.md` (P1–P16)
-- **Issue**: SCHEMA defines `dependencies-with-locations` and `--with-locations`; no invariant names sorting, presence rules, or determinism for that structure.
-- **Recommendation**: Add a small property (or extend P5) for location-augmented output: ordering, required fields, and when the array is present.
-
-### [W6] Stale auditor outputs under `kb/reports/`
-
-- **Location**: `kb/reports/quality-report.md`, `kb/reports/test-report.md`
-- **Issue**: Reports still reference `src/public_api.rs`, `cargo public-api`, three-way `is-public-api`, and `enrich_atoms_with_public_api`, which conflict with the current SCIP module walk and deleted module. They read as current truth but are outdated relative to P11/P12 and `architecture.md`.
-- **Recommendation**: Regenerate reports after updating `.cursor/rules/auditors/*.md`, or archive/delete stale reports with a note until re-run.
-
-### [W7] Stale `.cursor` auditor rules contradict the KB
-
-- **Location**: `.cursor/rules/auditors/code-quality-auditor.md` (P6, P11); `.cursor/rules/auditors/test-quality-auditor.md` (test paths)
-- **Issue**: Code-quality auditor asks to verify `normalize_code_name` is used in the main pipeline; `properties.md` P6 states it is **not** called there. It still describes P11 as “three-way” / `enrich_atoms_with_public_api`. Test-quality auditor lists `src/public_api.rs` as a test location.
-- **Recommendation**: Update auditor markdown to match P6, P11 (binary SCIP classification + P12), and actual test modules so future audits do not reintroduce wrong expectations.
+---
 
 ## Info
 
-### [I1] Changelog dates cluster on one day
+### [I1] Root KB index `last-updated` lags engineering files
 
-- **Location**: `docs/SCHEMA.md` changelog (2.2 and 2.3 both `2026-04-07`)
-- **Issue**: Historically accurate or not, same-day minor bumps can confuse readers about ordering.
-- **Recommendation**: If 2.2 shipped earlier, use its real date; otherwise a one-line note that both landed in the same release train is enough.
+- **Location**: `kb/index.md` (`2026-04-07`) vs `kb/engineering/*.md` (`2026-04-09`)
+- **Note**: Not a contradiction in content; only the top-level KB stamp is older. Bump when convenient for navigational consistency.
 
-### [I2] `code-path` only implied, not glossed
+### [I2] Illustrative `tool.version` strings still differ across docs
 
-- **Location**: `kb/engineering/properties.md` P4; `kb/engineering/glossary.md` (**External stub**)
-- **Issue**: Non-stub atoms’ `code-path` semantics (relative path rules) are not defined in the glossary; only the empty stub case is mentioned.
-- **Recommendation**: Optional one-line glossary entry or a pointer to SCHEMA field reference.
+- **Location**: `docs/SCHEMA.md` (`0.4.0` in the envelope example), `docs/USAGE.md` (`0.3.0`), `Cargo.toml` (`0.5.0`)
+- **Note**: Examples are non-normative; readers comparing to an installed binary may still be momentarily confused. Optional cleanup: placeholder or sync on release.
 
-### [I3] “Module visibility map” / module-chain walk unnamed in glossary
+### [I3] `USAGE.md` missing-tool wording vs full-run non-fatal
 
-- **Location**: `kb/engineering/architecture.md` (pipeline, data flow); `kb/engineering/glossary.md` (**is-public-api**)
-- **Issue**: Architecture names `module_visibility` / “module chain” as a pipeline artifact; glossary explains outcome on atoms but not the named internal map/concept.
-- **Recommendation**: Add **Module visibility map** (or alias) under **is-public-api** or as its own entry, linking to P11 and SCHEMA limitations.
+- **Location**: `docs/USAGE.md` § cargo-public-api (opt-in): “override step will **fail** with an actionable error message” when nightly/tool missing without `--auto-install`
+- **Note**: Behavior matches **P17** (extract completes; SCIP values kept). The word “fail” applies to the override step, not the process exit code. For parity with the Charon subsection, an explicit “extraction still completes” clause would remove any ambiguity.
 
-### [I4] `kb/index.md` status still “draft”
+---
 
-- **Location**: `kb/index.md` front matter
-- **Issue**: KB content is detailed and referenced as source of truth; “draft” may understate maturity for external readers.
-- **Recommendation**: Bump status when the team agrees the KB is stable, or clarify what “draft” means (e.g. reports subdirectory only).
+## Distinction: properties “Known issues” C1–C3
+
+`kb/engineering/properties.md` § **Known issues** C1–C3 are **long-standing** call-attribution / disambiguation limitations (P8/P9). They are **not** the first-pass ambiguity-report C1/C2 (schema / P11), which are **resolved** as above.

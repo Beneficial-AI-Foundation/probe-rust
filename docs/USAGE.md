@@ -57,8 +57,9 @@ probe-rust extract <PROJECT_PATH> [OPTIONS]
 | `--regenerate-scip` | | Force regeneration of the SCIP index, even if a cached version exists in `<project>/data/`. Useful after code changes. |
 | `--with-locations` | | Include a `dependencies-with-locations` array in each atom, recording the source line of every call site. |
 | `--allow-duplicates` | | Continue when duplicate `code_name` keys are detected. The first occurrence is kept and later duplicates are dropped. Without this flag, duplicates cause an error. |
-| `--auto-install` | | Automatically download missing external tools. Downloads `scip` from GitHub releases. When combined with `--with-charon`, also builds `charon` from source. Tools are installed to `~/.probe-rust/tools/`. |
+| `--auto-install` | | Automatically download missing external tools. Downloads `scip` from GitHub releases. When combined with `--with-charon`, also builds `charon` from source. When combined with `--with-public-api`, installs `cargo-public-api` and nightly toolchain. Tools are installed to `~/.probe-rust/tools/`. |
 | `--with-charon` | | Run Charon to enrich atoms with Aeneas-compatible `rust-qualified-name` and `is-public` fields. Only needed for projects integrating with Aeneas. Requires `charon` to be installed or `--auto-install` to be set. |
+| `--with-public-api` | | Override `is-public-api` using `cargo-public-api` output matched via `rust-qualified-name` (RQN). Provides ground-truth public API surface from `rustdoc`, ensuring cross-tool alignment with probe-verus and probe-aeneas. Requires nightly toolchain and `cargo-public-api` (use `--auto-install` to install both automatically). When not set, the default SCIP module-chain visibility walk is used. |
 
 ### Examples
 
@@ -77,13 +78,20 @@ probe-rust extract ./my-rust-project \
   --with-locations \
   --allow-duplicates \
   --auto-install \
-  --with-charon
+  --with-charon \
+  --with-public-api
 ```
 
 **With Charon enrichment (for Aeneas projects):**
 
 ```bash
 probe-rust extract ./my-aeneas-project --with-charon --auto-install
+```
+
+**With cargo-public-api override (for cross-tool alignment):**
+
+```bash
+probe-rust extract ./my-library --with-public-api --auto-install
 ```
 
 **Analyze a workspace member directly:**
@@ -292,7 +300,8 @@ The `extract` command produces a JSON file wrapped in a Schema 2.0 metadata enve
 | `kind` | Always `"exec"` for standard Rust functions. |
 | `language` | Always `"rust"`. |
 | `rust-qualified-name` | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used and Charon enrichment succeeds, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name is used. |
-| `is-public` | (Only with `--with-charon`) `true` if the function is declared `pub`. This is item-level visibility from Charon LLBC, not crate-level API reachability. |
+| `is-public` | `true` if the function is declared `pub`. Derived from SCIP signature visibility; when `--with-charon` is used, the Charon-derived value takes precedence. Always present for internal atoms; absent for external stubs. |
+| `is-public-api` | `true` if the function is reachable from the crate root (public module chain). Derived from SCIP module-chain visibility walk by default. When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name`. |
 
 ### External Stubs
 
@@ -300,7 +309,7 @@ Functions called but defined outside the analyzed project (e.g. from dependencie
 
 ## External Tools
 
-probe-rust depends on two external tools to generate its input data:
+The default extract pipeline requires two external tools. Optional enrichment steps add additional tool dependencies:
 
 ### scip
 
@@ -337,6 +346,19 @@ rustup component add rust-analyzer
 3. Clone and build from source if `--auto-install` is also passed
 
 If Charon is not found and `--auto-install` is not set, the enrichment step will fail with an actionable error message. If Charon runs but encounters an error, extraction continues with heuristic-based qualified names.
+
+### cargo-public-api (opt-in)
+
+[cargo-public-api](https://github.com/cargo-public-api/cargo-public-api) lists a crate's public API surface by running `rustdoc`. Activated with the `--with-public-api` flag. Requires a nightly Rust toolchain.
+
+**Resolution order (when `--with-public-api` is passed):**
+
+1. `cargo public-api` on `$PATH`
+2. Install via `cargo install cargo-public-api` if `--auto-install` is also passed
+
+If `cargo-public-api` or a nightly toolchain is not found and `--auto-install` is not set, the override step will fail with an actionable error message. If `cargo public-api` runs but encounters an error, extraction continues with SCIP-walk-derived `is-public-api` values.
+
+The `cargo public-api` output is cached in `<project>/data/public-api.txt`. Use `--regenerate-scip` to force regeneration.
 
 ## SCIP Caching
 

@@ -1,6 +1,6 @@
 # Properties and Invariants
 
-- **last-updated**: 2026-04-07
+- **last-updated**: 2026-04-09
 
 Every property here must hold in the implementation. If a property is violated, it is a bug in the code, not in the KB — unless a deliberate decision changes the KB first.
 
@@ -90,7 +90,7 @@ Charon can override this value when `--with-charon` is used.
 
 ### P11 — is-public-api from SCIP module walk
 
-`is-public-api` is binary (`true` / `false`) for all internal atoms. Derived from SCIP data at call-graph build time — no external tools required.
+**Default (no flags):** `is-public-api` is binary (`true` / `false`) for all internal atoms. Derived from SCIP data at call-graph build time — no external tools required.
 
 | Value | Meaning |
 |-------|---------|
@@ -98,7 +98,9 @@ Charon can override this value when `--with-charon` is used.
 | `false` | Not public API: function is non-public, or at least one ancestor module is non-public |
 | absent (`null`) | External stubs only (no code-path to analyze) |
 
-**Where**: `lib.rs` (`build_module_visibility_map`, `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`).
+**Optional override (`--with-public-api`):** When the flag is set, `is-public-api` is overridden for all atoms that have a `rust-qualified-name` (RQN). The RQN is looked up in the set of qualified names parsed from `cargo public-api -sss` output. Atoms without an RQN (external stubs) are unaffected. On failure (missing tools, nightly, or `cargo public-api` error), the override is skipped and SCIP-walk values are preserved (non-fatal, see [P17](#p17--public-api-override-non-fatal)).
+
+**Where**: `lib.rs` (`build_module_visibility_map`, `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`), `public_api.rs` (`enrich_atoms_with_public_api`), `commands/extract.rs` (`enrich_with_public_api`).
 
 ### P12 — Binary crate detection
 
@@ -118,7 +120,9 @@ Output paths under `.verilib/probes/` are constructed from package name and vers
 
 Generated SCIP data (`index.scip`, `index.scip.json`) is cached in `<project>/data/`. The `--regenerate-scip` flag forces re-generation. Stale cache does not cause incorrect output — it causes stale output.
 
-**Where**: `scip_cache.rs`, `commands/extract.rs`.
+When `--with-public-api` is used, the `cargo public-api` output is also cached in `<project>/data/public-api.txt`. The `--regenerate-scip` flag also forces regeneration of this cache.
+
+**Where**: `scip_cache.rs`, `public_api.rs` (`collect_public_api`, `PUBLIC_API_CACHE_FILE`), `commands/extract.rs`.
 
 ### P15 — Charon non-fatal
 
@@ -138,6 +142,12 @@ Generated SCIP data (`index.scip`, `index.scip.json`) is cached in `<project>/da
 Lifetime prefixes (`&'a`) and backtick quoting are stripped from the extracted type name.
 
 **Where**: `lib.rs` (`enrich_display_name`, `extract_bracket_type`).
+
+### P17 — Public-API override non-fatal
+
+`--with-public-api` failure (missing nightly toolchain, missing `cargo-public-api`, or `cargo public-api` execution error) produces a warning and preserves the SCIP-walk-derived `is-public-api` values. It never aborts the extract pipeline. Analogous to [P15](#p15--charon-non-fatal) for Charon.
+
+**Where**: `commands/extract.rs` (`enrich_with_public_api`), `public_api.rs` (`ensure_nightly_toolchain`, `ensure_cargo_public_api`, `collect_public_api`).
 
 ---
 
