@@ -343,10 +343,7 @@ fn enrich_with_public_api(
 
             let (set_true, set_false) =
                 public_api::enrich_atoms_with_public_api(atoms_dict, &public_names);
-            println!(
-                "  ✓ is-public-api: {} true, {} false",
-                set_true, set_false
-            );
+            println!("  ✓ is-public-api: {} true, {} false", set_true, set_false);
         }
         Err(e) => {
             eprintln!("  ⚠ cargo-public-api failed: {e}");
