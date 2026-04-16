@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-16
+
+### Fixed
+- **`setup` now installs rust-analyzer**: `probe-rust setup` previously only
+  checked whether rust-analyzer was present and emitted a warning if missing.
+  It now runs `rustup component add rust-analyzer` directly. This fixes
+  Docker and CI environments where setup completed "successfully" but
+  rust-analyzer was never installed, causing `extract` to fail with
+  `Unknown binary 'rust-analyzer'`.
+- **`--auto-install` installs rust-analyzer**: `resolve_or_install` now handles
+  `Tool::RustAnalyzer` the same way it handles scip and charon — installing
+  via rustup when the tool is missing and `--auto-install` is set.
+
 ## [0.6.0] - 2026-04-09
 
 ### Added
@@ -125,7 +138,8 @@ Initial release.
 - CI pipeline with formatting, clippy, and unit test checks.
 - Release automation via cargo-dist for Linux, macOS, and Windows binaries.
 
-[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.3.0...v0.4.0

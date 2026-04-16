@@ -10,10 +10,9 @@ Install or check status of external tools (rust-analyzer, scip).
 probe-rust setup [--status]
 ```
 
-Downloads scip into `~/.probe-rust/tools/` if not already present. Checks
-whether rust-analyzer is available and prints installation instructions if
-missing (rust-analyzer must be installed via `rustup component add
-rust-analyzer`).
+Downloads scip into `~/.probe-rust/tools/` if not already present. Installs
+rust-analyzer via `rustup component add rust-analyzer` if not already
+available.
 
 **Options:**
 
@@ -32,8 +31,8 @@ probe-rust setup --status
 ```
 
 Running `setup` is recommended before first use, especially in CI or Docker
-environments. Alternatively, `extract --auto-install` will download scip on
-the fly if missing.
+environments. Alternatively, `extract --auto-install` will install missing
+tools (scip, rust-analyzer, charon) on the fly.
 
 ---
 
@@ -57,7 +56,7 @@ probe-rust extract <PROJECT_PATH> [OPTIONS]
 | `--regenerate-scip` | | Force regeneration of the SCIP index, even if a cached version exists in `<project>/data/`. Useful after code changes. |
 | `--with-locations` | | Include a `dependencies-with-locations` array in each atom, recording the source line of every call site. |
 | `--allow-duplicates` | | Continue when duplicate `code_name` keys are detected. The first occurrence is kept and later duplicates are dropped. Without this flag, duplicates cause an error. |
-| `--auto-install` | | Automatically download missing external tools. Downloads `scip` from GitHub releases. When combined with `--with-charon`, also builds `charon` from source. When combined with `--with-public-api`, installs `cargo-public-api` and nightly toolchain. Tools are installed to `~/.probe-rust/tools/`. |
+| `--auto-install` | | Automatically install missing external tools. Downloads `scip` from GitHub releases; installs `rust-analyzer` via `rustup component add`. When combined with `--with-charon`, also builds `charon` from source. When combined with `--with-public-api`, installs `cargo-public-api` and nightly toolchain. Tools are installed to `~/.probe-rust/tools/`. |
 | `--with-charon` | | Run Charon to enrich atoms with Aeneas-compatible `rust-qualified-name` and `is-public` fields. Only needed for projects integrating with Aeneas. Requires `charon` to be installed or `--auto-install` to be set. |
 | `--with-public-api` | | Override `is-public-api` using `cargo-public-api` output matched via `rust-qualified-name` (RQN). Provides ground-truth public API surface from `rustdoc`, ensuring cross-tool alignment with probe-verus and probe-aeneas. Requires nightly toolchain and `cargo-public-api` (use `--auto-install` to install both automatically). When not set, the default SCIP module-chain visibility walk is used. |
 
@@ -329,7 +328,9 @@ The [scip](https://github.com/sourcegraph/scip) CLI converts `rust-analyzer` out
 
 ### rust-analyzer
 
-Must be installed separately. The recommended approach:
+Installed automatically by `probe-rust setup` or when `--auto-install` is
+passed. Uses `rustup component add rust-analyzer`. Can also be installed
+manually:
 
 ```bash
 rustup component add rust-analyzer

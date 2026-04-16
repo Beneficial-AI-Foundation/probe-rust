@@ -253,6 +253,10 @@ pub fn resolve_tool(tool: Tool) -> Result<PathBuf, ToolError> {
 pub fn resolve_or_install(tool: Tool, auto_install: bool) -> Result<PathBuf, ToolError> {
     match resolve_tool(tool) {
         Ok(p) => Ok(p),
+        Err(ToolError::NotInstalled(_)) if auto_install && tool == Tool::RustAnalyzer => {
+            install_rust_analyzer().map_err(|e| ToolError::DownloadFailed(tool, e))?;
+            resolve_tool(tool)
+        }
         Err(ToolError::NotInstalled(_)) if auto_install && tool == Tool::Scip => {
             eprintln!("{tool} not found, downloading...");
             download_scip()?;
@@ -399,6 +403,40 @@ fn hex_sha256(data: &[u8]) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// rust-analyzer (via rustup)
+// ---------------------------------------------------------------------------
+
+/// Install rust-analyzer via `rustup component add rust-analyzer`.
+fn install_rust_analyzer() -> Result<(), String> {
+    eprintln!("Installing rust-analyzer via rustup...");
+    let output = Command::new("rustup")
+        .args(["component", "add", "rust-analyzer"])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|e| format!("Failed to run rustup: {e}"))?;
+
+    if !output.status.success() {
+        return Err(
+            "rust-analyzer: rustup component add failed. Install it manually with:\n  \
+             rustup component add rust-analyzer"
+                .to_string(),
+        );
+    }
+
+    match resolve_tool(Tool::RustAnalyzer) {
+        Ok(p) => {
+            eprintln!("  ✓ rust-analyzer installed at {}", p.display());
+            Ok(())
+        }
+        Err(_) => Err(
+            "rust-analyzer: rustup component add succeeded but binary not found on PATH"
+                .to_string(),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Build from source (charon)
 // ---------------------------------------------------------------------------
 
@@ -531,8 +569,8 @@ pub fn print_status() {
 /// Install all managed tools. Returns `(errors, warnings)`.
 ///
 /// - **scip**: downloaded if not already present. Failure → error.
-/// - **rust-analyzer**: checked only (must be installed via rustup).
-///   Missing → warning with install instructions.
+/// - **rust-analyzer**: installed via `rustup component add` if missing.
+///   Failure → warning (rustup may not be available in all environments).
 pub fn install_all() -> (Vec<String>, Vec<String>) {
     let mut errors: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
@@ -547,16 +585,13 @@ pub fn install_all() -> (Vec<String>, Vec<String>) {
         }
     }
 
-    // rust-analyzer (check only)
+    // rust-analyzer
     match resolve_tool(Tool::RustAnalyzer) {
         Ok(p) => eprintln!("rust-analyzer: available at {}", p.display()),
-        Err(_) => {
-            warnings.push(
-                "rust-analyzer not found. Install it with:\n  \
-                 rustup component add rust-analyzer"
-                    .to_string(),
-            );
-        }
+        Err(_) => match install_rust_analyzer() {
+            Ok(()) => {}
+            Err(e) => warnings.push(e),
+        },
     }
 
     (errors, warnings)
