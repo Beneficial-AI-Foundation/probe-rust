@@ -368,57 +368,40 @@ fn make_unique_key(
     }
 }
 
-/// Derive a Rust-style qualified name from the code-path (file) and SCIP symbol.
+/// Derive a Rust-style qualified name from the SCIP symbol and display name.
 ///
-/// When `pkg_name` is provided it is used as the crate prefix for bare `src/`
-/// paths (i.e. SCIP indexes generated from within a single crate rather than a
-/// workspace root).
+/// The SCIP symbol carries the authoritative module chain — including inline
+/// `mod` segments (e.g. `tests/`) that the filesystem path alone can't reveal.
+/// Using the file path here instead would collapse `crate::tests::foo` and
+/// `crate::foo` to the same RQN, which breaks downstream RQN-keyed matching.
 #[must_use]
-pub fn derive_rust_qualified_name(
-    code_path: &str,
-    display_name: &str,
-    pkg_name: Option<&str>,
-) -> Option<String> {
-    if code_path.is_empty() {
+pub fn derive_rust_qualified_name(scip_symbol: &str, display_name: &str) -> Option<String> {
+    // SCIP symbol shape: "rust-analyzer cargo <crate> <ver> <chain>".
+    let s = scip_symbol.strip_prefix(SCIP_SYMBOL_PREFIX)?;
+    let parts: Vec<&str> = s.splitn(3, ' ').collect();
+    if parts.len() < 3 {
         return None;
     }
+    let crate_part = parts[0];
+    let chain = parts[2];
+    let chain = chain.strip_suffix('.').unwrap_or(chain);
+    let chain = chain.strip_suffix("()").unwrap_or(chain);
 
-    // SCIP relative paths come in two forms:
-    //   1. "crate-name/src/lib.rs" (multi-crate workspace or external dep)
-    //   2. "src/lib.rs" (single crate, rust-analyzer default)
-    let (crate_name, file_path) = if let Some(pos) = code_path.find("/src/") {
-        let crate_part = &code_path[..pos];
-        let crate_name = crate_part
-            .rsplit('/')
-            .next()
-            .unwrap_or(crate_part)
-            .replace('-', "_");
-        (crate_name, &code_path[pos + 5..])
-    } else if let Some(rest) = code_path.strip_prefix("src/") {
-        let crate_name = pkg_name
-            .filter(|n| !n.is_empty())
-            .map(|n| n.replace('-', "_"))
-            .unwrap_or_default();
-        (crate_name, rest)
-    } else {
-        return None;
+    // Everything before the last '/' is the module chain; the last segment is
+    // the function name (or `Type#method` for impls) and is dropped because
+    // `display_name` has already been enriched to `Type::method` by callers.
+    let module_path = match chain.rfind('/') {
+        Some(idx) => chain[..idx].replace('/', "::"),
+        None => String::new(),
     };
 
-    let module_path = file_path
-        .trim_end_matches(".rs")
-        .trim_end_matches("/mod")
-        .replace('/', "::");
+    let crate_name = crate_part.replace('-', "_");
 
-    if crate_name.is_empty() {
-        if module_path.is_empty() || module_path == "lib" {
-            Some(display_name.to_string())
-        } else {
-            Some(format!("{}::{}", module_path, display_name))
-        }
-    } else if module_path.is_empty() || module_path == "lib" {
-        Some(format!("{}::{}", crate_name, display_name))
-    } else {
-        Some(format!("{}::{}::{}", crate_name, module_path, display_name))
+    match (crate_name.is_empty(), module_path.is_empty()) {
+        (true, true) => Some(display_name.to_string()),
+        (true, false) => Some(format!("{}::{}", module_path, display_name)),
+        (false, true) => Some(format!("{}::{}", crate_name, display_name)),
+        (false, false) => Some(format!("{}::{}::{}", crate_name, module_path, display_name)),
     }
 }
 
@@ -1030,7 +1013,6 @@ pub fn convert_to_atoms_with_parsed_spans(
     symbol_to_display_name: &HashMap<String, String>,
     project_root: &Path,
     with_locations: bool,
-    pkg_name: Option<&str>,
     module_visibility: &HashMap<String, bool>,
     is_library: bool,
 ) -> Vec<AtomWithLines> {
@@ -1048,7 +1030,6 @@ pub fn convert_to_atoms_with_parsed_spans(
         symbol_to_display_name,
         Some(&span_map),
         with_locations,
-        pkg_name,
         module_visibility,
         is_library,
     )
@@ -1060,7 +1041,6 @@ fn convert_to_atoms_with_lines_internal(
     symbol_to_display_name: &HashMap<String, String>,
     span_map: Option<&HashMap<(String, String, usize), rust_parser::SpanInfo>>,
     with_locations: bool,
-    pkg_name: Option<&str>,
     _module_visibility: &HashMap<String, bool>,
     _is_library: bool,
 ) -> Vec<AtomWithLines> {
@@ -1346,11 +1326,7 @@ fn convert_to_atoms_with_lines_internal(
                 .sort_by(|a, b| a.line.cmp(&b.line).then(a.code_name.cmp(&b.code_name)));
 
             let code_module = extract_code_module(&code_name);
-            let rqn = derive_rust_qualified_name(
-                &data.node.relative_path,
-                &data.node.display_name,
-                pkg_name,
-            );
+            let rqn = derive_rust_qualified_name(&data.node.symbol, &data.node.display_name);
             let sig_public = is_signature_public(&data.node.signature_text);
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
@@ -1599,9 +1575,8 @@ mod tests {
     #[test]
     fn test_derive_rust_qualified_name_method() {
         let rqn = derive_rust_qualified_name(
-            "curve25519-dalek/src/backend/serial/u64/field.rs",
+            "rust-analyzer cargo curve25519-dalek 4.0.0 backend/serial/u64/field/FieldElement51#reduce().",
             "FieldElement51::reduce",
-            None,
         );
         assert_eq!(
             rqn.unwrap(),
@@ -1611,53 +1586,59 @@ mod tests {
 
     #[test]
     fn test_derive_rust_qualified_name_lib_root() {
-        let rqn = derive_rust_qualified_name("my-crate/src/lib.rs", "init", None);
+        let rqn = derive_rust_qualified_name("rust-analyzer cargo my-crate 0.1.0 init().", "init");
         assert_eq!(rqn.unwrap(), "my_crate::init");
     }
 
     #[test]
-    fn test_derive_rust_qualified_name_bare_src_prefix() {
-        let rqn = derive_rust_qualified_name("src/lib.rs", "init", None);
-        assert_eq!(rqn.unwrap(), "init");
-    }
-
-    #[test]
-    fn test_derive_rust_qualified_name_bare_src_with_pkg_name() {
-        let rqn = derive_rust_qualified_name("src/lib.rs", "init", Some("curve25519-dalek"));
-        assert_eq!(rqn.unwrap(), "curve25519_dalek::init");
-    }
-
-    #[test]
-    fn test_derive_rust_qualified_name_bare_src_nested() {
-        let rqn = derive_rust_qualified_name("src/commands/extract.rs", "cmd_extract", None);
-        assert_eq!(rqn.unwrap(), "commands::extract::cmd_extract");
-    }
-
-    #[test]
-    fn test_derive_rust_qualified_name_bare_src_nested_with_pkg_name() {
+    fn test_derive_rust_qualified_name_submodule_file() {
         let rqn = derive_rust_qualified_name(
-            "src/commands/extract.rs",
+            "rust-analyzer cargo probe-rust 0.1.0 commands/extract/cmd_extract().",
             "cmd_extract",
-            Some("probe-rust"),
         );
         assert_eq!(rqn.unwrap(), "probe_rust::commands::extract::cmd_extract");
     }
 
+    /// Regression: `#[test] fn foo()` inside `mod tests` must keep the `tests::`
+    /// segment in its RQN, or it collapses to the same RQN as an outer free
+    /// `fn foo()`, breaking probe-aeneas's RQN-keyed matching.
     #[test]
-    fn test_derive_rust_qualified_name_no_src() {
-        assert!(derive_rust_qualified_name("some/path/file.rs", "foo", None).is_none());
+    fn test_derive_rust_qualified_name_inline_tests_module() {
+        let outer =
+            derive_rust_qualified_name("rust-analyzer cargo my-crate 0.1.0 my_fn().", "my_fn");
+        let test = derive_rust_qualified_name(
+            "rust-analyzer cargo my-crate 0.1.0 tests/my_fn().",
+            "my_fn",
+        );
+        assert_eq!(outer.unwrap(), "my_crate::my_fn");
+        assert_eq!(test.unwrap(), "my_crate::tests::my_fn");
+    }
+
+    /// Inline submodules inside a file must also be preserved (the SCIP chain
+    /// is the authoritative source, not the filesystem path).
+    #[test]
+    fn test_derive_rust_qualified_name_inline_submodule() {
+        let rqn = derive_rust_qualified_name(
+            "rust-analyzer cargo my-crate 0.1.0 foo/inner/bar().",
+            "bar",
+        );
+        assert_eq!(rqn.unwrap(), "my_crate::foo::inner::bar");
+    }
+
+    #[test]
+    fn test_derive_rust_qualified_name_missing_prefix() {
+        assert!(derive_rust_qualified_name("not-a-scip-symbol foo()", "foo").is_none());
     }
 
     #[test]
     fn test_derive_rust_qualified_name_empty() {
-        assert!(derive_rust_qualified_name("", "foo", None).is_none());
+        assert!(derive_rust_qualified_name("", "foo").is_none());
     }
 
     #[test]
-    fn test_derive_rust_qualified_name_pkg_name_ignored_when_crate_in_path() {
-        let rqn =
-            derive_rust_qualified_name("curve25519-dalek/src/lib.rs", "init", Some("other-crate"));
-        assert_eq!(rqn.unwrap(), "curve25519_dalek::init");
+    fn test_derive_rust_qualified_name_malformed_too_few_segments() {
+        // Only "<crate> <ver>" after the prefix, no chain segment.
+        assert!(derive_rust_qualified_name("rust-analyzer cargo crate 0.1.0", "foo").is_none());
     }
 
     #[test]
@@ -1903,7 +1884,6 @@ mod tests {
                 &display_names,
                 None,
                 false,
-                None,
                 &module_vis,
                 true,
             );

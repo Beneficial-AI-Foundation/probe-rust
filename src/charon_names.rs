@@ -310,16 +310,51 @@ fn make_match_key_from_charon(qualified_name: &str, crate_name: &str) -> String 
     strip_impl_blocks(without_crate)
 }
 
-/// From an atom's `code_path` and `display_name`, produce a match key
-/// like `scalar::from_bytes_mod_order`.
-fn make_match_key_from_atom(code_path: &str, display_name: &str) -> String {
-    let module = module_from_code_path(code_path);
+/// Produce a match key like `scalar::from_bytes_mod_order` for an atom.
+///
+/// When `rust_qualified_name` is available we derive the module path from it
+/// directly — it carries inline `mod tests` / nested `mod inner` segments that
+/// the filesystem path alone doesn't reveal. Without that, a `#[test] fn mul()`
+/// inside `mod test` collapses to the same key as a `Scalar52::mul` impl method
+/// in the same file, and the test atom silently inherits Charon's RQN for the
+/// real method. Falls back to the filesystem path when RQN is absent.
+fn make_match_key_from_atom(
+    rust_qualified_name: Option<&str>,
+    code_path: &str,
+    display_name: &str,
+) -> String {
     let bare_fn = bare_function_name(display_name);
 
+    if let Some(rqn) = rust_qualified_name {
+        if let Some(module) = module_from_rqn(rqn, display_name) {
+            return if module.is_empty() {
+                bare_fn.to_string()
+            } else {
+                format!("{module}::{bare_fn}")
+            };
+        }
+    }
+
+    let module = module_from_code_path(code_path);
     if module.is_empty() || module == "lib" {
         bare_fn.to_string()
     } else {
         format!("{module}::{bare_fn}")
+    }
+}
+
+/// Extract the module path from a Rust-qualified name by stripping the crate
+/// prefix and the trailing `::<display_name>` suffix.
+///
+/// Returns `None` when the RQN doesn't end in `display_name` (indicating the
+/// caller should fall back to another derivation strategy).
+fn module_from_rqn(rqn: &str, display_name: &str) -> Option<String> {
+    let without_name = rqn
+        .strip_suffix(display_name)
+        .and_then(|s| s.strip_suffix("::"))?;
+    match without_name.split_once("::") {
+        Some((_crate, module)) => Some(module.to_string()),
+        None => Some(String::new()),
     }
 }
 
@@ -670,7 +705,11 @@ pub fn enrich_atoms_with_charon_names(
             continue;
         }
 
-        let match_key = make_match_key_from_atom(&atom.code_path, &atom.display_name);
+        let match_key = make_match_key_from_atom(
+            atom.rust_qualified_name.as_deref(),
+            &atom.code_path,
+            &atom.display_name,
+        );
 
         let candidates = charon_map.get(&match_key).or_else(|| {
             let module_key =
@@ -764,22 +803,83 @@ mod tests {
     }
 
     #[test]
-    fn test_make_match_key_from_atom() {
+    fn test_make_match_key_from_atom_fallback_path_based() {
+        // Without an RQN, fall back to the filesystem-path-derived module.
         assert_eq!(
-            make_match_key_from_atom("src/scalar.rs", "Scalar::from_bytes_mod_order"),
+            make_match_key_from_atom(None, "src/scalar.rs", "Scalar::from_bytes_mod_order"),
             "scalar::from_bytes_mod_order"
         );
         assert_eq!(
-            make_match_key_from_atom("src/backend.rs", "get_selected_backend"),
+            make_match_key_from_atom(None, "src/backend.rs", "get_selected_backend"),
             "backend::get_selected_backend"
         );
         assert_eq!(
             make_match_key_from_atom(
+                None,
                 "curve25519-dalek/src/backend/serial/u64/field.rs",
                 "FieldElement51::reduce"
             ),
             "backend::serial::u64::field::reduce"
         );
+    }
+
+    #[test]
+    fn test_make_match_key_from_atom_rqn_based() {
+        // Impl method: RQN module strips the trailing "Type::method" suffix.
+        assert_eq!(
+            make_match_key_from_atom(
+                Some("curve25519_dalek::backend::serial::u64::field::FieldElement51::reduce"),
+                "curve25519-dalek/src/backend/serial/u64/field.rs",
+                "FieldElement51::reduce",
+            ),
+            "backend::serial::u64::field::reduce"
+        );
+        // Free fn in submodule.
+        assert_eq!(
+            make_match_key_from_atom(Some("my_crate::foo::bar"), "src/foo.rs", "bar",),
+            "foo::bar"
+        );
+        // Free fn at crate root.
+        assert_eq!(
+            make_match_key_from_atom(Some("my_crate::init"), "src/lib.rs", "init",),
+            "init"
+        );
+    }
+
+    /// Regression: a `#[test] fn mul()` inside `mod test` and a `Scalar52::mul`
+    /// impl in the same file must produce distinct match keys. Otherwise the
+    /// test atom silently inherits Charon's RQN for the real impl method,
+    /// re-creating the RQN collision that breaks probe-aeneas's matching.
+    #[test]
+    fn test_make_match_key_from_atom_inline_test_module_distinct_from_impl() {
+        let impl_key = make_match_key_from_atom(
+            Some("curve25519_dalek::backend::serial::u64::scalar::Scalar52::mul"),
+            "curve25519-dalek/src/backend/serial/u64/scalar.rs",
+            "Scalar52::mul",
+        );
+        let test_key = make_match_key_from_atom(
+            Some("curve25519_dalek::backend::serial::u64::scalar::test::mul"),
+            "curve25519-dalek/src/backend/serial/u64/scalar.rs",
+            "mul",
+        );
+        assert_eq!(impl_key, "backend::serial::u64::scalar::mul");
+        assert_eq!(test_key, "backend::serial::u64::scalar::test::mul");
+        assert_ne!(impl_key, test_key);
+    }
+
+    #[test]
+    fn test_module_from_rqn() {
+        assert_eq!(
+            module_from_rqn("c::foo::bar", "bar").as_deref(),
+            Some("foo")
+        );
+        assert_eq!(
+            module_from_rqn("c::foo::Type::method", "Type::method").as_deref(),
+            Some("foo")
+        );
+        assert_eq!(module_from_rqn("c::my_fn", "my_fn").as_deref(), Some(""));
+        // Mismatch between RQN suffix and display_name → None (caller falls back).
+        assert!(module_from_rqn("c::foo::bar", "baz").is_none());
     }
 
     #[test]
