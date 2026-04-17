@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-04-16
+
+### Fixed
+- **`rust-qualified-name` now reflects the SCIP module chain**: the RQN was
+  previously reconstructed from the filesystem path + bare display name, which
+  dropped inline module segments (`mod tests`, nested `mod inner {}`). A
+  `#[test] fn foo()` inside `mod tests` collided with a free `fn foo()` in the
+  same file — both got `crate::foo` instead of `crate::tests::foo` vs
+  `crate::foo`. This broke probe-aeneas's RQN-keyed translation matching:
+  the test atom could inherit the verified function's `is-disabled: false`
+  status, and disambiguation could route the Lean translation to the wrong
+  atom, leaving the verified function rendered as unverified.
+  `derive_rust_qualified_name` now parses the module chain from the SCIP
+  symbol, which is the authoritative source.
+- **Charon enrichment no longer collides tests with impl methods**:
+  `charon_names` built its lookup key from `(file-derived module, bare
+  display_name)`, so a `#[test] fn mul()` in `mod test` and a `Scalar52::mul`
+  method in the same file shared a match key — the test atom silently
+  inherited Charon's RQN for the real impl method, re-creating the same
+  collision at a different layer. The key now uses the atom's SCIP-derived
+  RQN, which keeps the `::test::` segment and produces a distinct key.
+
 ## [0.6.1] - 2026-04-16
 
 ### Fixed
@@ -138,7 +160,8 @@ Initial release.
 - CI pipeline with formatting, clippy, and unit test checks.
 - Release automation via cargo-dist for Linux, macOS, and Windows binaries.
 
-[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.4.0...v0.5.0

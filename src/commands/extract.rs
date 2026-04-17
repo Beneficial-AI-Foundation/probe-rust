@@ -54,7 +54,6 @@ pub fn cmd_extract(
         &symbol_to_display_name,
         &project_path,
         with_locations,
-        Some(&metadata.pkg_name),
         &module_visibility,
         is_library,
     );
