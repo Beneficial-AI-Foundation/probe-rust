@@ -1,6 +1,6 @@
 # Glossary
 
-- **last-updated**: 2026-04-09
+- **last-updated**: 2026-04-18
 
 Every domain term used in the KB must be defined here. Terms are listed alphabetically.
 
@@ -54,13 +54,19 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **Library crate** — A Cargo package that has a `[lib]` target. Functions in library crates can be public API; [binary-only crates](#binary-only-crate) always have `is-public-api: false`. See [P12](properties.md).
 
+**Match key** — A normalized string used to correlate [Charon](#charon) LLBC function entries with SCIP-derived [atoms](#atom). Built as `module::bare_function_name`. From the atom side: module derived from `code_path` or `code_module`, bare function name from `display_name`. From the Charon side: strip the first `::` segment (always the crate name, which may differ from `translated.crate_name` for dependency crates included via `--include`) and remove `{...}` impl blocks. When multiple Charon candidates share the same match key, [span disambiguation](#span-disambiguation) selects the best one. See `charon_names.rs`.
+
+**Multi-crate LLBC** — A [Charon](#charon) LLBC file that contains functions from more than one crate. Produced when Charon is invoked with `--include` to pull in dependency crate functions alongside the target crate. The LLBC's `translated.crate_name` reflects only the target crate; included dependency functions have qualified names prefixed by their own crate name. [Match key](#match-key) construction handles this by stripping the first path segment unconditionally rather than matching against `crate_name`.
+
 **Occurrence** — A SCIP data element representing a reference to or definition of a symbol at a specific source location. Has `range`, `symbol`, and `symbol_roles` fields.
 
 **Probe URI** — See [Code-name](#code-name).
 
 **Ralph Loop** — The development quality loop: implement, audit (three auditor skills), fix, repeat until clean, then run tests. See [kb/index.md](../index.md).
 
-**RQN (Rust Qualified Name)** — The `rust-qualified-name` field on [atoms](#atom). A `::` separated path like `crate_name::module::Type::method`. Derived heuristically from file path + [display name](#display-name), or precisely from [Charon](#charon) LLBC when `--with-charon` is used.
+**RQN (Rust Qualified Name)** — The `rust-qualified-name` field on [atoms](#atom). A `::` separated path like `crate_name::module::{Type}::method`. Derived heuristically from file path + [display name](#display-name), or precisely from [Charon](#charon) LLBC when `--with-charon` is used. The heuristic form uses bare `Type::method`; the Charon form includes `{Type}::method` with nested impl segments and may have the crate prefix from any crate in a [multi-crate LLBC](#multi-crate-llbc). Matching between Charon RQNs and atoms uses a normalized [match key](#match-key), not raw string equality.
+
+**Span disambiguation** — When multiple [Charon](#charon) candidates share the same [match key](#match-key), the candidate whose LLBC span best overlaps the [atom's](#atom) source line range is selected. For multi-line Charon spans, overlap is `min(atom_end, c_end) - max(atom_start, c_start)`. For single-line spans (`line_start == line_end`, common for dependency crates in [multi-crate LLBCs](#multi-crate-llbc)), a containment check is used instead: the span must fall within `[atom_start, atom_end]`. See `charon_names.rs` (`disambiguate_by_span`).
 
 **SCIP document** — A document entry in the [SCIP](#scip-source-code-intelligence-protocol) index, corresponding to a single source file. Contains [occurrences](#occurrence) and [symbol](#scip-source-code-intelligence-protocol) definitions. Each document has its own occurrence stream walked during [call attribution](#call-attribution).
 

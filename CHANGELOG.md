@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-04-18
+
+### Fixed
+- **Charon enrichment now works for multi-crate LLBCs** (issue #7):
+  `make_match_key_from_charon` stripped only the target crate prefix from
+  qualified names. Functions from dependency crates included via Charon's
+  `--include` flag retained their full crate-qualified name as the match key
+  and never matched any atom. The function now strips the first `::` segment
+  unconditionally, which is always the crate name regardless of which crate
+  the function belongs to.
+- **Span disambiguation handles single-line Charon spans** (issue #8):
+  `disambiguate_by_span` used an overlap formula that always yields zero when
+  `line_start == line_end` (a single-line span pointing at the function
+  signature). This is common for dependency crates in multi-crate LLBCs —
+  89% of spans in the libsignal-verify LLBC are single-line. The function
+  now uses a containment check for single-line spans: if the line falls
+  within the atom's body range, overlap is 1. This increased enrichment from
+  95 to 116 atoms and exact translations from 12/21 to 17/21 on
+  libsignal-verify.
+
 ## [0.6.2] - 2026-04-16
 
 ### Fixed

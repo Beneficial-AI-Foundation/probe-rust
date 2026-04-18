@@ -1,6 +1,6 @@
 # Architecture
 
-- **last-updated**: 2026-04-09
+- **last-updated**: 2026-04-18
 
 ## Overview
 
@@ -81,6 +81,8 @@ Refines function body end lines. SCIP only gives the definition location (functi
 ### Charon (optional, external)
 
 Provides precise Rust qualified names and item visibility via LLBC analysis. Failure is non-fatal ([P15](../engineering/properties.md#p15--charon-non-fatal)). Requires a nightly toolchain compatible with Charon's upstream requirements.
+
+Supports multi-crate LLBCs: when the LLBC contains functions from dependency crates (via Charon's `--include` flag), enrichment handles qualified names whose crate prefix differs from `translated.crate_name` by stripping the first `::` segment unconditionally. Span disambiguation handles single-line Charon spans (common for included dependencies) via containment check.
 
 **Files**: `charon_cache.rs`, `charon_names.rs`
 

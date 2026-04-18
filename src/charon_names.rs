@@ -17,7 +17,9 @@
 //! We match by building a lookup key `(module_suffix, bare_function_name)`:
 //! - From the atom: `code_path = "src/scalar.rs"` -> module `scalar`,
 //!   `display_name = "Scalar::from_bytes_mod_order"` -> bare fn `from_bytes_mod_order`.
-//! - From the Charon name: strip crate prefix and `{...}` blocks to get the
+//! - From the Charon name: strip the first `::` segment (always the crate
+//!   name, which may differ from `translated.crate_name` for dependency
+//!   crates pulled in via `--include`) and `{...}` impl blocks to get the
 //!   same `scalar::from_bytes_mod_order` key.
 
 use std::collections::HashMap;
@@ -301,11 +303,15 @@ fn build_trait_impl_type_info_map(
 /// `curve25519_dalek::scalar::{impl core::clone::Clone}::clone`,
 /// produce a match key `scalar::clone` by stripping the crate prefix
 /// and all `{...}` segments.
-fn make_match_key_from_charon(qualified_name: &str, crate_name: &str) -> String {
-    let without_crate = qualified_name
-        .strip_prefix(crate_name)
-        .and_then(|s| s.strip_prefix("::"))
-        .unwrap_or(qualified_name);
+///
+/// Strips the first `::` segment unconditionally (always the crate name)
+/// so that included dependency crates (via `--include`) are handled
+/// identically to the target crate.
+fn make_match_key_from_charon(qualified_name: &str, _crate_name: &str) -> String {
+    let without_crate = match qualified_name.find("::") {
+        Some(idx) => &qualified_name[idx + 2..],
+        None => qualified_name,
+    };
 
     strip_impl_blocks(without_crate)
 }
@@ -609,8 +615,19 @@ fn normalize_source_path(p: &str) -> &str {
     }
 }
 
-/// Pick the Charon candidate whose span best matches the atom's location.
-/// Returns `None` if no candidate has a positive line overlap.
+/// Pick the Charon candidate whose span best overlaps the atom's line range.
+///
+/// For **multi-line** Charon spans (`line_start < line_end`) the overlap is
+/// `min(atom_end, c_end) - max(atom_start, c_start)`; the candidate with the
+/// largest positive value wins.
+///
+/// For **single-line** spans (`line_start == line_end`) -- common when Charon
+/// reports only the function signature line, especially for dependency crates
+/// pulled in via `--include` -- the standard formula always yields zero.
+/// Instead we use a containment check: if the single line falls within
+/// `[atom_start, atom_end]` the overlap is 1; otherwise 0.
+///
+/// Returns `None` if no candidate has a positive overlap.
 fn disambiguate_by_span<'a>(
     candidates: &'a [CharonFunInfo],
     atom_file: &str,
@@ -636,8 +653,15 @@ fn disambiguate_by_span<'a>(
             (Some(s), Some(e)) if s > 0 => (s, e),
             _ => continue,
         };
-        let overlap =
-            std::cmp::min(atom_end, c_end) as i64 - std::cmp::max(atom_start, c_start) as i64;
+        let overlap = if c_start == c_end {
+            if c_start >= atom_start && c_start <= atom_end {
+                1
+            } else {
+                0
+            }
+        } else {
+            std::cmp::min(atom_end, c_end) as i64 - std::cmp::max(atom_start, c_start) as i64
+        };
         if overlap > best_overlap {
             best_overlap = overlap;
             best = Some(c);
@@ -800,6 +824,33 @@ mod tests {
             ),
             "backend::get_selected_backend"
         );
+
+        // Multi-crate LLBC: included dependency crate (crate_name differs from
+        // the function's actual crate prefix).
+        assert_eq!(
+            make_match_key_from_charon(
+                "libsignal_core::address::{ServiceId}::parse_from_service_id_binary",
+                "signal_crypto"
+            ),
+            "address::parse_from_service_id_binary"
+        );
+        assert_eq!(
+            make_match_key_from_charon("libsignal_core::address::try_scoped", "signal_crypto"),
+            "address::try_scoped"
+        );
+        assert_eq!(
+            make_match_key_from_charon("other_crate::module::{impl Trait}::method", "target_crate"),
+            "module::method"
+        );
+
+        // Edge case: bare name with no `::` (no crate prefix to strip).
+        assert_eq!(
+            make_match_key_from_charon("standalone_fn", "some_crate"),
+            "standalone_fn"
+        );
+
+        // Edge case: empty string input.
+        assert_eq!(make_match_key_from_charon("", "some_crate"), "");
     }
 
     #[test]
@@ -1241,6 +1292,88 @@ mod tests {
     }
 
     #[test]
+    fn test_enrich_span_disambiguation_single_line_charon_span() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_span_disambig_single");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Two Charon candidates share the same match key (module::do_stuff)
+        // but have different single-line spans (line_start == line_end).
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Impl": [[], [], null]}, {"Ident": ["do_stuff", 0]}]},
+                    {"key": {"Fun": 1}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Impl": [[], [], null]}, {"Ident": ["do_stuff", 1]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 10, "col": 0}, "end": {"line": 10, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    },
+                    {
+                        "def_id": 1,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 50, "col": 0}, "end": {"line": 50, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": false}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/module.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        // Atom whose body range [50, 60] contains only the second candidate (line 50).
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/module/do_stuff()".to_string(),
+            crate::AtomWithLines {
+                display_name: "do_stuff".to_string(),
+                code_name: "probe:my-crate/1.0/module/do_stuff()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "module".to_string(),
+                code_path: "src/module.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 50,
+                    lines_end: 60,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 1, "single-line span should still allow enrichment");
+
+        let atom = atoms.get("probe:my-crate/1.0/module/do_stuff()").unwrap();
+        assert_eq!(
+            atom.is_public,
+            Some(false),
+            "should pick the candidate at line 50 (private), not line 10 (public)"
+        );
+        assert!(
+            atom.rust_qualified_name
+                .as_ref()
+                .is_some_and(|rqn| rqn.contains("do_stuff")),
+            "atom should be enriched with a rust-qualified-name containing do_stuff"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn test_enrich_skips_stubs_preserves_none() {
         use std::collections::BTreeMap;
 
@@ -1391,6 +1524,127 @@ mod tests {
             "should get the full Charon qualified name including parent fn"
         );
         assert_eq!(atom.is_public, Some(false));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Integration test for multi-crate LLBC enrichment (GitHub issue #7).
+    /// The LLBC has `crate_name = "target_crate"` but contains a function
+    /// from an included dependency crate (`dep_crate`).  The enrichment must
+    /// match it to the corresponding atom despite the prefix mismatch.
+    #[test]
+    fn test_enrich_multi_crate_llbc_included_dependency() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_multi_crate_enrich");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "target_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [
+                        {"Ident": ["target_crate", 0]},
+                        {"Ident": ["module_a", 0]},
+                        {"Ident": ["do_stuff", 0]}
+                    ]},
+                    {"key": {"Fun": 1}, "value": [
+                        {"Ident": ["dep_crate", 0]},
+                        {"Ident": ["module_b", 0]},
+                        {"Ident": ["helper", 0]}
+                    ]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 5, "col": 0}, "end": {"line": 15, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    },
+                    {
+                        "def_id": 1,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 1, "beg": {"line": 10, "col": 0}, "end": {"line": 20, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [
+                    {"name": {"Local": "src/module_a.rs"}},
+                    {"name": {"Local": "dep/src/module_b.rs"}}
+                ]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:target-crate/1.0/module_a/do_stuff()".to_string(),
+            crate::AtomWithLines {
+                display_name: "do_stuff".to_string(),
+                code_name: "probe:target-crate/1.0/module_a/do_stuff()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "module_a".to_string(),
+                code_path: "src/module_a.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 5,
+                    lines_end: 15,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+        atoms.insert(
+            "probe:dep-crate/0.1/module_b/helper()".to_string(),
+            crate::AtomWithLines {
+                display_name: "helper".to_string(),
+                code_name: "probe:dep-crate/0.1/module_b/helper()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "module_b".to_string(),
+                code_path: "dep/src/module_b.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 10,
+                    lines_end: 20,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(
+            count, 2,
+            "both target-crate and dep-crate atoms should be enriched"
+        );
+
+        let target_atom = atoms
+            .get("probe:target-crate/1.0/module_a/do_stuff()")
+            .unwrap();
+        assert_eq!(
+            target_atom.rust_qualified_name.as_deref(),
+            Some("target_crate::module_a::do_stuff")
+        );
+        assert_eq!(target_atom.is_public, Some(true));
+
+        let dep_atom = atoms.get("probe:dep-crate/0.1/module_b/helper()").unwrap();
+        assert_eq!(
+            dep_atom.rust_qualified_name.as_deref(),
+            Some("dep_crate::module_b::helper")
+        );
+        assert_eq!(dep_atom.is_public, Some(true));
 
         std::fs::remove_dir_all(&dir).ok();
     }
