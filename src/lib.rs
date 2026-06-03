@@ -79,7 +79,6 @@ pub struct Document {
     pub occurrences: Vec<Occurrence>,
     #[serde(default)]
     pub symbols: Vec<Symbol>,
-    pub position_encoding: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -106,7 +105,6 @@ pub struct Symbol {
 pub struct SignatureDocumentation {
     pub language: String,
     pub text: String,
-    pub position_encoding: i32,
 }
 
 // =============================================================================
@@ -1687,7 +1685,6 @@ mod tests {
             signature_documentation: SignatureDocumentation {
                 language: "rust".into(),
                 text: signature.into(),
-                position_encoding: 0,
             },
             enclosing_symbol: None,
         }
@@ -1734,7 +1731,6 @@ mod tests {
                     // const_sym is NOT function-like, so no Symbol entry with function kind
                     make_symbol(target_sym, SCIP_KIND_FUNCTION, "target", "fn target()"),
                 ],
-                position_encoding: 0,
             }],
         };
 
@@ -1784,7 +1780,6 @@ mod tests {
                     make_symbol(fn_a_sym, SCIP_KIND_FUNCTION, "fn_a", "fn fn_a()"),
                     make_symbol(target_sym, SCIP_KIND_FUNCTION, "target", "fn target()"),
                 ],
-                position_encoding: 0,
             }],
         };
 
@@ -1852,7 +1847,6 @@ mod tests {
                     make_symbol(method_sym, SCIP_KIND_METHOD, "mul", "fn mul()"),
                     make_symbol(caller_sym, SCIP_KIND_FUNCTION, "caller", "fn caller()"),
                 ],
-                position_encoding: 0,
             }],
         };
 
@@ -2013,7 +2007,6 @@ mod tests {
             signature_documentation: SignatureDocumentation {
                 language: "rust".to_string(),
                 text: sig.to_string(),
-                position_encoding: 0,
             },
             enclosing_symbol: None,
         }
@@ -2034,7 +2027,6 @@ mod tests {
                 relative_path: "src/lib.rs".to_string(),
                 symbols: modules,
                 occurrences: vec![],
-                position_encoding: 0,
             }],
         }
     }

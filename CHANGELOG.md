@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-06-03
+
+### Fixed
+- Remove unused `position_encoding` field from SCIP `Document` and `SignatureDocumentation` structs; newer `scip` CLI versions (>= v0.7) omit this field from JSON output, causing SCIP parsing to fail with "missing field `position_encoding`"
+
 ## [0.6.3] - 2026-04-18
 
 ### Fixed
