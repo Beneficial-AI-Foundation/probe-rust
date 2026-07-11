@@ -68,21 +68,26 @@ pub struct SpanInfo {
     pub cfg: Option<String>,
 }
 
-/// Extract the predicate of the first item-gating `#[cfg(...)]` attribute as a
-/// string (e.g. `feature = "alloc"`, `not(test)`).
+/// Extract the predicates of **all** item-gating `#[cfg(...)]` attributes on an
+/// item, in source order (e.g. `["feature = \"alloc\"", "not(test)"]`).
 ///
+/// Multiple `#[cfg]` attributes on the same item are conjunctive — the item is
+/// compiled only if every one holds — so callers combine them with `all(...)`.
 /// Only true `#[cfg(...)]` is item-gating. `#[cfg_attr(...)]` conditionally adds
 /// a *doc/derive/allow* attribute but always compiles the item, so it is
 /// deliberately ignored — it is not a scope gate.
-fn cfg_predicate_of(attrs: &[syn::Attribute]) -> Option<String> {
-    for attr in attrs {
-        if attr.path().is_ident("cfg") {
-            if let syn::Meta::List(list) = &attr.meta {
-                return Some(list.tokens.to_string());
+fn cfg_predicates_of(attrs: &[syn::Attribute]) -> Vec<String> {
+    attrs
+        .iter()
+        .filter_map(|attr| {
+            if attr.path().is_ident("cfg") {
+                if let syn::Meta::List(list) = &attr.meta {
+                    return Some(list.tokens.to_string());
+                }
             }
-        }
-    }
-    None
+            None
+        })
+        .collect()
 }
 
 /// Combine several cfg predicates into one with `all(...)`. `None` when empty.
@@ -111,26 +116,22 @@ impl FunctionSpanVisitor {
     }
 
     /// Combined predicate for a function with the given `attrs`: enclosing gates
-    /// (the stack) plus the function's own `#[cfg(...)]`, if any.
+    /// (the stack) plus all of the function's own `#[cfg(...)]` attributes.
     fn combined_cfg(&self, attrs: &[syn::Attribute]) -> Option<String> {
         let mut parts = self.cfg_stack.clone();
-        if let Some(own) = cfg_predicate_of(attrs) {
-            parts.push(own);
-        }
+        parts.extend(cfg_predicates_of(attrs));
         combine_cfg_predicates(&parts)
     }
 
-    /// Run `f` with `attrs`'s `#[cfg]` (if any) pushed onto the enclosing-gate
-    /// stack, restoring it afterwards. Used for `mod`/`impl`/`trait` blocks.
+    /// Run `f` with all of `attrs`'s `#[cfg]` predicates pushed onto the
+    /// enclosing-gate stack, restoring it afterwards. Used for `mod`/`impl`/
+    /// `trait` blocks, which may themselves carry multiple `#[cfg]` attributes.
     fn with_enclosing_cfg(&mut self, attrs: &[syn::Attribute], f: impl FnOnce(&mut Self)) {
-        let pushed = cfg_predicate_of(attrs);
-        if let Some(p) = &pushed {
-            self.cfg_stack.push(p.clone());
-        }
+        let pushed = cfg_predicates_of(attrs);
+        let n = pushed.len();
+        self.cfg_stack.extend(pushed);
         f(self);
-        if pushed.is_some() {
-            self.cfg_stack.pop();
-        }
+        self.cfg_stack.truncate(self.cfg_stack.len() - n);
     }
 }
 
@@ -606,6 +607,10 @@ fn gated_free() {{}}
 
 fn plain_free() {{}}
 
+#[cfg(unix)]
+#[cfg(feature = "std")]
+fn gated_multi() {{}}
+
 #[cfg(test)]
 mod tests_mod {{
     #[cfg(feature = "serde")]
@@ -627,6 +632,11 @@ mod tests_mod {{
         );
         // No gate anywhere.
         assert_eq!(by("plain_free").cfg, None);
+        // Multiple `#[cfg]` on one item are conjunctive → `all(...)`.
+        assert_eq!(
+            by("gated_multi").cfg.as_deref(),
+            Some(r#"all(unix, feature = "std")"#)
+        );
         // Enclosing mod + impl gates combined with `all(...)`, outermost first.
         assert_eq!(
             by("nested").cfg.as_deref(),
