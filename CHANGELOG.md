@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-11
+
+### Fixed
+- **Charon single-candidate resolution now validates file/span before accepting** ([#14](https://github.com/Beneficial-AI-Foundation/probe-rust/issues/14)): a lone Charon candidate is accepted only when its source file matches the atom's `code-path` and its span overlaps the atom's line range, preventing cross-file (`subtle::{impl}::from` → every bare-`from` atom) and same-file `#[derive]` (`eq` at the derive line) RQN mis-assignments. Candidates with no usable file/span (compiler-generated / macro items, including a real file with `line == 0`) still fall back to acceptance.
+
+### CI
+- **Auto-tag pushes with `RELEASE_PAT`** ([#12](https://github.com/Beneficial-AI-Foundation/probe-rust/issues/12)): tags pushed by the default `GITHUB_TOKEN` don't trigger the tag-driven Release workflow, so `v0.7.0` was tagged but never released. The `auto-tag` job now pushes the tag with a dedicated `RELEASE_PAT` (no `GITHUB_TOKEN` fallback), matching probe-aeneas / probe-verus.
+
 ## [0.7.0] - 2026-07-11
 
 ### Added
