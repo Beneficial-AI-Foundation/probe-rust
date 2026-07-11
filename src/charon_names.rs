@@ -701,7 +701,12 @@ fn resolve_charon_candidate<'a>(
             if norm_c != norm_a {
                 return None;
             }
-            if atom.code_text.lines_start > 0 {
+            // Compare spans only when both the atom and the candidate carry
+            // usable line numbers. A candidate line of 0 means "no usable span"
+            // (matching `disambiguate_by_span`'s `s > 0` convention), so fall
+            // back to accepting on the file-path match alone rather than
+            // rejecting a span-less compiler-generated item.
+            if atom.code_text.lines_start > 0 && cs > 0 && ce > 0 {
                 let overlaps = if cs == ce {
                     cs >= atom.code_text.lines_start && cs <= atom.code_text.lines_end
                 } else {
@@ -2091,6 +2096,87 @@ mod tests {
                 .as_ref()
                 .is_some_and(|rqn| rqn.contains("fmt")),
             "atom should be enriched when candidate has no span to validate against"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_resolve_single_candidate_real_file_zero_lines_accepted() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_single_real_file_zero_lines");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Charon reports a real, matching file path but no usable span (lines 0),
+        // as happens for some compiler-generated / macro items. The `0` lines
+        // must be treated as "no span" (like disambiguate_by_span's `s > 0`),
+        // so the candidate is accepted on the file-path match alone.
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [
+                        {"Ident": ["my_crate", 0]},
+                        {"Ident": ["error", 0]},
+                        {"Impl": [[], [], null]},
+                        {"Ident": ["fmt", 0]}
+                    ]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 0, "col": 0}, "end": {"line": 0, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/error.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/error/SomeError_fmt()".to_string(),
+            crate::AtomWithLines {
+                display_name: "SomeError::fmt".to_string(),
+                code_name: "probe:my-crate/1.0/error/SomeError_fmt()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "error".to_string(),
+                code_path: "src/error.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 69,
+                    lines_end: 82,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                cfg: None,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(
+            count, 1,
+            "matching file with zero (unusable) span lines should still enrich"
+        );
+
+        let atom = atoms
+            .get("probe:my-crate/1.0/error/SomeError_fmt()")
+            .unwrap();
+        assert!(
+            atom.rust_qualified_name
+                .as_ref()
+                .is_some_and(|rqn| rqn.contains("fmt")),
+            "span-less candidate in the matching file should be accepted (file-path fallback)"
         );
 
         std::fs::remove_dir_all(&dir).ok();
