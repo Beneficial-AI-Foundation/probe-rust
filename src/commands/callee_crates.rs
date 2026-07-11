@@ -270,6 +270,7 @@ mod tests {
             language: "rust".to_string(),
             rust_qualified_name: None,
             is_disabled: false,
+            cfg: None,
             is_public: None,
             is_public_api: None,
         }
