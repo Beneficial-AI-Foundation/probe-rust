@@ -137,6 +137,7 @@ standardized metadata envelope:
     "language": "rust",
     "rust-qualified-name": "my_crate::module::MyStruct::method",
     "is-disabled": false,
+    "cfg": "feature = \"alloc\"",
     "is-public": true,
     "is-public-api": true
   }
@@ -156,7 +157,8 @@ standardized metadata envelope:
 | `kind` | DeclKind | yes | Always `"exec"` for standard Rust |
 | `language` | string | yes | Always `"rust"` |
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name. |
-| `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions they did not process. |
+| `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions that are out of scope. |
+| `cfg` | string | no | The combined item-gating `#[cfg(...)]` predicate governing the function — its own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-joined (e.g. `all(test, feature = "serde")`). Cosmetic `#[cfg_attr(...)]` is ignored. Omitted when the function has no `#[cfg]` gate. Downstream tools evaluate it against the build config to decide whether the function is compiled (and hence in scope). |
 | `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used, the Charon-derived value takes precedence. This is item-level visibility, not crate-level API reachability. |
 | `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. By default derived from SCIP module-chain visibility walk (no external tools required). When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name` (RQN). See **Limitations** below. |
 

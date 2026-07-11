@@ -679,11 +679,41 @@ fn disambiguate_by_span<'a>(
 /// disambiguation and heuristic RQN matching as tiebreakers.
 ///
 /// Returns the best `CharonFunInfo` or `None` if resolution fails.
+///
+/// For single candidates: validates file-path match and span overlap before
+/// accepting. This prevents two mis-assignment patterns:
+/// 1. Cross-file collisions (e.g. `subtle::{impl}::from` assigned to every
+///    `lib.rs` atom whose match key is bare `from`).
+/// 2. Same-file derive collisions (e.g. a `#[derive]` at L16 producing an
+///    `eq` candidate that gets assigned to unrelated manual impls).
 fn resolve_charon_candidate<'a>(
     candidates: &'a [CharonFunInfo],
     atom: &crate::AtomWithLines,
 ) -> Option<&'a CharonFunInfo> {
     if candidates.len() == 1 {
+        let c = &candidates[0];
+        if let (Some(f), Some(cs), Some(ce)) = (c.file_path.as_deref(), c.line_start, c.line_end) {
+            if f.is_empty() {
+                return Some(&candidates[0]);
+            }
+            let norm_c = normalize_source_path(f);
+            let norm_a = normalize_source_path(&atom.code_path);
+            if norm_c != norm_a {
+                return None;
+            }
+            if atom.code_text.lines_start > 0 {
+                let overlaps = if cs == ce {
+                    cs >= atom.code_text.lines_start && cs <= atom.code_text.lines_end
+                } else {
+                    std::cmp::min(atom.code_text.lines_end, ce) as i64
+                        - std::cmp::max(atom.code_text.lines_start, cs) as i64
+                        > 0
+                };
+                if !overlaps {
+                    return None;
+                }
+            }
+        }
         return Some(&candidates[0]);
     }
     let norm_atom_path = normalize_source_path(&atom.code_path);
@@ -1200,6 +1230,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1273,6 +1304,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1349,6 +1381,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1410,6 +1443,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1504,6 +1538,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: Some("my_crate::ristretto::step_2".to_string()),
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1598,6 +1633,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1619,6 +1655,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1666,6 +1703,7 @@ mod tests {
             language: "rust".to_string(),
             rust_qualified_name: None,
             is_disabled: false,
+            cfg: None,
             is_public: Some(true),
             is_public_api: None,
         };
@@ -1698,6 +1736,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             }
@@ -1735,6 +1774,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: Some("crate::mod::foo".to_string()),
                 is_disabled: false,
+                cfg: None,
                 is_public: Some(true),
                 is_public_api: None,
             },
@@ -1751,5 +1791,308 @@ mod tests {
             Some("crate::mod::foo"),
             "heuristic RQN should be preserved on Charon failure"
         );
+    }
+
+    #[test]
+    fn test_resolve_single_candidate_cross_file_rejected() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_single_cross_file");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // One Charon candidate for match key "from", located in a dependency crate file.
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [
+                        {"Ident": ["subtle", 0]},
+                        {"Impl": [[], [], null]},
+                        {"Ident": ["from", 0]}
+                    ]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 153, "col": 0}, "end": {"line": 153, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "/cargo/registry/src/subtle-2.6.1/src/lib.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        // Atom in a completely different file with match key "from" (bare).
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:device-transfer/0.1.0/impl<u8>#[KeyFormat]from()".to_string(),
+            crate::AtomWithLines {
+                display_name: "KeyFormat::from".to_string(),
+                code_name: "probe:device-transfer/0.1.0/impl<u8>#[KeyFormat]from()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "".to_string(),
+                code_path: "rust/device-transfer/src/lib.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 49,
+                    lines_end: 54,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                cfg: None,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 0, "cross-file single candidate should be rejected");
+
+        let atom = atoms
+            .get("probe:device-transfer/0.1.0/impl<u8>#[KeyFormat]from()")
+            .unwrap();
+        assert!(
+            atom.rust_qualified_name.is_none(),
+            "atom should not be enriched from a candidate in a different file"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_resolve_single_candidate_same_file_span_mismatch_rejected() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_single_span_mismatch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Single Charon candidate: derive macro at L16 in address.rs producing "eq".
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [
+                        {"Ident": ["my_crate", 0]},
+                        {"Ident": ["address", 0]},
+                        {"Impl": [[], [], null]},
+                        {"Ident": ["eq", 0]}
+                    ]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 16, "col": 0}, "end": {"line": 16, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/address.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        // Atom at L329-L340 (manual PartialEq impl), same file but non-overlapping.
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/address/ServiceId_eq()".to_string(),
+            crate::AtomWithLines {
+                display_name: "ServiceId::eq".to_string(),
+                code_name: "probe:my-crate/1.0/address/ServiceId_eq()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "address".to_string(),
+                code_path: "src/address.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 329,
+                    lines_end: 340,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                cfg: None,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(
+            count, 0,
+            "same-file but non-overlapping single candidate should be rejected"
+        );
+
+        let atom = atoms
+            .get("probe:my-crate/1.0/address/ServiceId_eq()")
+            .unwrap();
+        assert!(
+            atom.rust_qualified_name.is_none(),
+            "atom should not be enriched from a derive macro at a distant line"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_resolve_single_candidate_same_file_span_match() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_single_span_match");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Single Charon candidate with a span that overlaps the atom.
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [
+                        {"Ident": ["my_crate", 0]},
+                        {"Ident": ["address", 0]},
+                        {"Impl": [[], [], null]},
+                        {"Ident": ["from_uuid", 0]}
+                    ]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 100, "col": 0}, "end": {"line": 110, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/address.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/address/from_uuid()".to_string(),
+            crate::AtomWithLines {
+                display_name: "SpecificServiceId::from_uuid".to_string(),
+                code_name: "probe:my-crate/1.0/address/from_uuid()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "address".to_string(),
+                code_path: "src/address.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 98,
+                    lines_end: 112,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                cfg: None,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 1, "overlapping single candidate should enrich");
+
+        let atom = atoms.get("probe:my-crate/1.0/address/from_uuid()").unwrap();
+        assert!(
+            atom.rust_qualified_name
+                .as_ref()
+                .is_some_and(|rqn| rqn.contains("from_uuid")),
+            "atom should be enriched with the matching candidate"
+        );
+        assert_eq!(atom.is_public, Some(true));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_resolve_single_candidate_no_span_preserved() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_single_no_span");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Charon candidate with no usable file/span (file_id points to empty path,
+        // lines are 0). This mimics compiler-generated functions.
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [
+                        {"Ident": ["my_crate", 0]},
+                        {"Ident": ["error", 0]},
+                        {"Impl": [[], [], null]},
+                        {"Ident": ["fmt", 0]}
+                    ]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 0, "col": 0}, "end": {"line": 0, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": false}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Virtual": ""}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/error/SomeError_fmt()".to_string(),
+            crate::AtomWithLines {
+                display_name: "SomeError::fmt".to_string(),
+                code_name: "probe:my-crate/1.0/error/SomeError_fmt()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "error".to_string(),
+                code_path: "src/error.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 69,
+                    lines_end: 82,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                cfg: None,
+                is_public: None,
+                is_public_api: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(
+            count, 1,
+            "candidate with no span data should still enrich (fallback)"
+        );
+
+        let atom = atoms
+            .get("probe:my-crate/1.0/error/SomeError_fmt()")
+            .unwrap();
+        assert!(
+            atom.rust_qualified_name
+                .as_ref()
+                .is_some_and(|rqn| rqn.contains("fmt")),
+            "atom should be enriched when candidate has no span to validate against"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -700,6 +700,7 @@ pub fn my_crate::real_function()
             language: "rust".to_string(),
             rust_qualified_name: rqn.map(|s| s.to_string()),
             is_disabled: false,
+            cfg: None,
             is_public: None,
             is_public_api: None,
         }

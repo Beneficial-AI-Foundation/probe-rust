@@ -19,6 +19,12 @@ pub struct FunctionSpan {
     pub name: String,
     pub start_line: usize,
     pub end_line: usize,
+    /// The combined item-gating `#[cfg(...)]` predicate governing this function
+    /// (own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-
+    /// joined), if any. `None` when the function has no `#[cfg]` gate. Consumers
+    /// evaluate it against the build config to decide whether the function is
+    /// compiled (and hence in verification scope).
+    pub cfg: Option<String>,
 }
 
 // =============================================================================
@@ -54,21 +60,76 @@ pub struct FunctionListOutput {
     pub summary: FunctionListSummary,
 }
 
-/// Span information for a function (simplified: just end_line)
+/// Span information for a function.
 #[derive(Debug, Clone)]
 pub struct SpanInfo {
     pub end_line: usize,
+    /// Combined item-gating `#[cfg(...)]` predicate (see [`FunctionSpan::cfg`]).
+    pub cfg: Option<String>,
+}
+
+/// Extract the predicate of the first item-gating `#[cfg(...)]` attribute as a
+/// string (e.g. `feature = "alloc"`, `not(test)`).
+///
+/// Only true `#[cfg(...)]` is item-gating. `#[cfg_attr(...)]` conditionally adds
+/// a *doc/derive/allow* attribute but always compiles the item, so it is
+/// deliberately ignored — it is not a scope gate.
+fn cfg_predicate_of(attrs: &[syn::Attribute]) -> Option<String> {
+    for attr in attrs {
+        if attr.path().is_ident("cfg") {
+            if let syn::Meta::List(list) = &attr.meta {
+                return Some(list.tokens.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Combine several cfg predicates into one with `all(...)`. `None` when empty.
+fn combine_cfg_predicates(preds: &[String]) -> Option<String> {
+    match preds {
+        [] => None,
+        [single] => Some(single.clone()),
+        many => Some(format!("all({})", many.join(", "))),
+    }
 }
 
 /// Visitor that collects function spans from an AST
 struct FunctionSpanVisitor {
     functions: Vec<FunctionSpan>,
+    /// Stack of `#[cfg(...)]` predicates from enclosing `mod`/`impl`/`trait`
+    /// blocks. A function's effective predicate is `all(stack + own_cfg)`.
+    cfg_stack: Vec<String>,
 }
 
 impl FunctionSpanVisitor {
     fn new() -> Self {
         Self {
             functions: Vec::new(),
+            cfg_stack: Vec::new(),
+        }
+    }
+
+    /// Combined predicate for a function with the given `attrs`: enclosing gates
+    /// (the stack) plus the function's own `#[cfg(...)]`, if any.
+    fn combined_cfg(&self, attrs: &[syn::Attribute]) -> Option<String> {
+        let mut parts = self.cfg_stack.clone();
+        if let Some(own) = cfg_predicate_of(attrs) {
+            parts.push(own);
+        }
+        combine_cfg_predicates(&parts)
+    }
+
+    /// Run `f` with `attrs`'s `#[cfg]` (if any) pushed onto the enclosing-gate
+    /// stack, restoring it afterwards. Used for `mod`/`impl`/`trait` blocks.
+    fn with_enclosing_cfg(&mut self, attrs: &[syn::Attribute], f: impl FnOnce(&mut Self)) {
+        let pushed = cfg_predicate_of(attrs);
+        if let Some(p) = &pushed {
+            self.cfg_stack.push(p.clone());
+        }
+        f(self);
+        if pushed.is_some() {
+            self.cfg_stack.pop();
         }
     }
 }
@@ -79,11 +140,13 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let span = node.span();
         let start_line = span.start().line;
         let end_line = span.end().line;
+        let cfg = self.combined_cfg(&node.attrs);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
+            cfg,
         });
 
         syn::visit::visit_item_fn(self, node);
@@ -94,11 +157,13 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let span = node.span();
         let start_line = span.start().line;
         let end_line = span.end().line;
+        let cfg = self.combined_cfg(&node.attrs);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
+            cfg,
         });
 
         syn::visit::visit_impl_item_fn(self, node);
@@ -109,26 +174,28 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let span = node.span();
         let start_line = span.start().line;
         let end_line = span.end().line;
+        let cfg = self.combined_cfg(&node.attrs);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
+            cfg,
         });
 
         syn::visit::visit_trait_item_fn(self, node);
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        syn::visit::visit_item_impl(self, node);
+        self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_impl(v, node));
     }
 
     fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
-        syn::visit::visit_item_trait(self, node);
+        self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_trait(v, node));
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        syn::visit::visit_item_mod(self, node);
+        self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_mod(v, node));
     }
 
     fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
@@ -432,6 +499,7 @@ pub fn build_function_span_map(
                     key,
                     SpanInfo {
                         end_line: func.end_line,
+                        cfg: func.cfg.clone(),
                     },
                 );
             }
@@ -443,6 +511,37 @@ pub fn build_function_span_map(
 
 use crate::bare_function_name;
 
+/// Look up the parsed [`SpanInfo`] for a function given its path, name, and
+/// SCIP start line. Tries an exact `(path, bare-name, start-line)` key first,
+/// then a containment match (same file + name, SCIP start within the parsed
+/// span). Shared by [`get_function_end_line`] and [`get_function_cfg`].
+fn find_span_info<'a>(
+    span_map: &'a HashMap<(String, String, usize), SpanInfo>,
+    relative_path: &str,
+    function_name: &str,
+    start_line: usize,
+) -> Option<&'a SpanInfo> {
+    let bare_name = bare_function_name(function_name);
+
+    // Try exact match first
+    let key = (relative_path.to_string(), bare_name.to_string(), start_line);
+    if let Some(span_info) = span_map.get(&key) {
+        return Some(span_info);
+    }
+
+    // Try containment match: find a function with the same name in the same file
+    // where the SCIP start_line falls within the parsed span.
+    span_map
+        .iter()
+        .find_map(|((path, name, parsed_start), span_info)| {
+            (path == relative_path
+                && name == bare_name
+                && start_line >= *parsed_start
+                && start_line <= span_info.end_line)
+                .then_some(span_info)
+        })
+}
+
 /// Get the end line for a function given its path, name, and start line.
 pub fn get_function_end_line(
     span_map: &HashMap<(String, String, usize), SpanInfo>,
@@ -450,27 +549,18 @@ pub fn get_function_end_line(
     function_name: &str,
     start_line: usize,
 ) -> Option<usize> {
-    let bare_name = bare_function_name(function_name);
+    find_span_info(span_map, relative_path, function_name, start_line).map(|s| s.end_line)
+}
 
-    // Try exact match first
-    let key = (relative_path.to_string(), bare_name.to_string(), start_line);
-    if let Some(span_info) = span_map.get(&key) {
-        return Some(span_info.end_line);
-    }
-
-    // Try containment match: find a function with the same name in the same file
-    // where the SCIP start_line falls within the parsed span.
-    for ((path, name, parsed_start), span_info) in span_map.iter() {
-        if path == relative_path
-            && name == bare_name
-            && start_line >= *parsed_start
-            && start_line <= span_info.end_line
-        {
-            return Some(span_info.end_line);
-        }
-    }
-
-    None
+/// Get the combined `#[cfg(...)]` predicate for a function given its path, name,
+/// and start line, using the same matching as [`get_function_end_line`].
+pub fn get_function_cfg(
+    span_map: &HashMap<(String, String, usize), SpanInfo>,
+    relative_path: &str,
+    function_name: &str,
+    start_line: usize,
+) -> Option<String> {
+    find_span_info(span_map, relative_path, function_name, start_line).and_then(|s| s.cfg.clone())
 }
 
 #[cfg(test)]
@@ -503,6 +593,45 @@ fn another_function(x: i32) -> i32 {{
 
         assert!(spans[0].end_line >= spans[0].start_line);
         assert!(spans[1].end_line >= spans[1].start_line);
+    }
+
+    #[test]
+    fn test_cfg_predicate_capture() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+#[cfg(feature = "alloc")]
+fn gated_free() {{}}
+
+fn plain_free() {{}}
+
+#[cfg(test)]
+mod tests_mod {{
+    #[cfg(feature = "serde")]
+    impl Foo {{
+        fn nested(&self) {{}}
+    }}
+}}
+"#
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let by = |n: &str| spans.iter().find(|s| s.name == n).unwrap();
+
+        // Own gate only.
+        assert_eq!(
+            by("gated_free").cfg.as_deref(),
+            Some(r#"feature = "alloc""#)
+        );
+        // No gate anywhere.
+        assert_eq!(by("plain_free").cfg, None);
+        // Enclosing mod + impl gates combined with `all(...)`, outermost first.
+        assert_eq!(
+            by("nested").cfg.as_deref(),
+            Some(r#"all(test, feature = "serde")"#)
+        );
     }
 
     #[test]

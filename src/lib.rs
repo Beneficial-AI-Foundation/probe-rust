@@ -323,6 +323,13 @@ pub struct AtomWithLines {
     pub rust_qualified_name: Option<String>,
     #[serde(rename = "is-disabled", default)]
     pub is_disabled: bool,
+    /// Combined item-gating `#[cfg(...)]` predicate governing the function
+    /// (own gate plus enclosing `impl`/`mod`/`trait` gates, `all(...)`-joined),
+    /// if any. Emitted for downstream scope analysis (e.g. probe-aeneas decides
+    /// whether the function is compiled in the Aeneas build). Omitted when the
+    /// function has no `#[cfg]` gate.
+    #[serde(rename = "cfg", skip_serializing_if = "Option::is_none", default)]
+    pub cfg: Option<String>,
     #[serde(rename = "is-public", skip_serializing_if = "Option::is_none", default)]
     pub is_public: Option<bool>,
     #[serde(
@@ -1326,6 +1333,14 @@ fn convert_to_atoms_with_lines_internal(
             let code_module = extract_code_module(&code_name);
             let rqn = derive_rust_qualified_name(&data.node.symbol, &data.node.display_name);
             let sig_public = is_signature_public(&data.node.signature_text);
+            let cfg = span_map.and_then(|map| {
+                rust_parser::get_function_cfg(
+                    map,
+                    &data.node.relative_path,
+                    &data.node.display_name,
+                    data.lines_start,
+                )
+            });
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -1341,6 +1356,7 @@ fn convert_to_atoms_with_lines_internal(
                 language: "rust".to_string(),
                 rust_qualified_name: rqn,
                 is_disabled: false,
+                cfg,
                 is_public: Some(sig_public),
                 is_public_api: None,
             }
@@ -1446,6 +1462,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1554,6 +1571,7 @@ mod tests {
                 language: "rust".to_string(),
                 rust_qualified_name: None,
                 is_disabled: false,
+                cfg: None,
                 is_public: None,
                 is_public_api: None,
             },
@@ -1989,6 +2007,7 @@ mod tests {
             language: "rust".to_string(),
             rust_qualified_name: None,
             is_disabled: false,
+            cfg: None,
             is_public: None,
             is_public_api: None,
         }

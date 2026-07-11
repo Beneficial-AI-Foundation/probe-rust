@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-11
+
+### Added
+- **Per-function `cfg` predicate** in `extract` atom output: the combined item-gating `#[cfg(...)]` predicate governing each function — its own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-joined (e.g. `all(test, feature = "serde")`). Cosmetic `#[cfg_attr(...)]` is ignored. Omitted when a function has no `#[cfg]` gate. Downstream tools (e.g. probe-aeneas) evaluate it against the build config to decide whether a function is compiled and therefore in verification scope. New `cfg` field on `AtomWithLines`; captured by the source-parsing pass (`rust_parser`).
+
 ## [0.6.4] - 2026-06-03
 
 ### Fixed
