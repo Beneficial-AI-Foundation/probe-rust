@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-16
+
+### Added
+- **`charon-def-id` / `charon-version` atom fields** (schema 2.4): the Charon `FunDeclId` and the charon version that produced it, emitted **together or not at all**, so downstream tools (probe-aeneas) can join Rust↔Lean by integer id equality, provenance-gated on the charon version.
+- **`--translation <PATH>` flag** on `extract`: reads `charon-def-id`/`charon-version` directly from an Aeneas `translation.json` (using the `functions[]` `FunDeclId` id-space only) without running charon. Takes precedence over `--with-charon`; `rust-qualified-name` and `is-public` stay SCIP-derived. Introduces a source-blind enrichment seam (`Enrichment` / `resolve_enrichment` / `enrich_atoms`) so the LLBC path can be retired once every project ships a manifest.
+
+### Fixed
+- **Manifest single-candidate joins fail closed**: a manifest candidate is accepted only with a file-path match (span overlap when both carry usable lines); a match-key-only hit or a `source`-less record never stamps a `charon-def-id`. The LLBC path keeps its lenient span-less acceptance for compiler-generated items.
+- **`is-public` no longer clobbered**: a matched Charon candidate without visibility (LLBC entry lacking `attr_info.public`, or the manifest, which has none) no longer overwrites the SCIP-derived value with `None`.
+- **Re-enrichment clears stale provenance**: any atom that does not produce a fresh id+version this pass (no match, or no readable version) has both fields cleared, so a stale id never survives against a different source.
+
 ## [0.7.1] - 2026-07-11
 
 ### Fixed
