@@ -791,8 +791,14 @@ pub fn enrich_atoms_with_charon_names(
             if let Some(best) = resolve_charon_candidate(candidates, atom) {
                 atom.rust_qualified_name = Some(best.qualified_name.clone());
                 atom.is_public = best.is_public;
-                atom.charon_def_id = Some(best.def_id);
-                atom.charon_version = charon_version.clone();
+                // Emit the def-id only together with its provenance version. A
+                // def-id is meaningful only relative to the Charon run that
+                // produced it, so an id without a version is uninterpretable
+                // downstream — omit both if the version could not be read.
+                if let Some(version) = &charon_version {
+                    atom.charon_def_id = Some(best.def_id);
+                    atom.charon_version = Some(version.clone());
+                }
                 enriched += 1;
             }
         }
@@ -1312,6 +1318,83 @@ mod tests {
         // WS3: the resolved FunDeclId and charon version ride along.
         assert_eq!(atom.charon_def_id, Some(7));
         assert_eq!(atom.charon_version.as_deref(), Some("0.1.99"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// When the LLBC has no top-level `charon_version`, the def-id must NOT be
+    /// emitted on its own: a def-id is only interpretable relative to a Charon
+    /// version, so an orphan id would violate the provenance contract. RQN /
+    /// visibility (version-independent) are still enriched.
+    #[test]
+    fn test_enrich_omits_def_id_without_charon_version() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_enrich_no_version");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // No top-level `charon_version` field.
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 7}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Ident": ["do_stuff", 0]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 7,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 5, "col": 0}, "end": {"line": 15, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/module.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        let mut atoms = BTreeMap::new();
+        atoms.insert(
+            "probe:my-crate/1.0/module/do_stuff()".to_string(),
+            crate::AtomWithLines {
+                display_name: "do_stuff".to_string(),
+                code_name: "probe:my-crate/1.0/module/do_stuff()".to_string(),
+                dependencies: std::collections::BTreeSet::new(),
+                dependencies_with_locations: Vec::new(),
+                code_module: "module".to_string(),
+                code_path: "src/module.rs".to_string(),
+                code_text: crate::CodeTextInfo {
+                    lines_start: 5,
+                    lines_end: 15,
+                },
+                kind: crate::DeclKind::Exec,
+                language: "rust".to_string(),
+                rust_qualified_name: None,
+                is_disabled: false,
+                cfg: None,
+                is_public: None,
+                is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
+            },
+        );
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 1);
+
+        let atom = atoms.get("probe:my-crate/1.0/module/do_stuff()").unwrap();
+        // Version-independent enrichment still happens.
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("my_crate::module::do_stuff")
+        );
+        assert_eq!(atom.is_public, Some(true));
+        // But no orphan def-id: both provenance fields stay absent together.
+        assert_eq!(atom.charon_def_id, None);
+        assert_eq!(atom.charon_version, None);
 
         std::fs::remove_dir_all(&dir).ok();
     }
