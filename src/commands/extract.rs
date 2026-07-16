@@ -334,9 +334,24 @@ fn enrich_from_manifest(translation: &Path, atoms_dict: &mut BTreeMap<String, At
 
     match charon_names::resolve_enrichment(Some(translation), None) {
         Ok(Some(enrichment)) => {
+            // The manifest's `charon_version` gates the whole pass: with a
+            // version every matched atom is stamped with the def-id pair, without
+            // one none are (the coupling invariant). Report accordingly so the
+            // count never overclaims def-ids that were not written.
+            let has_version = enrichment.charon_version.is_some();
             let count = charon_names::enrich_atoms(atoms_dict, &enrichment, true);
             let total = atoms_dict.len();
-            println!("  ✓ Enriched {count}/{total} atoms with charon-def-id from translation.json");
+            if has_version {
+                println!(
+                    "  ✓ Enriched {count}/{total} atoms with charon-def-id from translation.json"
+                );
+            } else {
+                eprintln!(
+                    "  ⚠ translation.json has no charon_version; charon-def-id omitted \
+                     ({count}/{total} atoms matched a manifest record)"
+                );
+                eprintln!("    rust-qualified-name stays SCIP-derived");
+            }
         }
         Ok(None) => {}
         Err(e) => {

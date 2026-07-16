@@ -158,15 +158,15 @@ standardized metadata envelope:
 | `code-text` | CodeTextInfo | yes | Line range of the function body |
 | `kind` | DeclKind | yes | Always `"exec"` for standard Rust |
 | `language` | string | yes | Always `"rust"` |
-| `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible name; otherwise a heuristic based on file path and display name. |
+| `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible LLBC-derived name; otherwise (including the `--translation` manifest path, which does not override it) a heuristic based on the SCIP signature / file path and display name. |
 | `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions that are out of scope. |
 | `cfg` | string | no | The combined item-gating `#[cfg(...)]` predicate governing the function — its own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-joined (e.g. `all(test, feature = "serde")`). Cosmetic `#[cfg_attr(...)]` is ignored. Omitted when the function has no `#[cfg]` gate. Downstream tools evaluate it against the build config to decide whether the function is compiled (and hence in scope). |
-| `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used, the Charon-derived value takes precedence. This is item-level visibility, not crate-level API reachability. |
+| `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used and the matched LLBC entry carries visibility (`attr_info.public`), the Charon-derived value takes precedence; a candidate without visibility (and the `--translation` manifest path, which carries none) never clobbers the SCIP value. This is item-level visibility, not crate-level API reachability. |
 | `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. By default derived from SCIP module-chain visibility walk (no external tools required). When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name` (RQN). See **Limitations** below. |
-| `charon-def-id` | integer | no | Charon `FunDeclId` — the `Fun` key from the LLBC's `item_names`, carried through the same match-key/span resolution that assigns `rust-qualified-name`. Equals Aeneas's `translation.json` `def_id`, enabling a precise integer join to the Lean translation. Present only with `--with-charon` when a Charon function matched **and** the LLBC's `charon_version` was read. Its accuracy is exactly that of the underlying Charon-name match (single-candidate span resolution) — it is not an independent oracle, so consumers should still gate on `charon-version` and may corroborate with `rust-qualified-name`/span rather than treat the id alone as ground truth. |
-| `charon-version` | string | no | The charon version (LLBC top-level `charon_version`) that produced `charon-def-id`. Lets consumers provenance-gate the join — trust `charon-def-id` only when this matches the charon version behind their manifest. |
+| `charon-def-id` | integer | no | Charon `FunDeclId`, carried through the same match-key/span resolution that assigns `rust-qualified-name`. Equals Aeneas's `translation.json` `def_id`, enabling a precise integer join to the Lean translation. Populated from **either** source: with `--with-charon` it is the `Fun` key from the LLBC's `item_names`; with `--translation <manifest>` it is the `def_id` of a `functions[]` entry (charon's `FunDeclId` id-space only — `globals`/`trait_impls` are excluded). Present only when a Charon function matched **and** that source's `charon_version` was read. Its accuracy is exactly that of the underlying Charon-name match (single-candidate resolution requires a file-path match; the manifest path additionally refuses match-key-only hits) — it is not an independent oracle, so consumers should still gate on `charon-version` and may corroborate with `rust-qualified-name`/span rather than treat the id alone as ground truth. |
+| `charon-version` | string | no | The charon version that produced `charon-def-id` — the top-level `charon_version` of the LLBC (`--with-charon`) or of the `translation.json` (`--translation`). Lets consumers provenance-gate the join — trust `charon-def-id` only when this matches the charon version behind their manifest. |
 
-> **Coupling invariant.** `charon-def-id` and `charon-version` are emitted **together or not at all** — a `FunDeclId` is only interpretable relative to the charon run that produced it, so probe-rust never writes an id without its version. Re-enrichment (running `--with-charon` over already-enriched atoms) clears **both** for any atom that does not produce a fresh id+version this pass — whether no Charon function matched or the version could not be read — so a stale id never survives against a different LLBC. Consumers may treat a present `charon-def-id` as always accompanied by a `charon-version`. (Enforced by the emitter, not the deserializer: an externally hand-written file with an orphan id would still parse.)
+> **Coupling invariant.** `charon-def-id` and `charon-version` are emitted **together or not at all** — a `FunDeclId` is only interpretable relative to the charon run that produced it, so probe-rust never writes an id without its version. This holds for both enrichment sources (`--with-charon` LLBC and `--translation` manifest). Re-enrichment (running either source over already-enriched atoms) clears **both** for any atom that does not produce a fresh id+version this pass — whether no Charon function matched or the version could not be read — so a stale id never survives against a different source. Consumers may treat a present `charon-def-id` as always accompanied by a `charon-version`. (Enforced by the emitter, not the deserializer: an externally hand-written file with an orphan id would still parse.)
 
 ### DependencyWithLocation
 
@@ -338,9 +338,11 @@ major version.
 ### Changelog
 
 - **2.4** (2026-07-16): Added `charon-def-id` and `charon-version` optional
-  fields (with `--with-charon`), emitted together or not at all. Enables
-  downstream tools (probe-aeneas) to join Rust↔Lean by Charon `FunDeclId`
-  integer equality, provenance-gated on matching charon version.
+  fields, emitted together or not at all. Populated from either the
+  `--with-charon` LLBC or a `--translation <manifest>` Aeneas `translation.json`
+  (which reads `def_id`s without running charon). Enables downstream tools
+  (probe-aeneas) to join Rust↔Lean by Charon `FunDeclId` integer equality,
+  provenance-gated on matching charon version.
 - **2.3** (2026-04-07): Replaced `cargo-public-api` integration with SCIP
   module-chain visibility walk. `is-public-api` is now always present for
   internal atoms (binary `true`/`false`), no uncertain bucket. No external
@@ -364,10 +366,10 @@ probe-rust atoms use the same data shape as probe-verus atoms. Key differences:
 | Envelope `schema` | `"probe-rust/extract"` | `"probe-verus/atoms"` |
 | `kind` values | Always `"exec"` | `"exec"`, `"proof"`, `"spec"` |
 | `dependencies-with-locations` `location` | Always `"inner"` | `"inner"`, `"precondition"`, `"postcondition"` |
-| `rust-qualified-name` | Optional (with `--with-charon`) | Not present |
-| `is-public` | Always for internal atoms (from SCIP); `--with-charon` overrides | Not present |
+| `rust-qualified-name` | Optional (LLBC-derived with `--with-charon`; SCIP-derived otherwise, including `--translation`) | Not present |
+| `is-public` | Always for internal atoms (from SCIP); an LLBC candidate with visibility overrides, `--translation` never does | Not present |
 | `is-public-api` | Always for internal atoms (SCIP module walk; optionally overridden via `--with-public-api`) | Not present |
-| `charon-def-id` / `charon-version` | Optional pair (with `--with-charon`, when matched + version read) | Not present |
+| `charon-def-id` / `charon-version` | Optional pair (with `--with-charon` LLBC or `--translation` manifest, when matched + version read) | Not present |
 
 The `callee-crates` and `list-functions` commands accept atoms.json from
 either tool interchangeably.

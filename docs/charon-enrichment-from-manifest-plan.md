@@ -1,7 +1,12 @@
 # Plan: charon enrichment from `translation.json` (manifest path), LLBC as legacy
 
-Status: planned. Companion to probe-aeneas `docs/charon-def-id-matching-plan.md`
-(WS3) and the durable-fix drafts in probe-aeneas `docs/upstream-issues/`.
+Status: implemented (steps 1–3 below). The seam (`Enrichment`,
+`EnrichmentSource`, `resolve_enrichment`, source-blind `enrich_atoms`) and the
+`--translation` flag landed in `src/charon_names.rs` and `src/commands/extract.rs`
+— not in a separate `src/charon_enrichment.rs` as originally sketched. Steps 4–6
+(probe-aeneas wiring, activation A/B, legacy removal) remain planned. Companion to
+probe-aeneas `docs/charon-def-id-matching-plan.md` (WS3) and the durable-fix
+drafts in probe-aeneas `docs/upstream-issues/`.
 
 ## Goal
 

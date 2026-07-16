@@ -708,14 +708,35 @@ fn disambiguate_by_span<'a>(
 ///    `lib.rs` atom whose match key is bare `from`).
 /// 2. Same-file derive collisions (e.g. a `#[derive]` at L16 producing an
 ///    `eq` candidate that gets assigned to unrelated manual impls).
+///
+/// The single-candidate acceptance policy depends on `source`:
+/// - [`EnrichmentSource::Llbc`] keeps the lenient legacy behavior: a candidate
+///   with no usable file/span (empty file path, lines `0`) is still accepted on
+///   match-key alone, so span-less compiler-generated items (e.g. derived
+///   `fmt`) still enrich `rust-qualified-name`/`is-public`.
+/// - [`EnrichmentSource::Manifest`] fails **closed**: a manifest `def_id` feeds
+///   an integer Rust↔Lean join, so a single candidate is accepted only with a
+///   non-empty file path that matches the atom (and span overlap when both
+///   carry usable lines). A match-key-only "match" is not enough evidence to
+///   stamp a `charon-def-id`; such candidates are rejected here.
 fn resolve_charon_candidate<'a>(
     candidates: &'a [CharonFunInfo],
     atom: &crate::AtomWithLines,
+    source: EnrichmentSource,
 ) -> Option<&'a CharonFunInfo> {
     if candidates.len() == 1 {
         let c = &candidates[0];
+        // Manifest ids are consumed as a precise integer join, so never accept a
+        // single candidate on match-key alone — require file-path proof. A
+        // `source: null`/empty-file manifest record (file_path `None` or `""`)
+        // is rejected rather than blindly stamped onto a same-key atom.
+        let has_usable_file = matches!(c.file_path.as_deref(), Some(f) if !f.is_empty());
+        if source == EnrichmentSource::Manifest && !has_usable_file {
+            return None;
+        }
         if let (Some(f), Some(cs), Some(ce)) = (c.file_path.as_deref(), c.line_start, c.line_end) {
             if f.is_empty() {
+                // Only reachable for the LLBC path now (Manifest returned above).
                 return Some(&candidates[0]);
             }
             let norm_c = normalize_source_path(f);
@@ -937,7 +958,7 @@ pub fn enrich_atoms(
         });
 
         if let Some(candidates) = candidates {
-            if let Some(best) = resolve_charon_candidate(candidates, atom) {
+            if let Some(best) = resolve_charon_candidate(candidates, atom, enrichment.source) {
                 // Manifest path (minimal): do not override `rust-qualified-name`
                 // — the join keys on `charon-def-id`, and the atom keeps its
                 // SCIP-derived RQN, avoiding a format change for consumers that
@@ -2838,6 +2859,185 @@ mod tests {
         assert_eq!(
             atom.charon_def_id, None,
             "stale def-id must be cleared even when nothing matched"
+        );
+        assert_eq!(atom.charon_version, None, "stale version must be cleared");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `from_translation_json` errors (not panics) on an unreadable path and on
+    /// malformed JSON — the CLI relies on this to warn-and-skip rather than
+    /// crash.
+    #[test]
+    fn from_translation_json_errors_on_bad_path_and_bad_json() {
+        let dir = std::env::temp_dir().join("probe_rust_test_manifest_errors");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let missing = dir.join("does_not_exist.json");
+        assert!(Enrichment::from_translation_json(&missing).is_err());
+
+        let bad = dir.join("bad.json");
+        std::fs::write(&bad, r#"{ this is not valid json "#).unwrap();
+        assert!(Enrichment::from_translation_json(&bad).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A `functions[]` entry with a null/absent `rust_name` is silently skipped
+    /// (no match key to build), and a manifest with no `functions` key yields an
+    /// empty map but still carries the top-level `charon_version`.
+    #[test]
+    fn from_translation_json_skips_null_rust_name_and_missing_functions() {
+        let dir = std::env::temp_dir().join("probe_rust_test_manifest_skip");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // One usable function + one with rust_name: null (must be skipped).
+        let with_null = dir.join("with_null.json");
+        std::fs::write(
+            &with_null,
+            r#"{
+                "charon_version": "0.1.217",
+                "functions": [
+                    {"def_id": 1, "rust_name": null,
+                     "source": {"file": "src/m.rs", "begin_line": 5, "end_line": 15}},
+                    {"def_id": 2, "rust_name": "my_crate::m::keep",
+                     "source": {"file": "src/m.rs", "begin_line": 20, "end_line": 30}}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let e = Enrichment::from_translation_json(&with_null).unwrap();
+        let all: Vec<_> = e.by_match_key.values().flatten().collect();
+        assert_eq!(all.len(), 1, "the null-rust_name entry must be dropped");
+        assert_eq!(all[0].def_id, 2);
+
+        // No `functions` key at all -> empty map, version preserved.
+        let no_functions = dir.join("no_functions.json");
+        std::fs::write(&no_functions, r#"{"charon_version": "0.1.217"}"#).unwrap();
+        let e = Enrichment::from_translation_json(&no_functions).unwrap();
+        assert!(e.by_match_key.is_empty());
+        assert_eq!(e.charon_version.as_deref(), Some("0.1.217"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Guard: a manifest single candidate with no usable `source` (file_path
+    /// `None`) must be REJECTED — a match-key-only hit is not enough evidence to
+    /// stamp a `charon-def-id` that feeds an integer Rust↔Lean join. Contrast
+    /// with the LLBC path, which accepts span-less candidates (see
+    /// `test_resolve_single_candidate_no_span_preserved`).
+    #[test]
+    fn manifest_single_candidate_without_source_is_rejected() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_manifest_no_source");
+        std::fs::create_dir_all(&dir).unwrap();
+        let tj = dir.join("translation.json");
+        // Function shares the atom's match key (`m::do_stuff`) but has no source.
+        std::fs::write(
+            &tj,
+            r#"{
+                "charon_version": "0.1.217",
+                "functions": [
+                    {"def_id": 82, "rust_name": "my_crate::m::do_stuff"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let atom = test_atom();
+        let mut atoms = BTreeMap::new();
+        atoms.insert(atom.code_name.clone(), atom);
+
+        let e = Enrichment::from_translation_json(&tj).unwrap();
+        // The candidate is present in the map, keyed the same as the atom...
+        assert!(e.by_match_key.contains_key("m::do_stuff"));
+        let count = enrich_atoms(&mut atoms, &e, false);
+        // ...but it is refused for lack of file-path proof.
+        assert_eq!(count, 0, "sourceless manifest candidate must not enrich");
+
+        let atom = atoms.get("probe:c/1.0/m/do_stuff()").unwrap();
+        assert_eq!(atom.charon_def_id, None);
+        assert_eq!(atom.charon_version, None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Guard: a manifest single candidate whose `source.file` points at a
+    /// different file than the atom must be rejected (cross-file collision),
+    /// even though the coarse match key collides.
+    #[test]
+    fn manifest_single_candidate_wrong_file_is_rejected() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_manifest_wrong_file");
+        std::fs::create_dir_all(&dir).unwrap();
+        let tj = dir.join("translation.json");
+        std::fs::write(
+            &tj,
+            r#"{
+                "charon_version": "0.1.217",
+                "functions": [
+                    {"def_id": 82, "rust_name": "my_crate::m::do_stuff",
+                     "source": {"file": "src/other.rs", "begin_line": 5, "end_line": 15}}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        // Atom lives in src/m.rs (see `test_atom`), candidate in src/other.rs.
+        let atom = test_atom();
+        let mut atoms = BTreeMap::new();
+        atoms.insert(atom.code_name.clone(), atom);
+
+        let e = Enrichment::from_translation_json(&tj).unwrap();
+        let count = enrich_atoms(&mut atoms, &e, false);
+        assert_eq!(count, 0, "cross-file manifest candidate must not enrich");
+
+        let atom = atoms.get("probe:c/1.0/m/do_stuff()").unwrap();
+        assert_eq!(atom.charon_def_id, None);
+        assert_eq!(atom.charon_version, None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Re-enrichment safety on the MANIFEST path: an atom carrying stale
+    /// provenance that matches nothing in the current manifest must have both
+    /// fields cleared (the coupling invariant is enforced source-blind).
+    #[test]
+    fn manifest_re_enrich_clears_stale_provenance_on_no_match() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_manifest_clear_stale");
+        std::fs::create_dir_all(&dir).unwrap();
+        let tj = dir.join("translation.json");
+        // A manifest that covers an unrelated function only.
+        std::fs::write(
+            &tj,
+            r#"{
+                "charon_version": "0.1.217",
+                "functions": [
+                    {"def_id": 3, "rust_name": "my_crate::other::unrelated",
+                     "source": {"file": "src/other.rs", "begin_line": 1, "end_line": 2}}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let mut atom = test_atom();
+        atom.charon_def_id = Some(999);
+        atom.charon_version = Some("0.0.1-stale".to_string());
+        let mut atoms = BTreeMap::new();
+        atoms.insert(atom.code_name.clone(), atom);
+
+        let e = Enrichment::from_translation_json(&tj).unwrap();
+        let count = enrich_atoms(&mut atoms, &e, false);
+        assert_eq!(count, 0, "no manifest function matches this atom");
+
+        let atom = atoms.get("probe:c/1.0/m/do_stuff()").unwrap();
+        assert_eq!(
+            atom.charon_def_id, None,
+            "stale def-id must be cleared on the manifest no-match path"
         );
         assert_eq!(atom.charon_version, None, "stale version must be cleared");
 
