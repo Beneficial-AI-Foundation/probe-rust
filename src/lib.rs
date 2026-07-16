@@ -338,20 +338,25 @@ pub struct AtomWithLines {
         default
     )]
     pub is_public_api: Option<bool>,
-    /// Charon `FunDeclId` for this function, resolved by matching the atom's
-    /// source span to a `fun_decls[]` entry in the LLBC. Equals Aeneas's
+    /// Charon `FunDeclId` for this function — the `Fun` key from the LLBC's
+    /// `item_names`, carried through the match-key lookup (with span
+    /// disambiguation) that resolves the atom's Charon name. Equals Aeneas's
     /// `translation.json` `def_id`, enabling a precise integer join to the Lean
-    /// translation. Omitted when no Charon function was matched.
+    /// translation. Always emitted **together with** `charon_version`: set when a
+    /// Charon function matched *and* the LLBC version was read, omitted
+    /// otherwise (never an id without its version — see the emitter in
+    /// `charon_names::enrich_atoms_with_charon_names`).
     #[serde(
         rename = "charon-def-id",
         skip_serializing_if = "Option::is_none",
         default
     )]
     pub charon_def_id: Option<u64>,
-    /// Charon version that produced `charon_def_id` (from the LLBC's top-level
+    /// Charon version that produced `charon_def_id` (the LLBC's top-level
     /// `charon_version`). Provenance-gates the def-id join downstream: consumers
     /// trust `charon_def_id` only when this matches the charon version that
-    /// produced their manifest. Omitted when no Charon function was matched.
+    /// produced their manifest. Emitted together with `charon_def_id` (both or
+    /// neither).
     #[serde(
         rename = "charon-version",
         skip_serializing_if = "Option::is_none",

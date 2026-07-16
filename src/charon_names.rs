@@ -47,8 +47,16 @@ pub struct CharonFunInfo {
     pub is_public: Option<bool>,
 }
 
-/// Parse an LLBC JSON file and return Charon function info grouped by match key.
-pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFunInfo>>, String> {
+/// Parsed LLBC name data: function info grouped by match key, plus the LLBC's
+/// top-level `charon_version` (the provenance for `charon-def-id`).
+pub struct LlbcNames {
+    pub by_match_key: HashMap<String, Vec<CharonFunInfo>>,
+    /// Top-level `charon_version`, `None` if absent or non-string.
+    pub charon_version: Option<String>,
+}
+
+/// Parse an LLBC JSON file into [`LlbcNames`].
+pub fn parse_llbc_names(llbc_path: &Path) -> Result<LlbcNames, String> {
     let contents =
         std::fs::read_to_string(llbc_path).map_err(|e| format!("failed to read LLBC file: {e}"))?;
     let root: serde_json::Value = {
@@ -58,6 +66,13 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
         serde::Deserialize::deserialize(stacked)
             .map_err(|e| format!("failed to parse LLBC JSON: {e}"))?
     };
+
+    // Provenance: the version comes from the already-parsed root — no second
+    // read of the multi-megabyte file needed.
+    let charon_version = root
+        .get("charon_version")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
     let translated = root
         .get("translated")
@@ -123,7 +138,10 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
             });
     }
 
-    Ok(result)
+    Ok(LlbcNames {
+        by_match_key: result,
+        charon_version,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -752,10 +770,12 @@ pub fn enrich_atoms_with_charon_names(
     llbc_path: &Path,
     verbose: bool,
 ) -> Result<usize, String> {
-    let charon_map = parse_llbc_names(llbc_path)?;
-    // Read once; stamped onto every enriched atom so consumers can provenance-
-    // gate the def-id join (trust `charon-def-id` only when versions agree).
-    let charon_version = read_charon_version(llbc_path);
+    let parsed = parse_llbc_names(llbc_path)?;
+    let charon_map = parsed.by_match_key;
+    // Provenance from the same parse; stamped onto every enriched atom so
+    // consumers can gate the def-id join (trust `charon-def-id` only when
+    // versions agree).
+    let charon_version = parsed.charon_version;
 
     if verbose {
         eprintln!(
@@ -794,10 +814,17 @@ pub fn enrich_atoms_with_charon_names(
                 // Emit the def-id only together with its provenance version. A
                 // def-id is meaningful only relative to the Charon run that
                 // produced it, so an id without a version is uninterpretable
-                // downstream — omit both if the version could not be read.
-                if let Some(version) = &charon_version {
-                    atom.charon_def_id = Some(best.def_id);
-                    atom.charon_version = Some(version.clone());
+                // downstream. Set both, or clear both — never a half-populated
+                // pair (guards re-enrichment leaving a stale id).
+                match &charon_version {
+                    Some(version) => {
+                        atom.charon_def_id = Some(best.def_id);
+                        atom.charon_version = Some(version.clone());
+                    }
+                    None => {
+                        atom.charon_def_id = None;
+                        atom.charon_version = None;
+                    }
                 }
                 enriched += 1;
             }
@@ -805,32 +832,6 @@ pub fn enrich_atoms_with_charon_names(
     }
 
     Ok(enriched)
-}
-
-/// Read the top-level `charon_version` from an LLBC file cheaply.
-///
-/// Charon serializes `charon_version` as the first field, so a bounded prefix
-/// read avoids re-parsing the multi-megabyte AST. Returns `None` when the field
-/// is not found in the prefix or on IO error.
-fn read_charon_version(llbc_path: &Path) -> Option<String> {
-    use std::io::Read as _;
-    let mut file = std::fs::File::open(llbc_path).ok()?;
-    let mut buf = [0u8; 4096];
-    let n = file.read(&mut buf).ok()?;
-    let prefix = String::from_utf8_lossy(&buf[..n]);
-    parse_charon_version_prefix(&prefix)
-}
-
-/// Extract the `charon_version` string value from a JSON prefix. Tolerates
-/// whitespace around the `:` so it works on both compact and pretty-printed
-/// LLBC. Returns `None` when the field or its string value is absent.
-fn parse_charon_version_prefix(prefix: &str) -> Option<String> {
-    const KEY: &str = "\"charon_version\"";
-    let after_key = &prefix[prefix.find(KEY)? + KEY.len()..];
-    let value = after_key.trim_start().strip_prefix(':')?.trim_start();
-    let rest = value.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
 }
 
 #[cfg(test)]
@@ -1188,6 +1189,7 @@ mod tests {
         let llbc_path = dir.join("test.llbc");
 
         let llbc_json = r#"{
+            "charon_version": "0.1.217",
             "translated": {
                 "crate_name": "my_crate",
                 "item_names": [
@@ -1216,7 +1218,9 @@ mod tests {
         }"#;
         std::fs::write(&llbc_path, llbc_json).unwrap();
 
-        let charon_map = parse_llbc_names(&llbc_path).unwrap();
+        let parsed = parse_llbc_names(&llbc_path).unwrap();
+        assert_eq!(parsed.charon_version.as_deref(), Some("0.1.217"));
+        let charon_map = parsed.by_match_key;
 
         let pub_entries = charon_map.get("public_fn").unwrap();
         assert_eq!(pub_entries.len(), 1);
@@ -1233,19 +1237,29 @@ mod tests {
     }
 
     #[test]
-    fn test_read_charon_version() {
+    fn test_parse_llbc_names_charon_version_present_and_absent() {
         let dir = std::env::temp_dir().join("probe_rust_test_charon_version");
         std::fs::create_dir_all(&dir).unwrap();
 
+        // Present at top level -> extracted from the parsed root.
         let present = dir.join("with.llbc");
-        std::fs::write(&present, r#"{"charon_version":"0.1.217","translated":{}}"#).unwrap();
-        assert_eq!(read_charon_version(&present).as_deref(), Some("0.1.217"));
+        std::fs::write(
+            &present,
+            r#"{"charon_version":"0.1.217","translated":{"item_names":[]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            parse_llbc_names(&present)
+                .unwrap()
+                .charon_version
+                .as_deref(),
+            Some("0.1.217")
+        );
 
+        // Absent -> None (the paired-omit path downstream drops the def-id too).
         let absent = dir.join("without.llbc");
-        std::fs::write(&absent, r#"{"translated":{}}"#).unwrap();
-        assert_eq!(read_charon_version(&absent), None);
-
-        assert_eq!(read_charon_version(&dir.join("missing.llbc")), None);
+        std::fs::write(&absent, r#"{"translated":{"item_names":[]}}"#).unwrap();
+        assert_eq!(parse_llbc_names(&absent).unwrap().charon_version, None);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -2351,6 +2365,112 @@ mod tests {
                 .is_some_and(|rqn| rqn.contains("fmt")),
             "span-less candidate in the matching file should be accepted (file-path fallback)"
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A minimal atom for serde / enrichment tests.
+    fn test_atom() -> crate::AtomWithLines {
+        crate::AtomWithLines {
+            display_name: "do_stuff".to_string(),
+            code_name: "probe:c/1.0/m/do_stuff()".to_string(),
+            dependencies: std::collections::BTreeSet::new(),
+            dependencies_with_locations: Vec::new(),
+            code_module: "m".to_string(),
+            code_path: "src/m.rs".to_string(),
+            code_text: crate::CodeTextInfo {
+                lines_start: 5,
+                lines_end: 15,
+            },
+            kind: crate::DeclKind::Exec,
+            language: "rust".to_string(),
+            rust_qualified_name: None,
+            is_disabled: false,
+            cfg: None,
+            is_public: None,
+            is_public_api: None,
+            charon_def_id: None,
+            charon_version: None,
+        }
+    }
+
+    /// Serde contract: the fields serialize under their kebab-case keys, are
+    /// omitted when `None`, and round-trip when `Some`.
+    #[test]
+    fn charon_provenance_fields_serde_shape() {
+        // None -> keys omitted.
+        let bare = serde_json::to_value(test_atom()).unwrap();
+        assert!(bare.get("charon-def-id").is_none());
+        assert!(bare.get("charon-version").is_none());
+
+        // Some -> kebab-case keys with the values.
+        let mut atom = test_atom();
+        atom.charon_def_id = Some(439);
+        atom.charon_version = Some("0.1.217".to_string());
+        let v = serde_json::to_value(&atom).unwrap();
+        assert_eq!(v.get("charon-def-id").and_then(|x| x.as_u64()), Some(439));
+        assert_eq!(
+            v.get("charon-version").and_then(|x| x.as_str()),
+            Some("0.1.217")
+        );
+
+        // Round-trip.
+        let back: crate::AtomWithLines = serde_json::from_value(v).unwrap();
+        assert_eq!(back.charon_def_id, Some(439));
+        assert_eq!(back.charon_version.as_deref(), Some("0.1.217"));
+    }
+
+    /// Re-enrichment safety: an atom that already carries provenance from an
+    /// earlier run must have BOTH fields cleared when the current LLBC has no
+    /// `charon_version` — never a stale id next to a freshly-updated RQN.
+    #[test]
+    fn test_enrich_clears_stale_provenance_when_version_missing() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_enrich_clear_stale");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // LLBC with a matching function but NO top-level charon_version.
+        let llbc_json = r#"{
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 7}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["m", 0]}, {"Ident": ["do_stuff", 0]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 7,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 5, "col": 0}, "end": {"line": 15, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/m.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        // Pre-set stale provenance from a hypothetical earlier run.
+        let mut atom = test_atom();
+        atom.charon_def_id = Some(999);
+        atom.charon_version = Some("0.0.1-stale".to_string());
+        let mut atoms = BTreeMap::new();
+        atoms.insert(atom.code_name.clone(), atom);
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 1);
+
+        let atom = atoms.get("probe:c/1.0/m/do_stuff()").unwrap();
+        // RQN re-enriched, but the stale id/version are both cleared.
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("my_crate::m::do_stuff")
+        );
+        assert_eq!(atom.charon_def_id, None, "stale def-id must be cleared");
+        assert_eq!(atom.charon_version, None, "stale version must be cleared");
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -1,7 +1,7 @@
 # probe-rust Data Schemas
 
-Version: 2.3
-Date: 2026-04-07
+Version: 2.4
+Date: 2026-07-16
 
 This document specifies the JSON output formats produced by each probe-rust
 subcommand. It complements the language-agnostic
@@ -69,7 +69,7 @@ standardized metadata envelope:
 ```json
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.3",
+  "schema-version": "2.4",
   "tool": {
     "name": "probe-rust",
     "version": "0.4.0",
@@ -92,7 +92,7 @@ standardized metadata envelope:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema` | string | Data type identifier: `"probe-rust/extract"` |
-| `schema-version` | string | Interchange spec version (`"2.3"`) |
+| `schema-version` | string | Interchange spec version (`"2.4"`) |
 | `tool.name` | string | Always `"probe-rust"` |
 | `tool.version` | string | Semver version of the probe-rust binary |
 | `tool.command` | string | Subcommand that produced the file (e.g. `"extract"`) |
@@ -136,6 +136,8 @@ standardized metadata envelope:
     "kind": "exec",
     "language": "rust",
     "rust-qualified-name": "my_crate::module::MyStruct::method",
+    "charon-def-id": 439,
+    "charon-version": "0.1.217",
     "is-disabled": false,
     "cfg": "feature = \"alloc\"",
     "is-public": true,
@@ -161,6 +163,10 @@ standardized metadata envelope:
 | `cfg` | string | no | The combined item-gating `#[cfg(...)]` predicate governing the function — its own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-joined (e.g. `all(test, feature = "serde")`). Cosmetic `#[cfg_attr(...)]` is ignored. Omitted when the function has no `#[cfg]` gate. Downstream tools evaluate it against the build config to decide whether the function is compiled (and hence in scope). |
 | `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used, the Charon-derived value takes precedence. This is item-level visibility, not crate-level API reachability. |
 | `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. By default derived from SCIP module-chain visibility walk (no external tools required). When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name` (RQN). See **Limitations** below. |
+| `charon-def-id` | integer | no | Charon `FunDeclId` — the `Fun` key from the LLBC's `item_names`, carried through the same match-key/span resolution that assigns `rust-qualified-name`. Equals Aeneas's `translation.json` `def_id`, enabling a precise integer join to the Lean translation. Present only with `--with-charon` when a Charon function matched **and** the LLBC's `charon_version` was read. Its accuracy is exactly that of the underlying Charon-name match (single-candidate span resolution) — it is not an independent oracle, so consumers should still gate on `charon-version` and may corroborate with `rust-qualified-name`/span rather than treat the id alone as ground truth. |
+| `charon-version` | string | no | The charon version (LLBC top-level `charon_version`) that produced `charon-def-id`. Lets consumers provenance-gate the join — trust `charon-def-id` only when this matches the charon version behind their manifest. |
+
+> **Coupling invariant.** `charon-def-id` and `charon-version` are emitted **together or not at all** — a `FunDeclId` is only interpretable relative to the charon run that produced it, so probe-rust never writes an id without its version (and re-enrichment clears both if the version is unavailable). Consumers may treat a present `charon-def-id` as always accompanied by a `charon-version`. (Enforced by the emitter, not the deserializer: an externally hand-written file with an orphan id would still parse.)
 
 ### DependencyWithLocation
 
@@ -182,6 +188,8 @@ stub entries with:
 - `rust-qualified-name`: absent
 - `is-public`: absent
 - `is-public-api`: absent
+- `charon-def-id`: absent
+- `charon-version`: absent
 
 ### Limitations: `is-public-api`
 
@@ -329,6 +337,10 @@ major version.
 
 ### Changelog
 
+- **2.4** (2026-07-16): Added `charon-def-id` and `charon-version` optional
+  fields (with `--with-charon`), emitted together or not at all. Enables
+  downstream tools (probe-aeneas) to join Rust↔Lean by Charon `FunDeclId`
+  integer equality, provenance-gated on matching charon version.
 - **2.3** (2026-04-07): Replaced `cargo-public-api` integration with SCIP
   module-chain visibility walk. `is-public-api` is now always present for
   internal atoms (binary `true`/`false`), no uncertain bucket. No external
@@ -355,6 +367,7 @@ probe-rust atoms use the same data shape as probe-verus atoms. Key differences:
 | `rust-qualified-name` | Optional (with `--with-charon`) | Not present |
 | `is-public` | Always for internal atoms (from SCIP); `--with-charon` overrides | Not present |
 | `is-public-api` | Always for internal atoms (SCIP module walk; optionally overridden via `--with-public-api`) | Not present |
+| `charon-def-id` / `charon-version` | Optional pair (with `--with-charon`, when matched + version read) | Not present |
 
 The `callee-crates` and `list-functions` commands accept atoms.json from
 either tool interchangeably.
