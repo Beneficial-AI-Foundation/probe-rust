@@ -788,6 +788,15 @@ pub fn enrich_atoms_with_charon_names(
     let mut enriched = 0;
 
     for atom in atoms.values_mut() {
+        // Provenance is (re)derived from THIS LLBC alone. Clear both fields up
+        // front so any atom that does not produce a fresh (id, version) this
+        // pass — no match, or a match without a readable version — never keeps
+        // stale provenance from an earlier enrichment. Upholds the coupling
+        // invariant (both set, or both absent) across re-enrichment. RQN /
+        // is-public are left as-is (no coupling contract).
+        atom.charon_def_id = None;
+        atom.charon_version = None;
+
         if atom.code_path.is_empty() {
             continue;
         }
@@ -811,20 +820,13 @@ pub fn enrich_atoms_with_charon_names(
             if let Some(best) = resolve_charon_candidate(candidates, atom) {
                 atom.rust_qualified_name = Some(best.qualified_name.clone());
                 atom.is_public = best.is_public;
-                // Emit the def-id only together with its provenance version. A
+                // Emit the def-id only together with its provenance version — a
                 // def-id is meaningful only relative to the Charon run that
-                // produced it, so an id without a version is uninterpretable
-                // downstream. Set both, or clear both — never a half-populated
-                // pair (guards re-enrichment leaving a stale id).
-                match &charon_version {
-                    Some(version) => {
-                        atom.charon_def_id = Some(best.def_id);
-                        atom.charon_version = Some(version.clone());
-                    }
-                    None => {
-                        atom.charon_def_id = None;
-                        atom.charon_version = None;
-                    }
+                // produced it. Both were pre-cleared above, so set them only
+                // when a version is available; otherwise they stay absent.
+                if let Some(version) = &charon_version {
+                    atom.charon_def_id = Some(best.def_id);
+                    atom.charon_version = Some(version.clone());
                 }
                 enriched += 1;
             }
@@ -2470,6 +2472,60 @@ mod tests {
             Some("my_crate::m::do_stuff")
         );
         assert_eq!(atom.charon_def_id, None, "stale def-id must be cleared");
+        assert_eq!(atom.charon_version, None, "stale version must be cleared");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Re-enrichment safety: an atom that matched a prior LLBC but matches
+    /// NOTHING in the current one must have its stale provenance cleared — the
+    /// coupling invariant holds on the no-match path, not just no-version.
+    #[test]
+    fn test_enrich_clears_stale_provenance_on_no_match() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_enrich_clear_no_match");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Valid LLBC (with a version) but NO function matching our atom.
+        let llbc_json = r#"{
+            "charon_version": "0.1.217",
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["other", 0]}, {"Ident": ["unrelated", 0]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 1, "col": 0}, "end": {"line": 2, "col": 0}}},
+                            "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/other.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        // Atom carries stale provenance and lives in a file the LLBC doesn't cover.
+        let mut atom = test_atom();
+        atom.charon_def_id = Some(999);
+        atom.charon_version = Some("0.0.1-stale".to_string());
+        let mut atoms = BTreeMap::new();
+        atoms.insert(atom.code_name.clone(), atom);
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 0, "no function matches this atom");
+
+        let atom = atoms.get("probe:c/1.0/m/do_stuff()").unwrap();
+        assert_eq!(
+            atom.charon_def_id, None,
+            "stale def-id must be cleared even when nothing matched"
+        );
         assert_eq!(atom.charon_version, None, "stale version must be cleared");
 
         std::fs::remove_dir_all(&dir).ok();
