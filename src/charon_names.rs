@@ -790,6 +790,95 @@ impl Enrichment {
             source: EnrichmentSource::Llbc,
         })
     }
+
+    /// Build from an Aeneas `translation.json` — charon already ran once inside
+    /// Aeneas, so no second charon run is needed.
+    ///
+    /// Only the manifest's `functions[]` array is used: its `def_id` is the
+    /// charon `FunDeclId` (the id probe-rust joins on). `globals[]`/`trait_impls[]`
+    /// live in charon's separate `GlobalDeclId`/`TraitImplId` spaces and their
+    /// integers can collide with a `FunDeclId`, so they must not enter the map.
+    /// Loop helpers share their parent's `def_id`, so it does not matter which
+    /// family member an atom's span matches — the id is the same.
+    pub fn from_translation_json(path: &Path) -> Result<Self, String> {
+        use serde::Deserialize;
+
+        #[derive(Deserialize)]
+        struct Manifest {
+            #[serde(default)]
+            charon_version: Option<String>,
+            #[serde(default)]
+            functions: Vec<ManifestFn>,
+        }
+        #[derive(Deserialize)]
+        struct ManifestFn {
+            def_id: u64,
+            #[serde(default)]
+            rust_name: Option<String>,
+            #[serde(default)]
+            source: Option<ManifestSource>,
+        }
+        #[derive(Deserialize)]
+        struct ManifestSource {
+            file: String,
+            #[serde(default)]
+            begin_line: usize,
+            #[serde(default)]
+            end_line: usize,
+        }
+
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("failed to read translation.json: {e}"))?;
+        let manifest: Manifest = serde_json::from_str(&content)
+            .map_err(|e| format!("failed to parse translation.json: {e}"))?;
+
+        let mut by_match_key: HashMap<String, Vec<CharonFunInfo>> = HashMap::new();
+        for f in &manifest.functions {
+            let Some(rust_name) = f.rust_name.as_deref() else {
+                continue;
+            };
+            let match_key = make_match_key_from_charon(rust_name, "");
+            let (file_path, line_start, line_end) = match &f.source {
+                Some(s) => (Some(s.file.clone()), Some(s.begin_line), Some(s.end_line)),
+                None => (None, None, None),
+            };
+            by_match_key
+                .entry(match_key.clone())
+                .or_default()
+                .push(CharonFunInfo {
+                    qualified_name: rust_name.to_string(),
+                    def_id: f.def_id,
+                    match_key,
+                    file_path,
+                    line_start,
+                    line_end,
+                    is_public: None, // the manifest carries no Rust visibility
+                });
+        }
+
+        Ok(Enrichment {
+            by_match_key,
+            charon_version: manifest.charon_version,
+            source: EnrichmentSource::Manifest,
+        })
+    }
+}
+
+/// Resolve the charon enrichment source, preferring the Aeneas `translation.json`
+/// (no charon run) over a charon LLBC (legacy). Returns `Ok(None)` when neither
+/// source is available. This is the single dispatch point; retiring the LLBC
+/// path later means dropping the `llbc_path` arm here and the functions it calls.
+pub fn resolve_enrichment(
+    translation_json: Option<&Path>,
+    llbc_path: Option<&Path>,
+) -> Result<Option<Enrichment>, String> {
+    if let Some(tj) = translation_json {
+        return Enrichment::from_translation_json(tj).map(Some);
+    }
+    if let Some(llbc) = llbc_path {
+        return Enrichment::from_llbc(llbc).map(Some);
+    }
+    Ok(None)
 }
 
 /// Enrich atoms by matching their `code_path` + `display_name` against the
@@ -849,7 +938,14 @@ pub fn enrich_atoms(
 
         if let Some(candidates) = candidates {
             if let Some(best) = resolve_charon_candidate(candidates, atom) {
-                atom.rust_qualified_name = Some(best.qualified_name.clone());
+                // Manifest path (minimal): do not override `rust-qualified-name`
+                // — the join keys on `charon-def-id`, and the atom keeps its
+                // SCIP-derived RQN, avoiding a format change for consumers that
+                // match on it (e.g. `--with-public-api`). The LLBC path keeps
+                // overriding, as before.
+                if enrichment.source == EnrichmentSource::Llbc {
+                    atom.rust_qualified_name = Some(best.qualified_name.clone());
+                }
                 // Only override visibility when the source actually carries it:
                 // the LLBC's `attr_info.public` may be absent, and the manifest
                 // has no visibility at all. Overwriting with `None` would wipe
@@ -2521,6 +2617,117 @@ mod tests {
         );
         assert_eq!(atom.charon_def_id, None, "stale def-id must be cleared");
         assert_eq!(atom.charon_version, None, "stale version must be cleared");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn from_translation_json_builds_functions_only_records() {
+        let dir = std::env::temp_dir().join("probe_rust_test_manifest_records");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("translation.json");
+        // globals/trait_impls share integers with functions (0, 5) — they must
+        // NOT enter the map (separate charon id spaces).
+        std::fs::write(
+            &path,
+            r#"{
+                "charon_version": "0.1.217",
+                "crate": "my_crate",
+                "functions": [
+                    {"def_id": 0, "rust_name": "my_crate::m::do_stuff",
+                     "source": {"file": "src/m.rs", "begin_line": 5, "end_line": 15}}
+                ],
+                "globals": [ {"def_id": 0, "rust_name": "my_crate::m::CONST"} ],
+                "trait_impls": [ {"def_id": 5, "rust_name": "my_crate::{impl T for X}"} ]
+            }"#,
+        )
+        .unwrap();
+
+        let e = Enrichment::from_translation_json(&path).unwrap();
+        assert_eq!(e.source, EnrichmentSource::Manifest);
+        assert_eq!(e.charon_version.as_deref(), Some("0.1.217"));
+        // Exactly one record, from functions[]; globals/trait_impls excluded.
+        let all: Vec<_> = e.by_match_key.values().flatten().collect();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].def_id, 0);
+        assert_eq!(all[0].file_path.as_deref(), Some("src/m.rs"));
+        assert_eq!(all[0].line_start, Some(5));
+        assert!(e.by_match_key.contains_key("m::do_stuff"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolve_enrichment_prefers_manifest_over_llbc() {
+        let dir = std::env::temp_dir().join("probe_rust_test_resolve_precedence");
+        std::fs::create_dir_all(&dir).unwrap();
+        let tj = dir.join("translation.json");
+        std::fs::write(
+            &tj,
+            r#"{"charon_version":"0.1.217","crate":"c","functions":[]}"#,
+        )
+        .unwrap();
+        let llbc = dir.join("charon.llbc");
+        std::fs::write(
+            &llbc,
+            r#"{"charon_version":"0.1.174","translated":{"item_names":[]}}"#,
+        )
+        .unwrap();
+
+        // Both present -> manifest wins.
+        let e = resolve_enrichment(Some(&tj), Some(&llbc)).unwrap().unwrap();
+        assert_eq!(e.source, EnrichmentSource::Manifest);
+        assert_eq!(e.charon_version.as_deref(), Some("0.1.217"));
+
+        // LLBC only.
+        let e = resolve_enrichment(None, Some(&llbc)).unwrap().unwrap();
+        assert_eq!(e.source, EnrichmentSource::Llbc);
+
+        // Neither -> None.
+        assert!(resolve_enrichment(None, None).unwrap().is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn manifest_enrich_stamps_def_id_and_keeps_scip_rqn() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_manifest_enrich");
+        std::fs::create_dir_all(&dir).unwrap();
+        let tj = dir.join("translation.json");
+        std::fs::write(
+            &tj,
+            r#"{
+                "charon_version": "0.1.217",
+                "crate": "my_crate",
+                "functions": [
+                    {"def_id": 82, "rust_name": "my_crate::m::do_stuff",
+                     "source": {"file": "src/m.rs", "begin_line": 5, "end_line": 15}}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        // Atom with a SCIP-derived RQN that differs from the manifest rendering.
+        let mut atom = test_atom();
+        atom.rust_qualified_name = Some("my_crate::m::do_stuff_SCIP".to_string());
+        let mut atoms = BTreeMap::new();
+        atoms.insert(atom.code_name.clone(), atom);
+
+        let e = Enrichment::from_translation_json(&tj).unwrap();
+        let count = enrich_atoms(&mut atoms, &e, false);
+        assert_eq!(count, 1);
+
+        let atom = atoms.get("probe:c/1.0/m/do_stuff()").unwrap();
+        // Minimal flavor: def-id + version stamped, RQN left as SCIP-derived.
+        assert_eq!(atom.charon_def_id, Some(82));
+        assert_eq!(atom.charon_version.as_deref(), Some("0.1.217"));
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("my_crate::m::do_stuff_SCIP"),
+            "manifest path must not override the SCIP rust-qualified-name"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

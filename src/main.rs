@@ -43,6 +43,12 @@ enum Commands {
         #[arg(long)]
         with_charon: bool,
 
+        /// Path to an Aeneas `translation.json`. When given, charon `def_id`s are
+        /// read from the manifest (no charon run); implies charon enrichment and
+        /// takes precedence over `--with-charon`'s LLBC path.
+        #[arg(long)]
+        translation: Option<PathBuf>,
+
         /// Override is-public-api using cargo-public-api (RQN-based matching).
         /// Requires nightly toolchain and cargo-public-api (use --auto-install).
         #[arg(long)]
@@ -126,6 +132,7 @@ fn main() -> ExitCode {
             allow_duplicates,
             auto_install,
             with_charon,
+            translation,
             with_public_api,
         } => commands::cmd_extract(
             project_path,
@@ -135,6 +142,7 @@ fn main() -> ExitCode {
             allow_duplicates,
             auto_install,
             with_charon,
+            translation,
             with_public_api,
         ),
         Commands::CalleeCrates {
