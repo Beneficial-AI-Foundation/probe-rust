@@ -89,8 +89,9 @@ fn live_extract_structural_check() {
         false,
         false,
         true,
-        false,
-        false,
+        false, // with_charon
+        None,  // translation
+        false, // with_public_api
     )
     .expect("probe-rust extract failed");
 

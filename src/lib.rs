@@ -338,6 +338,34 @@ pub struct AtomWithLines {
         default
     )]
     pub is_public_api: Option<bool>,
+    /// Charon `FunDeclId` for this function, carried through the match-key lookup
+    /// (with span disambiguation) that resolves the atom's Charon name. Equals
+    /// Aeneas's `translation.json` `def_id`, enabling a precise integer join to
+    /// the Lean translation. Populated from either enrichment source: the `Fun`
+    /// key of the LLBC's `item_names` (`--with-charon`), or the `def_id` of a
+    /// `functions[]` entry in an Aeneas `translation.json` (`--translation`).
+    /// Always emitted **together with** `charon_version`: set when a Charon
+    /// function matched *and* that source's version was read, omitted otherwise
+    /// (never an id without its version — see the emitter in
+    /// `charon_names::enrich_atoms`).
+    #[serde(
+        rename = "charon-def-id",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub charon_def_id: Option<u64>,
+    /// Charon version that produced `charon_def_id` — the top-level
+    /// `charon_version` of the LLBC (`--with-charon`) or of the
+    /// `translation.json` (`--translation`). Provenance-gates the def-id join
+    /// downstream: consumers trust `charon_def_id` only when this matches the
+    /// charon version that produced their manifest. Emitted together with
+    /// `charon_def_id` (both or neither).
+    #[serde(
+        rename = "charon-version",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub charon_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1359,6 +1387,8 @@ fn convert_to_atoms_with_lines_internal(
                 cfg,
                 is_public: Some(sig_public),
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             }
         })
         .collect()
@@ -1465,6 +1495,8 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
     }
@@ -1574,6 +1606,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -2010,6 +2044,8 @@ mod tests {
             cfg: None,
             is_public: None,
             is_public_api: None,
+            charon_def_id: None,
+            charon_version: None,
         }
     }
 

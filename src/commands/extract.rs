@@ -22,6 +22,7 @@ pub fn cmd_extract(
     allow_duplicates: bool,
     auto_install: bool,
     with_charon: bool,
+    translation: Option<PathBuf>,
     with_public_api: bool,
 ) -> ProbeResult<()> {
     println!("═══════════════════════════════════════════════════════════");
@@ -97,7 +98,12 @@ pub fn cmd_extract(
         );
     }
 
-    if with_charon {
+    // Charon enrichment: prefer the Aeneas manifest (no charon run) when a
+    // `--translation` path is given; otherwise fall back to the LLBC path when
+    // `--with-charon` is set. `--translation` implies enrichment on its own.
+    if let Some(translation) = translation.as_deref() {
+        enrich_from_manifest(translation, &mut atoms_dict);
+    } else if with_charon {
         enrich_with_charon(&project_path, auto_install, &mut atoms_dict);
     }
 
@@ -301,14 +307,56 @@ fn enrich_with_charon(
         }
     };
 
-    match charon_names::enrich_atoms_with_charon_names(atoms_dict, &llbc_path, true) {
-        Ok(count) => {
+    match charon_names::resolve_enrichment(None, Some(&llbc_path)) {
+        Ok(Some(enrichment)) => {
+            let count = charon_names::enrich_atoms(atoms_dict, &enrichment, true);
             let total = atoms_dict.len();
             println!("  ✓ Enriched {count}/{total} atoms with Charon-derived rust-qualified-name");
         }
+        Ok(None) => {}
         Err(e) => {
             eprintln!("  ⚠ Charon LLBC parsing failed: {e}");
             eprintln!("    rust-qualified-name will use heuristic");
+        }
+    }
+}
+
+/// Enrich `charon-def-id`/`charon-version` from an Aeneas `translation.json`
+/// instead of running charon. On a read/parse error, warns and skips enrichment
+/// (does **not** silently fall back to a charon run — the point of passing
+/// `--translation` is to avoid one).
+fn enrich_from_manifest(translation: &Path, atoms_dict: &mut BTreeMap<String, AtomWithLines>) {
+    println!();
+    println!(
+        "Enriching charon-def-id from Aeneas translation.json (no charon run): {}",
+        translation.display()
+    );
+
+    match charon_names::resolve_enrichment(Some(translation), None) {
+        Ok(Some(enrichment)) => {
+            // The manifest's `charon_version` gates the whole pass: with a
+            // version every matched atom is stamped with the def-id pair, without
+            // one none are (the coupling invariant). Report accordingly so the
+            // count never overclaims def-ids that were not written.
+            let has_version = enrichment.charon_version.is_some();
+            let count = charon_names::enrich_atoms(atoms_dict, &enrichment, true);
+            let total = atoms_dict.len();
+            if has_version {
+                println!(
+                    "  ✓ Enriched {count}/{total} atoms with charon-def-id from translation.json"
+                );
+            } else {
+                eprintln!(
+                    "  ⚠ translation.json has no charon_version; charon-def-id omitted \
+                     ({count}/{total} atoms matched a manifest record)"
+                );
+                eprintln!("    rust-qualified-name stays SCIP-derived");
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("  ⚠ translation.json enrichment failed: {e}");
+            eprintln!("    charon-def-id will be absent; rust-qualified-name stays SCIP-derived");
         }
     }
 }
