@@ -759,27 +759,59 @@ fn resolve_charon_candidate<'a>(
     })
 }
 
-/// Enrich atoms by matching their `code_path` + `display_name` against
-/// Charon LLBC names. Returns the number of atoms enriched.
+/// Which source produced an [`Enrichment`] — for logging and test assertions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrichmentSource {
+    /// Aeneas `translation.json` (charon ran once, inside Aeneas).
+    Manifest,
+    /// charon LLBC (legacy; produced by a probe-rust-driven charon run).
+    Llbc,
+}
+
+/// Source-blind charon enrichment data: Charon function info grouped by match
+/// key, plus the producing charon version. [`enrich_atoms`] consumes this
+/// without knowing where it came from. This is the seam that lets the LLBC path
+/// be retired once every Aeneas project ships a `translation.json` — mirroring
+/// probe-aeneas's `function_source` (Manifest vs legacy) split.
+pub struct Enrichment {
+    pub by_match_key: HashMap<String, Vec<CharonFunInfo>>,
+    pub charon_version: Option<String>,
+    pub source: EnrichmentSource,
+}
+
+impl Enrichment {
+    /// Build from a charon LLBC file (legacy path). Fallible: reads and parses
+    /// the multi-megabyte AST.
+    pub fn from_llbc(llbc_path: &Path) -> Result<Self, String> {
+        let parsed = parse_llbc_names(llbc_path)?;
+        Ok(Enrichment {
+            by_match_key: parsed.by_match_key,
+            charon_version: parsed.charon_version,
+            source: EnrichmentSource::Llbc,
+        })
+    }
+}
+
+/// Enrich atoms by matching their `code_path` + `display_name` against the
+/// resolved [`Enrichment`], stamping `rust-qualified-name`, `is-public`, and the
+/// `charon-def-id`/`charon-version` provenance pair. Source-blind. Returns the
+/// number of atoms enriched.
 ///
-/// Uses a two-key strategy: first tries `code_path`-based match key, then
-/// falls back to `code_module`-based key which captures parent-function
+/// Uses a two-key strategy: first tries the `code_path`-based match key, then
+/// falls back to a `code_module`-based key which captures parent-function
 /// nesting (e.g. `decompress::step_2`) that file paths cannot express.
-pub fn enrich_atoms_with_charon_names(
+pub fn enrich_atoms(
     atoms: &mut std::collections::BTreeMap<String, crate::AtomWithLines>,
-    llbc_path: &Path,
+    enrichment: &Enrichment,
     verbose: bool,
-) -> Result<usize, String> {
-    let parsed = parse_llbc_names(llbc_path)?;
-    let charon_map = parsed.by_match_key;
-    // Provenance from the same parse; stamped onto every enriched atom so
-    // consumers can gate the def-id join (trust `charon-def-id` only when
-    // versions agree).
-    let charon_version = parsed.charon_version;
+) -> usize {
+    let charon_map = &enrichment.by_match_key;
+    let charon_version = &enrichment.charon_version;
 
     if verbose {
         eprintln!(
-            "  Charon LLBC has {} unique match-keys for functions (charon {})",
+            "  {:?} enrichment: {} unique match-keys (charon {})",
+            enrichment.source,
             charon_map.len(),
             charon_version.as_deref().unwrap_or("unknown"),
         );
@@ -788,12 +820,11 @@ pub fn enrich_atoms_with_charon_names(
     let mut enriched = 0;
 
     for atom in atoms.values_mut() {
-        // Provenance is (re)derived from THIS LLBC alone. Clear both fields up
+        // Provenance is (re)derived from THIS source alone. Clear both fields up
         // front so any atom that does not produce a fresh (id, version) this
         // pass — no match, or a match without a readable version — never keeps
         // stale provenance from an earlier enrichment. Upholds the coupling
-        // invariant (both set, or both absent) across re-enrichment. RQN /
-        // is-public are left as-is (no coupling contract).
+        // invariant (both set, or both absent) across re-enrichment.
         atom.charon_def_id = None;
         atom.charon_version = None;
 
@@ -819,12 +850,18 @@ pub fn enrich_atoms_with_charon_names(
         if let Some(candidates) = candidates {
             if let Some(best) = resolve_charon_candidate(candidates, atom) {
                 atom.rust_qualified_name = Some(best.qualified_name.clone());
-                atom.is_public = best.is_public;
+                // Only override visibility when the source actually carries it:
+                // the LLBC's `attr_info.public` may be absent, and the manifest
+                // has no visibility at all. Overwriting with `None` would wipe
+                // the SCIP-derived value.
+                if let Some(is_public) = best.is_public {
+                    atom.is_public = Some(is_public);
+                }
                 // Emit the def-id only together with its provenance version — a
                 // def-id is meaningful only relative to the Charon run that
                 // produced it. Both were pre-cleared above, so set them only
                 // when a version is available; otherwise they stay absent.
-                if let Some(version) = &charon_version {
+                if let Some(version) = charon_version {
                     atom.charon_def_id = Some(best.def_id);
                     atom.charon_version = Some(version.clone());
                 }
@@ -833,7 +870,18 @@ pub fn enrich_atoms_with_charon_names(
         }
     }
 
-    Ok(enriched)
+    enriched
+}
+
+/// Enrich atoms from a charon LLBC file (legacy convenience wrapper over
+/// [`Enrichment::from_llbc`] + [`enrich_atoms`]). Returns the number enriched.
+pub fn enrich_atoms_with_charon_names(
+    atoms: &mut std::collections::BTreeMap<String, crate::AtomWithLines>,
+    llbc_path: &Path,
+    verbose: bool,
+) -> Result<usize, String> {
+    let enrichment = Enrichment::from_llbc(llbc_path)?;
+    Ok(enrich_atoms(atoms, &enrichment, verbose))
 }
 
 #[cfg(test)]
@@ -2473,6 +2521,64 @@ mod tests {
         );
         assert_eq!(atom.charon_def_id, None, "stale def-id must be cleared");
         assert_eq!(atom.charon_version, None, "stale version must be cleared");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The enrich step must not clobber a SCIP-derived `is-public` with `None`
+    /// when the matched Charon candidate carries no visibility (LLBC entry
+    /// without `attr_info.public`, or a version-less/manifest source).
+    #[test]
+    fn test_enrich_does_not_clobber_is_public_with_none() {
+        use std::collections::BTreeMap;
+
+        let dir = std::env::temp_dir().join("probe_rust_test_enrich_pub_noclobber");
+        std::fs::create_dir_all(&dir).unwrap();
+        let llbc_path = dir.join("test.llbc");
+
+        // Matching function has a span but NO attr_info.public -> is_public None.
+        let llbc_json = r#"{
+            "charon_version": "0.1.217",
+            "translated": {
+                "crate_name": "my_crate",
+                "item_names": [
+                    {"key": {"Fun": 0}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["m", 0]}, {"Ident": ["do_stuff", 0]}]}
+                ],
+                "trait_impls": [],
+                "fun_decls": [
+                    {
+                        "def_id": 0,
+                        "item_meta": {
+                            "span": {"data": {"file_id": 0, "beg": {"line": 5, "col": 0}, "end": {"line": 15, "col": 0}}}
+                        }
+                    }
+                ],
+                "files": [{"name": {"Local": "src/m.rs"}}]
+            }
+        }"#;
+        std::fs::write(&llbc_path, llbc_json).unwrap();
+
+        // Atom already has is-public from SCIP.
+        let mut atom = test_atom();
+        atom.is_public = Some(false);
+        let mut atoms = BTreeMap::new();
+        atoms.insert(atom.code_name.clone(), atom);
+
+        let count = enrich_atoms_with_charon_names(&mut atoms, &llbc_path, false).unwrap();
+        assert_eq!(count, 1);
+
+        let atom = atoms.get("probe:c/1.0/m/do_stuff()").unwrap();
+        // RQN + def-id enriched, but the SCIP is-public survives.
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("my_crate::m::do_stuff")
+        );
+        assert_eq!(atom.charon_def_id, Some(0));
+        assert_eq!(
+            atom.is_public,
+            Some(false),
+            "SCIP is-public must not be clobbered by a candidate without visibility"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
