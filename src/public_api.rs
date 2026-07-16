@@ -703,6 +703,8 @@ pub fn my_crate::real_function()
             cfg: None,
             is_public: None,
             is_public_api: None,
+            charon_def_id: None,
+            charon_version: None,
         }
     }
 }

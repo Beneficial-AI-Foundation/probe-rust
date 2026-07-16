@@ -32,6 +32,9 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct CharonFunInfo {
     pub qualified_name: String,
+    /// Charon `FunDeclId` (the `Fun` key in `item_names`). Equals Aeneas's
+    /// `translation.json` `def_id`.
+    pub def_id: u64,
     /// Match key: `module::bare_fn_name`, e.g. `scalar::from_bytes_mod_order`
     pub match_key: String,
     /// Source file path from the LLBC span, e.g. `src/scalar.rs`
@@ -111,6 +114,7 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<HashMap<String, Vec<CharonFu
             .or_default()
             .push(CharonFunInfo {
                 qualified_name,
+                def_id: fun_id,
                 match_key,
                 file_path: meta.map(|m| m.file_path.clone()),
                 line_start: meta.map(|m| m.line_start),
@@ -749,11 +753,15 @@ pub fn enrich_atoms_with_charon_names(
     verbose: bool,
 ) -> Result<usize, String> {
     let charon_map = parse_llbc_names(llbc_path)?;
+    // Read once; stamped onto every enriched atom so consumers can provenance-
+    // gate the def-id join (trust `charon-def-id` only when versions agree).
+    let charon_version = read_charon_version(llbc_path);
 
     if verbose {
         eprintln!(
-            "  Charon LLBC has {} unique match-keys for functions",
-            charon_map.len()
+            "  Charon LLBC has {} unique match-keys for functions (charon {})",
+            charon_map.len(),
+            charon_version.as_deref().unwrap_or("unknown"),
         );
     }
 
@@ -783,12 +791,40 @@ pub fn enrich_atoms_with_charon_names(
             if let Some(best) = resolve_charon_candidate(candidates, atom) {
                 atom.rust_qualified_name = Some(best.qualified_name.clone());
                 atom.is_public = best.is_public;
+                atom.charon_def_id = Some(best.def_id);
+                atom.charon_version = charon_version.clone();
                 enriched += 1;
             }
         }
     }
 
     Ok(enriched)
+}
+
+/// Read the top-level `charon_version` from an LLBC file cheaply.
+///
+/// Charon serializes `charon_version` as the first field, so a bounded prefix
+/// read avoids re-parsing the multi-megabyte AST. Returns `None` when the field
+/// is not found in the prefix or on IO error.
+fn read_charon_version(llbc_path: &Path) -> Option<String> {
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(llbc_path).ok()?;
+    let mut buf = [0u8; 4096];
+    let n = file.read(&mut buf).ok()?;
+    let prefix = String::from_utf8_lossy(&buf[..n]);
+    parse_charon_version_prefix(&prefix)
+}
+
+/// Extract the `charon_version` string value from a JSON prefix. Tolerates
+/// whitespace around the `:` so it works on both compact and pretty-printed
+/// LLBC. Returns `None` when the field or its string value is absent.
+fn parse_charon_version_prefix(prefix: &str) -> Option<String> {
+    const KEY: &str = "\"charon_version\"";
+    let after_key = &prefix[prefix.find(KEY)? + KEY.len()..];
+    let value = after_key.trim_start().strip_prefix(':')?.trim_start();
+    let rest = value.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 #[cfg(test)]
@@ -1180,10 +1216,30 @@ mod tests {
         assert_eq!(pub_entries.len(), 1);
         assert_eq!(pub_entries[0].is_public, Some(true));
         assert_eq!(pub_entries[0].qualified_name, "my_crate::public_fn");
+        assert_eq!(pub_entries[0].def_id, 0);
 
         let priv_entries = charon_map.get("private_fn").unwrap();
         assert_eq!(priv_entries.len(), 1);
         assert_eq!(priv_entries[0].is_public, Some(false));
+        assert_eq!(priv_entries[0].def_id, 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_read_charon_version() {
+        let dir = std::env::temp_dir().join("probe_rust_test_charon_version");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let present = dir.join("with.llbc");
+        std::fs::write(&present, r#"{"charon_version":"0.1.217","translated":{}}"#).unwrap();
+        assert_eq!(read_charon_version(&present).as_deref(), Some("0.1.217"));
+
+        let absent = dir.join("without.llbc");
+        std::fs::write(&absent, r#"{"translated":{}}"#).unwrap();
+        assert_eq!(read_charon_version(&absent), None);
+
+        assert_eq!(read_charon_version(&dir.join("missing.llbc")), None);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1197,15 +1253,16 @@ mod tests {
         let llbc_path = dir.join("test.llbc");
 
         let llbc_json = r#"{
+            "charon_version": "0.1.99",
             "translated": {
                 "crate_name": "my_crate",
                 "item_names": [
-                    {"key": {"Fun": 0}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Ident": ["do_stuff", 0]}]}
+                    {"key": {"Fun": 7}, "value": [{"Ident": ["my_crate", 0]}, {"Ident": ["module", 0]}, {"Ident": ["do_stuff", 0]}]}
                 ],
                 "trait_impls": [],
                 "fun_decls": [
                     {
-                        "def_id": 0,
+                        "def_id": 7,
                         "item_meta": {
                             "span": {"data": {"file_id": 0, "beg": {"line": 5, "col": 0}, "end": {"line": 15, "col": 0}}},
                             "attr_info": {"attributes": [], "inline": null, "rename": null, "public": true}
@@ -1238,6 +1295,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1250,6 +1309,9 @@ mod tests {
             atom.rust_qualified_name.as_deref(),
             Some("my_crate::module::do_stuff")
         );
+        // WS3: the resolved FunDeclId and charon version ride along.
+        assert_eq!(atom.charon_def_id, Some(7));
+        assert_eq!(atom.charon_version.as_deref(), Some("0.1.99"));
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1312,6 +1374,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1389,6 +1453,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1451,6 +1517,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1546,6 +1614,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1641,6 +1711,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
         atoms.insert(
@@ -1663,6 +1735,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1711,6 +1785,8 @@ mod tests {
             cfg: None,
             is_public: Some(true),
             is_public_api: None,
+            charon_def_id: None,
+            charon_version: None,
         };
 
         let json = serde_json::to_value(&atom).unwrap();
@@ -1744,6 +1820,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             }
         };
 
@@ -1782,6 +1860,8 @@ mod tests {
                 cfg: None,
                 is_public: Some(true),
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1854,6 +1934,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -1928,6 +2010,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -2004,6 +2088,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -2079,6 +2165,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
@@ -2160,6 +2248,8 @@ mod tests {
                 cfg: None,
                 is_public: None,
                 is_public_api: None,
+                charon_def_id: None,
+                charon_version: None,
             },
         );
 
