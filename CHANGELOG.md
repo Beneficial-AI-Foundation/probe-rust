@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-17
+
+### Fixed
+- **`--with-public-api` now resolves crate-root `pub use` re-exports and renames**: `cargo public-api` reports items by their public re-export path (e.g. `spqr::ChainParams`, or `spqr::SerializationError` for `pub use crate::serialize::Error as SerializationError`), while atoms carry the definition-path `rust-qualified-name` (`spqr::chain::ChainParams`, `spqr::serialize::Error`). These are now reconciled by parsing crate-root `pub use` declarations (via `syn`) into an alias map and rewriting public names to their definition form before matching. The crate root is resolved by checking `<project>/Cargo.toml` for a `[package]` matching the target crate (honoring an explicit `[lib] path`, then `src/lib.rs`/`src/main.rs`), falling back to the lib target's `src_path` from `cargo metadata` for workspace layouts. The rewrite is additive (it only adds definition-form candidates; a match still requires a real atom), so with a correctly resolved crate root it does not mislabel private atoms. `#[cfg(...)]`-gated, nested/chained submodule, and glob (`pub use foo::*`) re-exports are not resolved; only `crate::`/`self::`-prefixed (Rust 2018+) root re-exports are.
+
 ## [0.8.0] - 2026-07-16
 
 ### Added
@@ -209,7 +214,13 @@ Initial release.
 - CI pipeline with formatting, clippy, and unit test checks.
 - Release automation via cargo-dist for Linux, macOS, and Windows binaries.
 
-[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.7.1...v0.8.0
+[0.7.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.4...v0.7.0
+[0.6.4]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.5.0...v0.6.0
