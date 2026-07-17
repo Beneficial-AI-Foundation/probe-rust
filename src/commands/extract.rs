@@ -388,6 +388,13 @@ fn enrich_with_public_api(
                 public_names.len()
             );
 
+            // Resolve crate-root `pub use` re-exports (and renames) so functions
+            // reported by cargo-public-api under their public path still match
+            // atoms carrying the definition-path `rust-qualified-name`.
+            let aliases = public_api::collect_reexport_aliases(project_path, pkg_name);
+            let public_names =
+                public_api::expand_public_names_with_aliases(&public_names, pkg_name, &aliases);
+
             let (set_true, set_false) =
                 public_api::enrich_atoms_with_public_api(atoms_dict, &public_names);
             println!("  ✓ is-public-api: {} true, {} false", set_true, set_false);

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`--with-public-api` now resolves crate-root `pub use` re-exports and renames**: `cargo public-api` reports items by their public re-export path (e.g. `spqr::ChainParams`, or `spqr::SerializationError` for `pub use crate::serialize::Error as SerializationError`), while atoms carry the definition-path `rust-qualified-name` (`spqr::chain::ChainParams`, `spqr::serialize::Error`). These are now reconciled by parsing crate-root `pub use` declarations (via `syn`) into an alias map and rewriting public names to their definition form before matching. The crate root is resolved by checking `<project>/Cargo.toml` for a `[package]` matching the target crate (honoring an explicit `[lib] path`, then `src/lib.rs`/`src/main.rs`), falling back to the lib target's `src_path` from `cargo metadata` for workspace layouts. The rewrite is additive (it only adds definition-form candidates; a match still requires a real atom), so with a correctly resolved crate root it does not mislabel private atoms. `#[cfg(...)]`-gated, nested/chained submodule, and glob (`pub use foo::*`) re-exports are not resolved; only `crate::`/`self::`-prefixed (Rust 2018+) root re-exports are.
+
 ## [0.8.0] - 2026-07-16
 
 ### Added
