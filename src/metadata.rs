@@ -10,7 +10,7 @@ use std::process::Command;
 
 const TOOL_NAME: &str = "probe-rust";
 const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const SCHEMA_VERSION: &str = "2.4";
+pub const SCHEMA_VERSION: &str = "3.0";
 
 // =============================================================================
 // Envelope types
@@ -301,7 +301,7 @@ mod tests {
     fn test_unwrap_envelope_with_envelope() {
         let json = serde_json::json!({
             "schema": "probe-rust/extract",
-            "schema-version": "2.0",
+            "schema-version": "3.0",
             "tool": { "name": "probe-rust", "version": "0.2.0", "command": "extract" },
             "source": {
                 "repo": "https://github.com/org/proj",

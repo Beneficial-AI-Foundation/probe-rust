@@ -1,7 +1,7 @@
 # probe-rust Data Schemas
 
-Version: 2.4
-Date: 2026-07-16
+Version: 3.0
+Date: 2026-07-27
 
 This document specifies the JSON output formats produced by each probe-rust
 subcommand. It complements the language-agnostic
@@ -69,7 +69,7 @@ standardized metadata envelope:
 ```json
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.4",
+  "schema-version": "3.0",
   "tool": {
     "name": "probe-rust",
     "version": "0.4.0",
@@ -92,7 +92,7 @@ standardized metadata envelope:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema` | string | Data type identifier: `"probe-rust/extract"` |
-| `schema-version` | string | Interchange spec version (`"2.4"`) |
+| `schema-version` | string | Interchange spec version (`"3.0"`) |
 | `tool.name` | string | Always `"probe-rust"` |
 | `tool.version` | string | Semver version of the probe-rust binary |
 | `tool.command` | string | Subcommand that produced the file (e.g. `"extract"`) |
@@ -337,6 +337,11 @@ major version.
 
 ### Changelog
 
+- **3.0** (2026-07-27): Renamed the `is-disabled` atom field to `untracked`
+  (both the JSON wire name and the Rust field). Semantics and boolean polarity
+  are unchanged (`is-disabled: true` → `untracked: true`). Breaking wire-format
+  change with no backward-compatibility alias, and part of the ecosystem-wide
+  major bump to a unified schema-version `3.0`.
 - **2.4** (2026-07-16): Added `charon-def-id` and `charon-version` optional
   fields, emitted together or not at all. Populated from either the
   `--with-charon` LLBC or a `--translation <manifest>` Aeneas `translation.json`
