@@ -10,4 +10,4 @@
 
 External references:
 
-- [Schema 2.0 specification](../../docs/SCHEMA.md) — envelope format, atom fields, versioning, `is-public-api` limitations
+- [Schema 3.0 specification](../../docs/SCHEMA.md) — envelope format, atom fields, versioning, `is-public-api` limitations

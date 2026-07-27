@@ -1,6 +1,6 @@
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.2",
+  "schema-version": "3.0",
   "tool": {
     "name": "probe-rust",
     "version": "0.3.0",
@@ -26,7 +26,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:alloc/https://github.com/rust-lang/rust/library/alloc/string/impl#[String][`AsRef<str>`]as_ref()": {
       "display-name": "as_ref",
@@ -39,7 +39,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:alloc/https://github.com/rust-lang/rust/library/alloc/string/impl#[T][ToString]to_string()": {
       "display-name": "to_string",
@@ -52,7 +52,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:alloc/https://github.com/rust-lang/rust/library/alloc/vec/impl#[`Vec<T,/A>`][Clone]clone()": {
       "display-name": "clone",
@@ -65,7 +65,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:alloc/https://github.com/rust-lang/rust/library/alloc/vec/impl#[`Vec<T,/A>`][IntoIterator]into_iter()": {
       "display-name": "into_iter",
@@ -78,7 +78,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:alloc/https://github.com/rust-lang/rust/library/alloc/vec/impl#[`Vec<T,/A>`]len()": {
       "display-name": "len",
@@ -91,7 +91,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:bincode/1.3.3/deserialize()": {
       "display-name": "deserialize",
@@ -104,7 +104,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:bincode/1.3.3/serialize()": {
       "display-name": "serialize",
@@ -117,7 +117,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/array/impl#[`[T;/N]`][Hash]hash()": {
       "display-name": "hash",
@@ -130,7 +130,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/borrow/Borrow#borrow()": {
       "display-name": "borrow",
@@ -143,7 +143,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/clone/Clone#clone()": {
       "display-name": "clone",
@@ -156,7 +156,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/cmp/impls/impl#[i8][Ord]cmp()": {
       "display-name": "cmp",
@@ -169,7 +169,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/convert/From#from()": {
       "display-name": "from",
@@ -182,7 +182,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/convert/impl#[T][`Into<U>`]into()": {
       "display-name": "into",
@@ -195,7 +195,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/convert/impl#[T][`TryInto<U>`]try_into()": {
       "display-name": "try_into",
@@ -208,7 +208,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx/_mm256_set1_epi32()": {
       "display-name": "_mm256_set1_epi32",
@@ -221,7 +221,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx/_mm256_set1_epi64x()": {
       "display-name": "_mm256_set1_epi64x",
@@ -234,7 +234,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx/_mm256_set_epi32()": {
       "display-name": "_mm256_set_epi32",
@@ -247,7 +247,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx/_mm256_set_epi64x()": {
       "display-name": "_mm256_set_epi64x",
@@ -260,7 +260,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx2/_mm256_blend_epi32()": {
       "display-name": "_mm256_blend_epi32",
@@ -273,7 +273,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx2/_mm256_mul_epu32()": {
       "display-name": "_mm256_mul_epu32",
@@ -286,7 +286,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx2/_mm256_permutevar8x32_epi32()": {
       "display-name": "_mm256_permutevar8x32_epi32",
@@ -299,7 +299,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx2/_mm256_shuffle_epi32()": {
       "display-name": "_mm256_shuffle_epi32",
@@ -312,7 +312,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx2/_mm256_srlv_epi32()": {
       "display-name": "_mm256_srlv_epi32",
@@ -325,7 +325,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx2/_mm256_unpackhi_epi32()": {
       "display-name": "_mm256_unpackhi_epi32",
@@ -338,7 +338,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/core_arch/x86/avx2/_mm256_unpacklo_epi32()": {
       "display-name": "_mm256_unpacklo_epi32",
@@ -351,7 +351,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/intrinsics/transmute()": {
       "display-name": "transmute",
@@ -364,7 +364,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/adapters/map/impl#[`Map<I,/F>`][Iterator]fold()": {
       "display-name": "fold",
@@ -377,7 +377,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/adapters/map/impl#[`Map<I,/F>`][Iterator]next()": {
       "display-name": "next",
@@ -390,7 +390,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/adapters/rev/impl#[`Rev<T>`][Clone]clone()": {
       "display-name": "clone",
@@ -403,7 +403,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/sources/empty/empty()": {
       "display-name": "empty",
@@ -416,7 +416,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/sources/once/once()": {
       "display-name": "once",
@@ -429,7 +429,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/collect/IntoIterator#into_iter()": {
       "display-name": "into_iter",
@@ -442,7 +442,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#by_ref()": {
       "display-name": "by_ref",
@@ -455,7 +455,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#chain()": {
       "display-name": "chain",
@@ -468,7 +468,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#cmp()": {
       "display-name": "cmp",
@@ -481,7 +481,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#collect()": {
       "display-name": "collect",
@@ -494,7 +494,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#filter()": {
       "display-name": "filter",
@@ -507,7 +507,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#fold()": {
       "display-name": "fold",
@@ -520,7 +520,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#map()": {
       "display-name": "map",
@@ -533,7 +533,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#product()": {
       "display-name": "product",
@@ -546,7 +546,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#rev()": {
       "display-name": "rev",
@@ -559,7 +559,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#size_hint()": {
       "display-name": "size_hint",
@@ -572,7 +572,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#skip()": {
       "display-name": "skip",
@@ -585,7 +585,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#sum()": {
       "display-name": "sum",
@@ -598,7 +598,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/iter/traits/iterator/Iterator#zip()": {
       "display-name": "zip",
@@ -611,7 +611,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[i8]wrapping_sub()": {
       "display-name": "wrapping_sub",
@@ -624,7 +624,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[u128]to_le_bytes()": {
       "display-name": "to_le_bytes",
@@ -637,7 +637,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[u16]to_le_bytes()": {
       "display-name": "to_le_bytes",
@@ -650,7 +650,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[u32]to_le_bytes()": {
       "display-name": "to_le_bytes",
@@ -663,7 +663,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[u64]from_le_bytes()": {
       "display-name": "from_le_bytes",
@@ -676,7 +676,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[u64]to_le_bytes()": {
       "display-name": "to_le_bytes",
@@ -689,7 +689,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[u64]wrapping_mul()": {
       "display-name": "wrapping_mul",
@@ -702,7 +702,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/num/impl#[u64]wrapping_sub()": {
       "display-name": "wrapping_sub",
@@ -715,7 +715,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/option/impl#[`Option<T>`]expect()": {
       "display-name": "expect",
@@ -728,7 +728,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/option/impl#[`Option<T>`]is_none()": {
       "display-name": "is_none",
@@ -741,7 +741,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/option/impl#[`Option<T>`]map()": {
       "display-name": "map",
@@ -754,7 +754,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/option/impl#[`Option<T>`]unwrap()": {
       "display-name": "unwrap",
@@ -767,7 +767,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/ptr/read_volatile()": {
       "display-name": "read_volatile",
@@ -780,7 +780,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/result/impl#[`Result<T,/E>`]as_deref()": {
       "display-name": "as_deref",
@@ -793,7 +793,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/result/impl#[`Result<T,/E>`]expect()": {
       "display-name": "expect",
@@ -806,7 +806,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/result/impl#[`Result<T,/E>`]map()": {
       "display-name": "map",
@@ -819,7 +819,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/slice/impl#[`[T]`]chunks()": {
       "display-name": "chunks",
@@ -832,7 +832,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/slice/impl#[`[T]`]copy_from_slice()": {
       "display-name": "copy_from_slice",
@@ -845,7 +845,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/slice/impl#[`[T]`]iter()": {
       "display-name": "iter",
@@ -858,7 +858,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/slice/impl#[`[T]`]iter_mut()": {
       "display-name": "iter_mut",
@@ -871,7 +871,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:core/https://github.com/rust-lang/rust/library/core/slice/impl#[`[T]`]len()": {
       "display-name": "len",
@@ -884,7 +884,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:criterion/0.5.1/bencher/impl#[`Bencher<'a,/M>`]iter()": {
       "display-name": "iter",
@@ -897,7 +897,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:criterion/0.5.1/bencher/impl#[`Bencher<'a,/M>`]iter_batched()": {
       "display-name": "iter_batched",
@@ -910,7 +910,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:criterion/0.5.1/benchmark_group/impl#[BenchmarkId]new()": {
       "display-name": "new",
@@ -923,7 +923,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:criterion/0.5.1/benchmark_group/impl#[`BenchmarkGroup<'a,/M>`]bench_function()": {
       "display-name": "bench_function",
@@ -936,7 +936,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:criterion/0.5.1/benchmark_group/impl#[`BenchmarkGroup<'a,/M>`]bench_with_input()": {
       "display-name": "bench_with_input",
@@ -949,7 +949,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:criterion/0.5.1/impl#[Criterion][Default]default()": {
       "display-name": "default",
@@ -962,7 +962,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:criterion/0.5.1/impl#[`Criterion<M>`]benchmark_group()": {
       "display-name": "benchmark_group",
@@ -975,7 +975,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/&VartimePrecomputedStraus#impl<I>#[VartimePrecomputedStraus]optional_mixed_multiscalar_mul()": {
       "display-name": "VartimePrecomputedStraus::optional_mixed_multiscalar_mul",
@@ -992,7 +992,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::VartimePrecomputedStraus::optional_mixed_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/cpuid_avx2/impl#[InitToken]get()": {
@@ -1006,7 +1006,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/cpuid_avx2/init()": {
       "display-name": "init",
@@ -1019,7 +1019,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/get_selected_backend()": {
       "display-name": "get_selected_backend",
@@ -1036,7 +1036,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::get_selected_backend",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1056,7 +1056,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::VartimePrecomputedStraus::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/pippenger_optional_multiscalar_mul()": {
@@ -1075,7 +1075,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::pippenger_optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/curve_models/&AffineNielsPoint#impl#[AffineNielsPoint][Zeroize]zeroize()": {
@@ -1092,7 +1092,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::AffineNielsPoint::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1110,7 +1110,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::AffineNielsPoint::conditional_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1126,7 +1126,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::AffineNielsPoint::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1142,7 +1142,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::AffineNielsPoint::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1158,7 +1158,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::CompletedPoint::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1174,7 +1174,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::CompletedPoint::as_extended",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/curve_models/&CompletedPoint#impl<ProjectivePoint>#[CompletedPoint]as_projective()": {
@@ -1189,7 +1189,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::CompletedPoint::as_projective",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/curve_models/&EdwardsPoint#impl<&AffineNielsPoint>#[`&'a/EdwardsPoint`][`Add<&'b/AffineNielsPoint>`]add()": {
@@ -1204,7 +1204,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::EdwardsPoint::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1220,7 +1220,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::EdwardsPoint::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1236,7 +1236,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::EdwardsPoint::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1252,7 +1252,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::EdwardsPoint::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1270,7 +1270,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1288,7 +1288,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint::conditional_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1304,7 +1304,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1320,7 +1320,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1336,7 +1336,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectivePoint::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1355,7 +1355,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectivePoint::double",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/curve_models/&ProjectivePoint#impl<EdwardsPoint>#[ProjectivePoint]as_extended()": {
@@ -1372,7 +1372,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectivePoint::as_extended",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/curve_models/&ProjectivePoint#impl<bool>#[ProjectivePoint][ValidityCheck]is_valid()": {
@@ -1389,7 +1389,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectivePoint::is_valid",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1407,7 +1407,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::AffineNielsPoint::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1425,7 +1425,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1443,7 +1443,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::AffineNielsPoint::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1459,7 +1459,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::AffineNielsPoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1477,7 +1477,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1493,7 +1493,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectiveNielsPoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1509,7 +1509,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::curve_models::ProjectivePoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1541,7 +1541,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::pippenger::Pippenger::optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1569,7 +1569,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::pippenger::test_vartime_pippenger",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1597,7 +1597,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::precomputed_straus::VartimePrecomputedStraus::optional_mixed_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1619,7 +1619,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::precomputed_straus::VartimePrecomputedStraus::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1646,7 +1646,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::straus::Straus::multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1675,7 +1675,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::straus::Straus::optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1700,7 +1700,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::variable_base::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1728,7 +1728,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::scalar_mul::vartime_double_base::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/field/&FieldElement51#impl#[FieldElement51][Zeroize]zeroize()": {
@@ -1745,7 +1745,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1763,7 +1763,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::negate",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/field/&FieldElement51#impl<&FieldElement51>#[FieldElement51][ConditionallySelectable]conditional_assign()": {
@@ -1780,7 +1780,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::conditional_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1796,7 +1796,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::add_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1812,7 +1812,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::mul_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1828,7 +1828,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::sub_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1844,7 +1844,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1860,7 +1860,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1878,7 +1878,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1894,7 +1894,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1912,7 +1912,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::square",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/field/&FieldElement51#impl<FieldElement51>#[FieldElement51]square2()": {
@@ -1929,7 +1929,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::square2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/field/&FieldElement51#impl<FieldElement51>#[`&'a/FieldElement51`][Neg]neg()": {
@@ -1946,7 +1946,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -1964,7 +1964,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::as_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/field/&FieldElement51#impl<u32>#[FieldElement51]pow2k()": {
@@ -1979,7 +1979,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::pow2k",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/field/impl<&FieldElement51>#[FieldElement51][ConditionallySelectable]conditional_select()": {
@@ -1996,7 +1996,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2014,7 +2014,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::conditional_swap",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2030,7 +2030,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::from_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/field/impl<FieldElement51>#[FieldElement51]from_limbs()": {
@@ -2045,7 +2045,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::from_limbs",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2061,7 +2061,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::FieldElement51::reduce",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2077,7 +2077,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::m",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2093,7 +2093,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::field::m",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2111,7 +2111,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2127,7 +2127,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2145,7 +2145,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::as_montgomery",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/&Scalar52#impl<Scalar52>#[Scalar52]from_montgomery()": {
@@ -2162,7 +2162,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::from_montgomery",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/&Scalar52#impl<Scalar52>#[Scalar52]montgomery_square()": {
@@ -2180,7 +2180,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::montgomery_square",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/&Scalar52#impl<Scalar52>#[Scalar52]square()": {
@@ -2199,7 +2199,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::square",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/&Scalar52#impl<[u8;/{const}]>#[Scalar52]as_bytes()": {
@@ -2214,7 +2214,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::as_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/&Scalar52#impl<usize>#[Scalar52][`Index<usize>`]index()": {
@@ -2229,7 +2229,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::index",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2245,7 +2245,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::index_mut",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2264,7 +2264,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::black_box",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2282,7 +2282,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/impl<&Scalar52>#[Scalar52]montgomery_mul()": {
@@ -2300,7 +2300,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::montgomery_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/impl<&Scalar52>#[Scalar52]mul()": {
@@ -2318,7 +2318,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/impl<&Scalar52>#[Scalar52]square_internal()": {
@@ -2335,7 +2335,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::square_internal",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2351,7 +2351,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/impl<&[u8;/{const}]>#[Scalar52]from_bytes()": {
@@ -2366,7 +2366,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::from_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/impl<&[u8;/{const}]>#[Scalar52]from_bytes_wide()": {
@@ -2384,7 +2384,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::from_bytes_wide",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/serial/u64/scalar/impl<Scalar52>#[Scalar52]montgomery_reduce()": {
@@ -2399,7 +2399,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::montgomery_reduce",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2417,7 +2417,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::Scalar52::mul_internal",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2433,7 +2433,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::m",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2452,7 +2452,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::part1",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2472,7 +2472,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::part2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2490,7 +2490,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2508,7 +2508,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::from_bytes_wide",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2526,7 +2526,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::montgomery_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2544,7 +2544,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::montgomery_mul_max",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2562,7 +2562,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::montgomery_square_max",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2580,7 +2580,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2598,7 +2598,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::mul_max",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2616,7 +2616,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::square_max",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2634,7 +2634,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::serial::u64::scalar::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2654,7 +2654,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::straus_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/straus_optional_multiscalar_mul()": {
@@ -2673,7 +2673,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::straus_optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/variable_base_mul()": {
@@ -2692,7 +2692,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::variable_base_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vartime_double_base_mul()": {
@@ -2711,7 +2711,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vartime_double_base_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/edwards/&CachedPoint#impl<&Self>#[CachedPoint][ConditionallySelectable]conditional_assign()": {
@@ -2728,7 +2728,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::CachedPoint::conditional_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2748,7 +2748,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::CachedPoint::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2768,7 +2768,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2784,7 +2784,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2802,7 +2802,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::conditional_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2823,7 +2823,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::double",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/edwards/&ExtendedPoint#impl<u32>#[ExtendedPoint]mul_by_pow_2()": {
@@ -2840,7 +2840,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::mul_by_pow_2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/edwards/impl<&Self>#[CachedPoint][ConditionallySelectable]conditional_select()": {
@@ -2857,7 +2857,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::CachedPoint::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2875,7 +2875,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2895,7 +2895,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::LookupTable<CachedPoint>::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2916,7 +2916,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::NafLookupTable5<CachedPoint>::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2937,7 +2937,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::NafLookupTable8<CachedPoint>::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2955,7 +2955,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::CachedPoint::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2971,7 +2971,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::CachedPoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -2990,7 +2990,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::CachedPoint::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3008,7 +3008,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3024,7 +3024,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3042,7 +3042,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::crate::EdwardsPoint::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3060,7 +3060,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::edwards::ExtendedPoint::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3080,7 +3080,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::conditional_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3096,7 +3096,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3112,7 +3112,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::blend",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/&FieldElement2625x4#impl<FieldElement2625x4>#[FieldElement2625x4]diff_sum()": {
@@ -3131,7 +3131,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::diff_sum",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/&FieldElement2625x4#impl<FieldElement2625x4>#[FieldElement2625x4]negate_lazy()": {
@@ -3146,7 +3146,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::negate_lazy",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/&FieldElement2625x4#impl<FieldElement2625x4>#[FieldElement2625x4]reduce()": {
@@ -3170,7 +3170,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::reduce",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/&FieldElement2625x4#impl<FieldElement2625x4>#[FieldElement2625x4]square_and_negate_D()": {
@@ -3185,7 +3185,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::square_and_negate_D",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/&FieldElement2625x4#impl<Shuffle>#[FieldElement2625x4]shuffle()": {
@@ -3200,7 +3200,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::shuffle",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/&FieldElement2625x4#impl<[FieldElement51;/{const}]>#[FieldElement2625x4]split()": {
@@ -3217,7 +3217,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::split",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/FieldElement2625x4#impl<(u32>#[FieldElement2625x4][`Mul<(u32,/u32,/u32,/u32)>`]mul()": {
@@ -3237,7 +3237,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3255,7 +3255,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3271,7 +3271,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3290,7 +3290,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::blend_lanes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3309,7 +3309,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3329,7 +3329,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/impl<&FieldElement51>#[FieldElement2625x4]splat()": {
@@ -3346,7 +3346,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::splat",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/avx2/field/impl<[u64x4;/{const}]>#[FieldElement2625x4]reduce64()": {
@@ -3368,7 +3368,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::FieldElement2625x4::reduce64",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3386,7 +3386,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::m",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3404,7 +3404,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::m",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3432,7 +3432,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::m_lo",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3457,7 +3457,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::m_lo",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3477,7 +3477,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::repack_pair",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3497,7 +3497,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::shuffle_lanes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3518,7 +3518,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::avx2::field::unpack_pair",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3533,7 +3533,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl#[u32x8]extract()": {
       "display-name": "extract",
@@ -3546,7 +3546,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl#[u32x8]shl()": {
       "display-name": "shl",
@@ -3559,7 +3559,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl#[u32x8]splat_const()": {
       "display-name": "u32x8::splat_const",
@@ -3575,7 +3575,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u32x8::splat_const",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl#[u64x4]shl()": {
@@ -3589,7 +3589,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl#[u64x4]shr()": {
       "display-name": "shr",
@@ -3602,7 +3602,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl#[u64x4]splat_const()": {
       "display-name": "u64x4::splat_const",
@@ -3618,7 +3618,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u64x4::splat_const",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl<u32>#[u32x8]new()": {
@@ -3635,7 +3635,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u32x8::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl<u32>#[u32x8]new_const()": {
@@ -3652,7 +3652,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u32x8::new_const",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl<u32>#[u32x8]splat()": {
@@ -3669,7 +3669,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u32x8::splat",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl<u64>#[u64x4]new()": {
@@ -3686,7 +3686,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u64x4::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl<u64>#[u64x4]new_const()": {
@@ -3703,7 +3703,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u64x4::new_const",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/impl<u64>#[u64x4]splat()": {
@@ -3720,7 +3720,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u64x4::splat",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/packed_simd/u32x8#impl<u32x8>#[u32x8]mul32()": {
@@ -3738,7 +3738,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::packed_simd::u32x8::mul32",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/scalar_mul/pippenger/spec_avx2/impl<J>#[Pippenger][VartimeMultiscalarMul]optional_multiscalar_mul()": {
@@ -3771,7 +3771,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::scalar_mul::pippenger::Pippenger::optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3797,7 +3797,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::scalar_mul::precomputed_straus::VartimePrecomputedStraus::optional_mixed_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3819,7 +3819,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::scalar_mul::precomputed_straus::VartimePrecomputedStraus::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3847,7 +3847,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::scalar_mul::straus::Straus::multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3874,7 +3874,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::scalar_mul::straus::Straus::optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3898,7 +3898,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::scalar_mul::variable_base::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/backend/vector/scalar_mul/vartime_double_base/spec_avx2/mul()": {
@@ -3923,7 +3923,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::backend::vector::scalar_mul::vartime_double_base::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/constants/test/test_d_vs_ratio()": {
@@ -3940,7 +3940,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::constants::test_d_vs_ratio",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3960,7 +3960,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::constants::test_eight_torsion",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3981,7 +3981,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::constants::test_four_torsion",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -3999,7 +3999,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::constants::test_sqrt_ad_minus_one",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4018,7 +4018,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::constants::test_sqrt_constants_sign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4037,7 +4037,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::constants::test_sqrt_minus_one",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4058,7 +4058,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::constants::test_two_torsion",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4077,7 +4077,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4092,7 +4092,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4110,7 +4110,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4129,7 +4129,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::ct_eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4147,7 +4147,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4167,7 +4167,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::decompress",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4183,7 +4183,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::as_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4199,7 +4199,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::to_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4217,7 +4217,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4235,7 +4235,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::ct_eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4251,7 +4251,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::add_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4270,7 +4270,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4286,7 +4286,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::sub_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4305,7 +4305,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4324,7 +4324,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4340,7 +4340,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::mul_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4358,7 +4358,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4377,7 +4377,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4395,7 +4395,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::as_affine_niels",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4417,7 +4417,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::compress",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4437,7 +4437,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::double",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4455,7 +4455,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::mul_by_cofactor",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4476,7 +4476,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::mul_by_pow_2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4492,7 +4492,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4511,7 +4511,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::to_montgomery",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4527,7 +4527,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::as_projective_niels",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4543,7 +4543,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::as_projective",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4562,7 +4562,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::is_valid",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4581,7 +4581,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::is_small_order",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4599,7 +4599,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::is_torsion_free",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4615,7 +4615,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::Scalar::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4633,7 +4633,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::VartimeEdwardsPrecomputation::optional_mixed_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4649,7 +4649,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4667,7 +4667,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::mul_clamped",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4688,7 +4688,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::step_1",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4708,7 +4708,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::step_2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -4723,7 +4723,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/edwards/impl#[EdwardsBasepointTableRadix256][BasepointTable]create()": {
       "display-name": "create",
@@ -4736,7 +4736,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/edwards/impl#[EdwardsBasepointTableRadix32][BasepointTable]create()": {
       "display-name": "create",
@@ -4749,7 +4749,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/edwards/impl#[EdwardsBasepointTableRadix64][BasepointTable]create()": {
       "display-name": "create",
@@ -4762,7 +4762,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/edwards/impl#[EdwardsBasepointTable][BasepointTable]basepoint()": {
       "display-name": "basepoint",
@@ -4775,7 +4775,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/edwards/impl#[EdwardsBasepointTable][BasepointTable]create()": {
       "display-name": "create",
@@ -4788,7 +4788,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/edwards/impl<&EdwardsPoint>#[EdwardsPoint][ConditionallySelectable]conditional_select()": {
       "display-name": "EdwardsPoint::conditional_select",
@@ -4804,7 +4804,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4822,7 +4822,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::vartime_double_scalar_mul_basepoint",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4838,7 +4838,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::mul_base",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4856,7 +4856,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::try_from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4875,7 +4875,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::from_slice",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -4893,7 +4893,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4909,7 +4909,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::CompressedEdwardsY::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4927,7 +4927,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4943,7 +4943,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4963,7 +4963,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::sum",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -4981,7 +4981,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::VartimeEdwardsPrecomputation::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -5002,7 +5002,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -5024,7 +5024,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -5043,7 +5043,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::EdwardsPoint::mul_base_clamped",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -5062,7 +5062,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint16_vs_mul_by_pow_2_4",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5084,7 +5084,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_decompression_compression",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5103,7 +5103,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_double_vs_basepoint2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5122,7 +5122,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_mult_by_basepoint_order",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5140,7 +5140,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_mult_one_vs_basepoint",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5160,7 +5160,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_mult_two_vs_basepoint2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5179,7 +5179,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_mult_vs_ed25519py",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5199,7 +5199,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_plus_basepoint_affine_niels_vs_basepoint2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5219,7 +5219,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_plus_basepoint_projective_niels_vs_basepoint2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5237,7 +5237,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_plus_basepoint_vs_basepoint2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5257,7 +5257,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_projective_extended_round_trip",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5276,7 +5276,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_table_basepoint_function_correct",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5299,7 +5299,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_tables",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5322,7 +5322,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::basepoint_tables_unreduced_scalar",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5342,7 +5342,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::compressed_identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5363,7 +5363,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::conditional_assign_for_affine_niels_point",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5383,7 +5383,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::decompression_sign_handling",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5404,7 +5404,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::extended_point_equality_handles_scaling",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5426,7 +5426,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::impl_sum",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5445,7 +5445,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::is_identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5463,7 +5463,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::is_small_order",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5479,7 +5479,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::monte_carlo_overflow_underflow_debug_assert_test",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5501,7 +5501,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::mul_base_clamped",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5527,7 +5527,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::multiscalar_consistency_iter",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5545,7 +5545,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::multiscalar_consistency_n_100",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5563,7 +5563,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::multiscalar_consistency_n_1000",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5581,7 +5581,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::multiscalar_consistency_n_250",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5599,7 +5599,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::multiscalar_consistency_n_500",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5617,7 +5617,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::scalar_mul_vs_ed25519py",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5636,7 +5636,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::scalarmult_extended_point_works_both_ways",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5654,7 +5654,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::test_precomputed_basepoint_mult",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5675,7 +5675,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::to_affine_niels_clears_denominators",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5696,7 +5696,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::double_scalar_mul_basepoint_vs_ed25519py",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5721,7 +5721,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::multiscalar_mul_vartime_vs_consttime",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5742,7 +5742,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::multiscalar_mul_vs_ed25519py",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5771,7 +5771,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::edwards::vartime_precomputed_vs_nonprecomputed_multiscalar",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5790,7 +5790,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5811,7 +5811,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5831,7 +5831,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5851,7 +5851,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5874,7 +5874,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5896,7 +5896,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5915,7 +5915,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::ct_eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5934,7 +5934,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5952,7 +5952,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::invsqrt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5971,7 +5971,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::pow22501",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -5990,7 +5990,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::is_negative",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6009,7 +6009,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::is_zero",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6028,7 +6028,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::invert",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6047,7 +6047,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::pow_p58",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6074,7 +6074,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::batch_invert",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6097,7 +6097,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::backend::serial::u64::field::FieldElement51::sqrt_ratio_i",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6116,7 +6116,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::a_invert_vs_inverse_of_a_constant",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6134,7 +6134,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::a_mul_a_vs_a_squared_constant",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6153,7 +6153,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::a_p58_vs_ap58_constant",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6172,7 +6172,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::a_square2_vs_a_squared_constant",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6191,7 +6191,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::a_square_vs_a_squared_constant",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6212,7 +6212,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::batch_invert_a_matches_nonbatched",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6230,7 +6230,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::batch_invert_empty",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6249,7 +6249,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::conditional_negate",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6268,7 +6268,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::encoding_is_canonical",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6286,7 +6286,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::equality",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6304,7 +6304,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::from_bytes_highbit_is_ignored",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6325,7 +6325,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::field::sqrt_ratio_behavior",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6340,7 +6340,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6355,7 +6355,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6379,7 +6379,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6397,7 +6397,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -6417,7 +6417,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::hash",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -6436,7 +6436,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::ct_eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -6455,7 +6455,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -6471,7 +6471,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::mul_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -6492,7 +6492,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -6508,7 +6508,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::as_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -6524,7 +6524,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::to_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -6549,7 +6549,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::mul_bits_be",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -6570,7 +6570,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::to_edwards",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -6589,7 +6589,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::ProjectivePoint::as_affine",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/montgomery/&Scalar#impl<&MontgomeryPoint>#[`&Scalar`][`Mul<&MontgomeryPoint>`]mul()": {
@@ -6604,7 +6604,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::Scalar::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6622,7 +6622,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::mul_clamped",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -6640,7 +6640,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::differential_add_and_double",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6664,7 +6664,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::elligator_encode",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6682,7 +6682,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::ProjectivePoint::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6701,7 +6701,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::mul_base",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -6717,7 +6717,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -6735,7 +6735,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::ProjectivePoint::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6751,7 +6751,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::ProjectivePoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6770,7 +6770,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::MontgomeryPoint::mul_base_clamped",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -6788,7 +6788,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::basepoint_edwards_to_montgomery",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6807,7 +6807,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::basepoint_montgomery_to_edwards",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6826,7 +6826,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::bytestring_bits_le",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6842,7 +6842,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::eq_defined_mod_p",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6862,7 +6862,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::identity_in_different_coordinates",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6884,7 +6884,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::identity_in_different_models",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6907,7 +6907,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::montgomery_elligator_correct",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6927,7 +6927,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::montgomery_elligator_zero_zero",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6947,7 +6947,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::montgomery_ladder_matches_edwards_scalarmult",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6971,7 +6971,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::montgomery_mul_bits_be",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -6993,7 +6993,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::montgomery_mul_bits_be_twist",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7013,7 +7013,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::montgomery_to_edwards_rejects_twist",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7033,7 +7033,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::mul_base_clamped",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7052,7 +7052,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::montgomery::rand_prime_order_point",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7073,7 +7073,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7093,7 +7093,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7113,7 +7113,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7134,7 +7134,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7154,7 +7154,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7176,7 +7176,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7199,7 +7199,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7221,7 +7221,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7244,7 +7244,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7267,7 +7267,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7283,7 +7283,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::BatchCompressState::efgh",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7301,7 +7301,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7320,7 +7320,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::ct_eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7338,7 +7338,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7358,7 +7358,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::decompress",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7374,7 +7374,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::as_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7390,7 +7390,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::to_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7406,7 +7406,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoBasepointTable::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7424,7 +7424,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoBasepointTable::basepoint",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7444,7 +7444,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7462,7 +7462,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::ct_eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7478,7 +7478,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::add_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7497,7 +7497,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7513,7 +7513,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::sub_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7529,7 +7529,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7545,7 +7545,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7561,7 +7561,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::mul_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7577,7 +7577,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7597,7 +7597,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7620,7 +7620,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::compress",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7636,7 +7636,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7652,7 +7652,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::coset4",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7668,7 +7668,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::Scalar::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7684,7 +7684,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::Scalar::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7705,7 +7705,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::VartimeRistrettoPrecomputation::optional_mixed_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7721,7 +7721,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7743,7 +7743,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::step_1",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7765,7 +7765,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::step_2",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7784,7 +7784,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::random",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/ristretto/impl<&RistrettoPoint>#[BatchCompressState][`From<&'a/RistrettoPoint>`]from()": {
@@ -7812,7 +7812,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::BatchCompressState::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -7830,7 +7830,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoBasepointTable::create",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7848,7 +7848,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7866,7 +7866,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::vartime_double_scalar_mul_basepoint",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7882,7 +7882,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::mul_base",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7902,7 +7902,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::from_uniform_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7920,7 +7920,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::try_from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7939,7 +7939,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::from_slice",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -7957,7 +7957,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7973,7 +7973,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::CompressedRistretto::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -7993,7 +7993,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::sum",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8009,7 +8009,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::double_and_compress_batch",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -8030,7 +8030,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::VartimeRistrettoPrecomputation::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8050,7 +8050,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8071,7 +8071,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8089,7 +8089,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8107,7 +8107,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8130,7 +8130,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::RistrettoPoint::elligator_ristretto_flavor",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8153,7 +8153,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::basepoint_roundtrip",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8173,7 +8173,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::compress_id",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8196,7 +8196,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::decompress_id",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8216,7 +8216,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::decompress_negative_s_fails",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8236,7 +8236,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::elligator_vs_ristretto_sage",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8255,7 +8255,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::encodings_of_small_multiples_of_basepoint",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8273,7 +8273,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::four_torsion_basepoint",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8293,7 +8293,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::four_torsion_random",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8315,7 +8315,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::impl_sum",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8334,7 +8334,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::one_way_map",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8356,7 +8356,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::random_roundtrip",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8376,7 +8376,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::scalarmult_ristrettopoint_works_both_ways",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8405,7 +8405,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::ristretto::vartime_precomputed_vs_nonprecomputed_multiscalar",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8424,7 +8424,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8444,7 +8444,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8467,7 +8467,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8488,7 +8488,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8506,7 +8506,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::zeroize",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8522,7 +8522,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::add_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8542,7 +8542,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::mul_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8558,7 +8558,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::sub_assign",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8578,7 +8578,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8598,7 +8598,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8618,7 +8618,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::sub",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8636,7 +8636,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::ct_eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8655,7 +8655,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::eq",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8671,7 +8671,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8690,7 +8690,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::is_canonical",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8710,7 +8710,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::invert",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -8731,7 +8731,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::reduce",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8753,7 +8753,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8771,7 +8771,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::unpack",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8787,7 +8787,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::as_radix_16",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8806,7 +8806,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::as_radix_2w",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8825,7 +8825,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::non_adjacent_form",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8841,7 +8841,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::as_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -8857,7 +8857,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::to_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -8875,7 +8875,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::bits_le",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8891,7 +8891,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::index",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8909,7 +8909,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::backend::serial::u64::scalar::Scalar52::pack",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8929,7 +8929,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::backend::serial::u64::scalar::Scalar52::invert",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/scalar/&Scalar52#impl<UnpackedScalar>#[`backend::serial::u64::scalar::Scalar52`]montgomery_invert()": {
@@ -8947,7 +8947,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::backend::serial::u64::scalar::Scalar52::montgomery_invert",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/scalar/Scalar#impl<Scalar>#[Scalar][Neg]neg()": {
@@ -8962,7 +8962,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::neg",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -8978,7 +8978,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::bot_half",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -8994,7 +8994,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::clamp_integer",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -9013,7 +9013,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::random",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/scalar/impl<&Self>#[Scalar][ConditionallySelectable]conditional_select()": {
@@ -9030,7 +9030,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::conditional_select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9059,7 +9059,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::batch_invert",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -9078,7 +9078,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from_bytes_mod_order_wide",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -9097,7 +9097,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::product",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9116,7 +9116,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::sum",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9132,7 +9132,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::default",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9150,7 +9150,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from_bytes_mod_order",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -9170,7 +9170,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from_canonical_bytes",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -9190,7 +9190,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9210,7 +9210,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9230,7 +9230,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9250,7 +9250,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9266,7 +9266,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": true
     },
@@ -9282,7 +9282,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::Scalar::to_radix_2w_size_hint",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9306,7 +9306,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::read_le_u64_into",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9325,7 +9325,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::square_multiply",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9341,7 +9341,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::add_reduces",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9367,7 +9367,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::batch_invert_consistency",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9385,7 +9385,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::batch_invert_empty",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9403,7 +9403,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::batch_invert_with_a_zero_input_panics",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9426,7 +9426,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::canonical_decoding",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9444,7 +9444,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::from_bytes_mod_order_wide",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9462,7 +9462,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::from_u64",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9482,7 +9482,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::fuzzer_testcase_reduction",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9500,7 +9500,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::impl_add",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9516,7 +9516,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::impl_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9538,7 +9538,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::impl_product",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9560,7 +9560,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::impl_sum",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9578,7 +9578,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::invert",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9600,7 +9600,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::montgomery_reduce_matches_from_bytes_mod_order_wide",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9616,7 +9616,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::neg_twice_is_identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9636,7 +9636,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::non_adjacent_form_iter",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9656,7 +9656,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::non_adjacent_form_random",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9674,7 +9674,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::non_adjacent_form_test_vector",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9692,7 +9692,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::reduce",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9708,7 +9708,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::scalar_mul_by_one",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9728,7 +9728,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::square",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9744,7 +9744,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::sub_reduces",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9765,7 +9765,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::test_mul_reduction_invariance",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9788,7 +9788,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::test_pippenger_radix",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9809,7 +9809,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::test_pippenger_radix_iter",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9828,7 +9828,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::test_read_le_u64_into",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9846,7 +9846,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::test_read_le_u64_into_should_panic_on_bad_input",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9864,7 +9864,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::test_scalar_clamp",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9886,7 +9886,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::test_scalar_from_int",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9906,7 +9906,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::to_bytes_from_bytes_roundtrips",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9924,7 +9924,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::scalar::top_half",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9948,7 +9948,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9971,7 +9971,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -9995,7 +9995,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10014,7 +10014,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::BasepointTable::mul_base_clamped",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10036,7 +10036,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::VartimePrecomputedMultiscalarMul::vartime_mixed_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10055,7 +10055,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::VartimePrecomputedMultiscalarMul::vartime_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10075,7 +10075,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::T::is_identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10090,7 +10090,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/traits/BasepointTable<&Self::Point>#create()": {
       "display-name": "BasepointTable::create",
@@ -10104,7 +10104,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::BasepointTable::create",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10120,7 +10120,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::Identity::identity",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10136,7 +10136,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::MultiscalarMul::multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10152,7 +10152,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::VartimeMultiscalarMul::optional_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10174,7 +10174,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::VartimeMultiscalarMul::vartime_multiscalar_mul",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10189,7 +10189,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/traits/VartimePrecomputedMultiscalarMul<I>#new()": {
       "display-name": "VartimePrecomputedMultiscalarMul::new",
@@ -10203,7 +10203,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::traits::VartimePrecomputedMultiscalarMul::new",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true,
       "is-public-api": true
     },
@@ -10219,7 +10219,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable5<T>::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10235,7 +10235,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable5<T>::select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/window/&NafLookupTable8<T>#impl<&core::fmt::Formatter<'_>>#[`NafLookupTable8<T>`][Debug]fmt()": {
@@ -10250,7 +10250,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable8<T>::fmt",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10266,7 +10266,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable8<T>::select",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": true
     },
     "probe:curve25519-dalek/4.1.3/window/impl#[`LookupTable<ProjectiveNielsPoint>`][`From<&'a/EdwardsPoint>`]from()": {
@@ -10280,7 +10280,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/window/impl#[`LookupTable<T>`]select()": {
       "display-name": "select",
@@ -10293,7 +10293,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:curve25519-dalek/4.1.3/window/impl<&EdwardsPoint>#[`NafLookupTable5<AffineNielsPoint>`][`From<&'a/EdwardsPoint>`]from()": {
       "display-name": "NafLookupTable5<AffineNielsPoint>::from",
@@ -10311,7 +10311,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable5<AffineNielsPoint>::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10331,7 +10331,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable5<ProjectiveNielsPoint>::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10351,7 +10351,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable8<AffineNielsPoint>::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10371,7 +10371,7 @@
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "curve25519_dalek::window::NafLookupTable8<ProjectiveNielsPoint>::from",
-      "is-disabled": false,
+      "untracked": false,
       "is-public": false,
       "is-public-api": false
     },
@@ -10386,7 +10386,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:rand/0.8.5/rngs/thread/impl#[ThreadRng][RngCore]fill_bytes()": {
       "display-name": "fill_bytes",
@@ -10399,7 +10399,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:rand/0.8.5/rngs/thread/thread_rng()": {
       "display-name": "thread_rng",
@@ -10412,7 +10412,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:rand_core/0.6.4/RngCore#fill_bytes()": {
       "display-name": "fill_bytes",
@@ -10425,7 +10425,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:rand_core/0.6.4/os/impl#[OsRng][RngCore]fill_bytes()": {
       "display-name": "fill_bytes",
@@ -10438,7 +10438,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:rustc_version/0.4.1/version()": {
       "display-name": "version",
@@ -10451,7 +10451,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:rustc_version/0.4.1/version_meta()": {
       "display-name": "version_meta",
@@ -10464,7 +10464,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:std/https://github.com/rust-lang/rust/library/std/env/var()": {
       "display-name": "var",
@@ -10477,7 +10477,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/ConditionallySelectable#conditional_swap()": {
       "display-name": "conditional_swap",
@@ -10490,7 +10490,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/ConstantTimeEq#ct_eq()": {
       "display-name": "ct_eq",
@@ -10503,7 +10503,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[Choice][`From<u8>`]from()": {
       "display-name": "from",
@@ -10516,7 +10516,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[Choice]unwrap_u8()": {
       "display-name": "unwrap_u8",
@@ -10529,7 +10529,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[T][ConditionallyNegatable]conditional_negate()": {
       "display-name": "conditional_negate",
@@ -10542,7 +10542,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[`CtOption<T>`]is_none()": {
       "display-name": "is_none",
@@ -10555,7 +10555,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[`CtOption<T>`]is_some()": {
       "display-name": "is_some",
@@ -10568,7 +10568,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[`CtOption<T>`]new()": {
       "display-name": "new",
@@ -10581,7 +10581,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[`[T]`][ConstantTimeEq]ct_eq()": {
       "display-name": "ct_eq",
@@ -10594,7 +10594,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[bool][`From<Choice>`]from()": {
       "display-name": "from",
@@ -10607,7 +10607,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[u64][ConditionallySelectable]conditional_assign()": {
       "display-name": "conditional_assign",
@@ -10620,7 +10620,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[u64][ConditionallySelectable]conditional_select()": {
       "display-name": "conditional_select",
@@ -10633,7 +10633,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[u64][ConditionallySelectable]conditional_swap()": {
       "display-name": "conditional_swap",
@@ -10646,7 +10646,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[u8][ConditionallySelectable]conditional_select()": {
       "display-name": "conditional_select",
@@ -10659,7 +10659,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:subtle/2.6.1/impl#[u8][ConstantTimeEq]ct_eq()": {
       "display-name": "ct_eq",
@@ -10672,7 +10672,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:zeroize/1.8.2/Zeroize#zeroize()": {
       "display-name": "zeroize",
@@ -10685,7 +10685,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:zeroize/1.8.2/impl#[Z][Zeroize]zeroize()": {
       "display-name": "zeroize",
@@ -10698,7 +10698,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:zeroize/1.8.2/impl#[`Vec<Z>`][Zeroize]zeroize()": {
       "display-name": "zeroize",
@@ -10711,7 +10711,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:zeroize/1.8.2/impl#[`Zeroizing<Z>`]new()": {
       "display-name": "new",
@@ -10724,7 +10724,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     },
     "probe:zeroize/1.8.2/impl#[`[Z;/N]`][Zeroize]zeroize()": {
       "display-name": "zeroize",
@@ -10737,7 +10737,7 @@
       },
       "kind": "exec",
       "language": "rust",
-      "is-disabled": false
+      "untracked": false
     }
   }
 }

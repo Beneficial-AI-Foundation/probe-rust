@@ -1,7 +1,7 @@
 # probe-rust Data Schemas
 
-Version: 2.4
-Date: 2026-07-16
+Version: 3.0
+Date: 2026-07-27
 
 This document specifies the JSON output formats produced by each probe-rust
 subcommand. It complements the language-agnostic
@@ -61,7 +61,7 @@ The code-name is not serialized inside the value object -- it is the dictionary 
 
 ---
 
-## Schema 2.0 Envelope
+## Schema 3.0 Envelope
 
 Commands that produce enveloped output (`extract`) wrap the payload in a
 standardized metadata envelope:
@@ -69,7 +69,7 @@ standardized metadata envelope:
 ```json
 {
   "schema": "probe-rust/extract",
-  "schema-version": "2.4",
+  "schema-version": "3.0",
   "tool": {
     "name": "probe-rust",
     "version": "0.4.0",
@@ -92,7 +92,7 @@ standardized metadata envelope:
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema` | string | Data type identifier: `"probe-rust/extract"` |
-| `schema-version` | string | Interchange spec version (`"2.4"`) |
+| `schema-version` | string | Interchange spec version (`"3.0"`) |
 | `tool.name` | string | Always `"probe-rust"` |
 | `tool.version` | string | Semver version of the probe-rust binary |
 | `tool.command` | string | Subcommand that produced the file (e.g. `"extract"`) |
@@ -138,7 +138,7 @@ standardized metadata envelope:
     "rust-qualified-name": "my_crate::module::MyStruct::method",
     "charon-def-id": 439,
     "charon-version": "0.1.217",
-    "is-disabled": false,
+    "untracked": false,
     "cfg": "feature = \"alloc\"",
     "is-public": true,
     "is-public-api": true
@@ -159,7 +159,7 @@ standardized metadata envelope:
 | `kind` | DeclKind | yes | Always `"exec"` for standard Rust |
 | `language` | string | yes | Always `"rust"` |
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible LLBC-derived name; otherwise (including the `--translation` manifest path, which does not override it) it is derived from the SCIP symbol’s module chain and the function’s `display-name`. |
-| `is-disabled` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions that are out of scope. |
+| `untracked` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions that are out of scope. |
 | `cfg` | string | no | The combined item-gating `#[cfg(...)]` predicate governing the function — its own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-joined (e.g. `all(test, feature = "serde")`). Cosmetic `#[cfg_attr(...)]` is ignored. Omitted when the function has no `#[cfg]` gate. Downstream tools evaluate it against the build config to decide whether the function is compiled (and hence in scope). |
 | `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used and the matched LLBC entry carries visibility (`attr_info.public`), the Charon-derived value takes precedence; a candidate without visibility (and the `--translation` manifest path, which carries none) never clobbers the SCIP value. This is item-level visibility, not crate-level API reachability. |
 | `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. By default derived from SCIP module-chain visibility walk (no external tools required). When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name` (RQN). See **Limitations** below. |
@@ -337,6 +337,11 @@ major version.
 
 ### Changelog
 
+- **3.0** (2026-07-27): Renamed the `is-disabled` atom field to `untracked`
+  (both the JSON wire name and the Rust field). Semantics and boolean polarity
+  are unchanged (`is-disabled: true` → `untracked: true`). Breaking wire-format
+  change with no backward-compatibility alias, and part of the ecosystem-wide
+  major bump to a unified schema-version `3.0`.
 - **2.4** (2026-07-16): Added `charon-def-id` and `charon-version` optional
   fields, emitted together or not at all. Populated from either the
   `--with-charon` LLBC or a `--translation <manifest>` Aeneas `translation.json`

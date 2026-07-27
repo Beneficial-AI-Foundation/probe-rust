@@ -269,7 +269,7 @@ mod tests {
             kind: DeclKind::Exec,
             language: "rust".to_string(),
             rust_qualified_name: None,
-            is_disabled: false,
+            untracked: false,
             cfg: None,
             is_public: None,
             is_public_api: None,

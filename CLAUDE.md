@@ -42,7 +42,7 @@ src/
 │   └── list_functions.rs # List-functions command (syn-based source parsing)
 ├── constants.rs     # Shared constants (SCIP kinds, prefixes)
 ├── error.rs         # Unified error types
-├── metadata.rs      # Schema 2.0 envelope construction, project metadata
+├── metadata.rs      # Schema 3.0 envelope construction, project metadata
 ├── path_utils.rs    # Path matching utilities
 ├── rust_parser.rs   # AST parsing using syn for function spans
 ├── scip_cache.rs    # SCIP index generation, caching
@@ -53,7 +53,7 @@ src/
 
 ### Pipeline
 
-1. **Extract Pipeline** (`extract` command): SCIP JSON → call graph parsing → spans via syn → Schema 2.0 envelope → `.verilib/probes/`
+1. **Extract Pipeline** (`extract` command): SCIP JSON → call graph parsing → spans via syn → Schema 3.0 envelope → `.verilib/probes/`
 2. **Callee-Crates Pipeline** (`callee-crates` command): atoms.json → function resolution → BFS traversal → group by crate
 3. **List-Functions Pipeline** (`list-functions` command): source files → syn AST parsing → function metadata collection
 
@@ -67,13 +67,13 @@ src/
 
 **Auto-download Tool Manager**: The `scip` CLI tool can be auto-downloaded to `~/.probe-rust/tools/`. Version resolution: env var override → GitHub `/releases/latest` API → compiled-in fallback.
 
-**Schema 2.0 Metadata Envelope**: All JSON outputs are wrapped in a standardized envelope containing `schema`, `schema-version`, `tool`, `source`, `timestamp`, and `data` fields. See `docs/SCHEMA.md` for the full specification.
+**Schema 3.0 Metadata Envelope**: All JSON outputs are wrapped in a standardized envelope containing `schema`, `schema-version`, `tool`, `source`, `timestamp`, and `data` fields. See `docs/SCHEMA.md` for the full specification.
 
 ### Key Types
 
 - `FunctionNode`: Call graph node with callees and type context
 - `AtomWithLines`: Output format with line ranges
-- `Envelope<T>`: Schema 2.0 metadata wrapper for JSON output
+- `Envelope<T>`: Schema 3.0 metadata wrapper for JSON output
 - `ProjectMetadata`: Git commit, repo URL, timestamp, package name/version
 
 ## External Tool Dependencies

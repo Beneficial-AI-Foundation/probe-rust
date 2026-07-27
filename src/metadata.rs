@@ -1,4 +1,4 @@
-//! Schema 2.0 metadata gathering and envelope construction.
+//! Schema 3.0 metadata gathering and envelope construction.
 //!
 //! Reads git info and Cargo.toml to populate the envelope fields.
 //! Provides envelope wrapping for output and unwrapping for input.
@@ -10,7 +10,7 @@ use std::process::Command;
 
 const TOOL_NAME: &str = "probe-rust";
 const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const SCHEMA_VERSION: &str = "2.4";
+pub const SCHEMA_VERSION: &str = "3.0";
 
 // =============================================================================
 // Envelope types
@@ -100,7 +100,7 @@ pub fn gather_metadata(project_path: &Path) -> ProjectMetadata {
 // Envelope wrapping / unwrapping
 // =============================================================================
 
-/// Wrap data in a Schema 2.0 envelope.
+/// Wrap data in a Schema 3.0 envelope.
 pub fn wrap_in_envelope<T: Serialize>(
     schema: &str,
     command: &str,
@@ -127,7 +127,7 @@ pub fn wrap_in_envelope<T: Serialize>(
     }
 }
 
-/// Extract the data payload from JSON, unwrapping the Schema 2.0 envelope if present.
+/// Extract the data payload from JSON, unwrapping the Schema 3.0 envelope if present.
 pub fn unwrap_envelope(json: serde_json::Value) -> serde_json::Value {
     if let serde_json::Value::Object(mut map) = json {
         let is_envelope = matches!(
@@ -301,7 +301,7 @@ mod tests {
     fn test_unwrap_envelope_with_envelope() {
         let json = serde_json::json!({
             "schema": "probe-rust/extract",
-            "schema-version": "2.0",
+            "schema-version": "3.0",
             "tool": { "name": "probe-rust", "version": "0.2.0", "command": "extract" },
             "source": {
                 "repo": "https://github.com/org/proj",
