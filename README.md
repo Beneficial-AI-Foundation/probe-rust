@@ -122,7 +122,7 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
       "kind": "exec",
       "language": "rust",
       "rust-qualified-name": "my_crate::module::MyStruct::process",
-      "is-disabled": false
+      "untracked": false
     }
   }
 }

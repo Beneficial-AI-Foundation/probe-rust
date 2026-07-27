@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`is-disabled` atom field renamed to `untracked`** (both the JSON wire name and the Rust field identifier). The semantics are unchanged — the field still means "out of verification scope" and the boolean polarity is preserved (`is-disabled: true` → `untracked: true`). This is a breaking wire-format change with no backward-compatibility alias.
+
 ## [0.8.1] - 2026-07-17
 
 ### Fixed
