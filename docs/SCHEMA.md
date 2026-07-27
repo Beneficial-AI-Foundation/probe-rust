@@ -61,7 +61,7 @@ The code-name is not serialized inside the value object -- it is the dictionary 
 
 ---
 
-## Schema 2.0 Envelope
+## Schema 3.0 Envelope
 
 Commands that produce enveloped output (`extract`) wrap the payload in a
 standardized metadata envelope:

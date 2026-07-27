@@ -11,7 +11,7 @@ Check the implementation against KB-defined properties and architectural constra
 
 ### Property checks
 
-- **P1 (Envelope)**: Verify `extract` output uses Schema 2.0 envelope with correct schema string and version matching `docs/SCHEMA.md`
+- **P1 (Envelope)**: Verify `extract` output uses Schema 3.0 envelope with correct schema string and version matching `docs/SCHEMA.md`
 - **P2 (Atom identity)**: Check code-name uniqueness; verify `BTreeMap` keying in output path
 - **P3 (Deterministic output)**: Scan for `HashMap`/`HashSet` in serialized output paths; verify `BTreeMap`/`BTreeSet` usage
 - **P4 (Stub structure)**: Verify `add_external_stubs` produces empty code-path, `{0,0}` lines, empty deps

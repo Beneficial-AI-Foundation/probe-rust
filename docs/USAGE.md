@@ -117,7 +117,7 @@ probe-rust callee-crates <FUNCTION> [OPTIONS]
 | Flag | Short | Description |
 |---|---|---|
 | `--depth <N>` | `-d` | Maximum traversal depth. 1 = direct callees, 2 = callees of callees, etc. |
-| `--atoms-file <PATH>` | `-a` | Path to atoms.json file. Reads from stdin if omitted. Supports both bare-dict and Schema 2.0 envelope formats. |
+| `--atoms-file <PATH>` | `-a` | Path to atoms.json file. Reads from stdin if omitted. Supports both bare-dict and Schema 3.0 envelope formats. |
 | `--output <PATH>` | `-o` | Output file path. Prints to stdout if omitted. |
 | `--exclude-stdlib` | | Exclude standard library crates (`core`, `alloc`, `std`) from output. |
 | `--exclude-crates <LIST>` | | Comma-separated list of crate names to exclude. |
@@ -247,7 +247,7 @@ Summary: 3 functions in 2 files
 
 For the complete JSON schema specification covering all commands, see [SCHEMA.md](SCHEMA.md).
 
-The `extract` command produces a JSON file wrapped in a Schema 2.0 metadata envelope:
+The `extract` command produces a JSON file wrapped in a Schema 3.0 metadata envelope:
 
 ```json
 {

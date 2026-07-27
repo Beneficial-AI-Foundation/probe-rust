@@ -8,7 +8,7 @@ Every property here must hold in the implementation. If a property is violated, 
 
 ### P1 — Envelope
 
-The `extract` command wraps output in a Schema 2.0 envelope with `schema: "probe-rust/extract"`. The `schema-version` field must match the version in `docs/SCHEMA.md`. Currently `"2.4"`.
+The `extract` command wraps output in a Schema 3.0 envelope with `schema: "probe-rust/extract"`. The `schema-version` field must match the version in `docs/SCHEMA.md`. Currently `"2.4"`.
 
 **Where**: `metadata.rs` (`wrap_in_envelope`, `SCHEMA_VERSION`), `commands/extract.rs`.
 

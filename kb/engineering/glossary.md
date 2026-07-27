@@ -36,7 +36,7 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **Display name** — The human-readable name shown for an [atom](#atom). For impl methods, enriched to `Type::method` form via `enrich_display_name`. See [P16](properties.md).
 
-**Envelope** — The Schema 2.0 metadata wrapper around the atoms map. Contains `schema`, `schema-version`, `tool`, `source`, `timestamp`, and `data` fields. See [P1](properties.md).
+**Envelope** — The Schema 3.0 metadata wrapper around the atoms map. Contains `schema`, `schema-version`, `tool`, `source`, `timestamp`, and `data` fields. See [P1](properties.md).
 
 **External stub** — An [atom](#atom) representing a function that is referenced (called) but not defined in the analyzed project. Has empty code-path, `{0,0}` lines, and empty [dependencies](#dependencies). See [P4](properties.md).
 

@@ -2,7 +2,7 @@
 
 Generate compact function call graph data from Rust projects.
 
-`probe-rust` analyzes any standard Rust codebase and produces structured JSON describing every function, its dependencies (callees), source locations, and Rust-qualified names. It is designed for downstream verification and analysis tooling — in particular, the [Beneficial AI Foundation](https://github.com/Beneficial-AI-Foundation)'s verification pipeline, where it feeds into [probe-aeneas](https://github.com/Beneficial-AI-Foundation/probe-aeneas) for Rust-to-Lean translation mapping. Output follows the Schema 2.1 envelope format; see [docs/SCHEMA.md](docs/SCHEMA.md) for the full specification.
+`probe-rust` analyzes any standard Rust codebase and produces structured JSON describing every function, its dependencies (callees), source locations, and Rust-qualified names. It is designed for downstream verification and analysis tooling — in particular, the [Beneficial AI Foundation](https://github.com/Beneficial-AI-Foundation)'s verification pipeline, where it feeds into [probe-aeneas](https://github.com/Beneficial-AI-Foundation/probe-aeneas) for Rust-to-Lean translation mapping. Output follows the Schema 3.0 envelope format; see [docs/SCHEMA.md](docs/SCHEMA.md) for the full specification.
 
 ## Prerequisites
 
@@ -134,7 +134,7 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
 2. **Call graph construction** — parses the SCIP JSON to identify all function definitions, call relationships, and trait impl disambiguation
 3. **Accurate line spans** — uses `syn` to parse Rust source files and resolve exact function body start/end lines
 4. **Charon enrichment** (opt-in via `--with-charon`) — runs [Charon](https://github.com/AeneasVerif/charon) to derive Aeneas-compatible `rust-qualified-name` fields; only needed for projects integrating with Aeneas
-5. **Schema 2.1 output** — wraps the call graph atoms in a metadata envelope containing git commit, repo URL, package info, and timestamps
+5. **Schema 3.0 output** — wraps the call graph atoms in a metadata envelope containing git commit, repo URL, package info, and timestamps
 
 ## Releases
 

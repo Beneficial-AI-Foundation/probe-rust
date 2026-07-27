@@ -4,7 +4,7 @@
 
 ## Overview
 
-probe-rust is a Rust CLI tool that analyzes function call graphs in standard Rust projects. It produces Schema 2.0 JSON envelopes containing atom dictionaries with accurate line spans, dependency edges, and visibility metadata.
+probe-rust is a Rust CLI tool that analyzes function call graphs in standard Rust projects. It produces Schema 3.0 JSON envelopes containing atom dictionaries with accurate line spans, dependency edges, and visibility metadata.
 
 ## Subcommands
 
@@ -52,7 +52,7 @@ commands/extract.rs (orchestration)
   |      Cached in <project>/data/public-api.txt            [P14]
   |
   |-- 8. metadata::wrap_in_envelope()                   [P1, P13]
-  |      Gathers git/cargo metadata, wraps atoms in Schema 2.0 envelope
+  |      Gathers git/cargo metadata, wraps atoms in Schema 3.0 envelope
   |
   v
 .verilib/probes/rust_<pkg>_<ver>.json
@@ -94,7 +94,7 @@ Overrides `is-public-api` using `cargo-public-api` output matched via `rust-qual
 
 ### Metadata / envelope (internal)
 
-Gathers project metadata (git commit, repo URL, package info) and wraps atoms in the Schema 2.0 envelope.
+Gathers project metadata (git commit, repo URL, package info) and wraps atoms in the Schema 3.0 envelope.
 
 **Files**: `metadata.rs`
 
@@ -118,7 +118,7 @@ src/
   lib.rs               Core types, SCIP parsing, call graph, atom conversion
   constants.rs         SCIP kinds, role bits, tolerances, prefixes
   error.rs             ProbeError / ProbeResult
-  metadata.rs          Schema 2.0 envelope, project metadata
+  metadata.rs          Schema 3.0 envelope, project metadata
   path_utils.rs        Path matching utilities
   rust_parser.rs       syn-based function span parsing
   scip_cache.rs        SCIP index generation and caching
@@ -171,5 +171,5 @@ rust-analyzer ──> index.scip ──> scip CLI ──> index.scip.json
                       [cargo public-api] ──> override is-public-api via RQN
                                                     |
                                                     v
-                                        Schema 2.0 envelope JSON
+                                        Schema 3.0 envelope JSON
 ```
