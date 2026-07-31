@@ -91,7 +91,7 @@ probe-rust extract <PROJECT_PATH> [OPTIONS]
 | `--auto-install` | Automatically download missing tools (`scip`, and `charon` when `--with-charon` is set) |
 | `--with-charon` | Enrich atoms with Charon-derived `rust-qualified-name` fields (for Aeneas integration) |
 
-For the full command reference with examples, see **[docs/USAGE.md](docs/USAGE.md)**. For the complete JSON schema specification, see **[docs/SCHEMA.md](docs/SCHEMA.md)**.
+For the full command reference with examples, see **[docs/USAGE.md](docs/USAGE.md)**. For the complete JSON schema specification, see **[docs/SCHEMA.md](docs/SCHEMA.md)**. For internal extraction mechanics (trait-impl disambiguation, source-file map), see **[docs/architecture.md](docs/architecture.md)**.
 
 ## Example Output
 
