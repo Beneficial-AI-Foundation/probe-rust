@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **`is-disabled` atom field renamed to `untracked`** (both the JSON wire name and the Rust field identifier). The semantics are unchanged — the field still means "out of verification scope" and the boolean polarity is preserved (`is-disabled: true` → `untracked: true`). This is a breaking wire-format change with no backward-compatibility alias.
 - **`schema-version` bumped `2.4` → `3.0`** (breaking). The ecosystem moves to a unified major schema-version `3.0`; the `untracked` rename above is the breaking wire change that motivates it. Consumers must accept major `3`.
+- Pinned the `probe-extract-check` dev-dependency to `probe` `tag = "v0.4.0"` (was an unpinned git dep frozen at a stale 0.1.0/`fcb4bc3a` in the lock). Test-only; the `tests/extract_check.rs` golden-fixture check now validates against the shipped 3.0 schema. No change to the crate's public behavior.
 
 ## [0.8.1] - 2026-07-17
 
