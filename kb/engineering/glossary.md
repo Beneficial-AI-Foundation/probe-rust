@@ -16,6 +16,8 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **Binary-only crate** — A Cargo package that has no `[lib]` target (only `[[bin]]` targets). All atoms are marked `is-public-api: false` since binaries have no public API surface. See [P12](properties.md), [library crate](#library-crate).
 
+**Bodiless declaration** — A trait method signature with no default body (`fn identity() -> Self;`). Reported on [atoms](#atom) as `has-body: false`; every function with real code — including a trait method *with* a default body — is `has-body: true`. There is nothing to verify in a bodiless declaration (the concrete impls carry the proof), so downstream tools classify it out of verification scope. Detected from the AST via [syn](#syn) (`TraitItemFn::default`), not from the line span or the [dependencies](#dependencies) set — neither is an equivalent test. See [P18](properties.md).
+
 **cargo-public-api** — External tool that lists a crate's public API surface by running `rustdoc` and parsing the output. Invoked via `cargo public-api -sss -p <pkg>`. Requires a nightly Rust toolchain. Used by `--with-public-api` to override [is-public-api](#is-public-api) values via [RQN](#rqn-rust-qualified-name) matching. See [P11](properties.md), [P17](properties.md), `public_api.rs`.
 
 **Call attribution** — The process of assigning [callee references](#callee-reference) to their enclosing function. Done by walking SCIP [occurrences](#occurrence) in lexical order and tracking the current [function-like definition](#function-like-definition). See [P8](properties.md).

@@ -330,6 +330,14 @@ pub struct AtomWithLines {
     /// function has no `#[cfg]` gate.
     #[serde(rename = "cfg", skip_serializing_if = "Option::is_none", default)]
     pub cfg: Option<String>,
+    /// Whether the function has an actual body. `false` only for a trait method
+    /// declaration with no default body (`fn f() -> Self;`) — there is no code
+    /// to verify, the concrete impls carry the proof, so downstream (probe-aeneas)
+    /// classifies it out of scope. `true` for free functions, impl methods, and
+    /// trait methods with a default body. Omitted when unknown (no resolved syn
+    /// span) and for external stubs.
+    #[serde(rename = "has-body", skip_serializing_if = "Option::is_none", default)]
+    pub has_body: Option<bool>,
     #[serde(rename = "is-public", skip_serializing_if = "Option::is_none", default)]
     pub is_public: Option<bool>,
     #[serde(
@@ -1369,6 +1377,14 @@ fn convert_to_atoms_with_lines_internal(
                     data.lines_start,
                 )
             });
+            let has_body = span_map.and_then(|map| {
+                rust_parser::get_function_has_body(
+                    map,
+                    &data.node.relative_path,
+                    &data.node.display_name,
+                    data.lines_start,
+                )
+            });
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -1385,6 +1401,7 @@ fn convert_to_atoms_with_lines_internal(
                 rust_qualified_name: rqn,
                 untracked: false,
                 cfg,
+                has_body,
                 is_public: Some(sig_public),
                 is_public_api: None,
                 charon_def_id: None,
@@ -1493,6 +1510,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                has_body: None,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1604,6 +1622,7 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                has_body: None,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2042,6 +2061,7 @@ mod tests {
             rust_qualified_name: None,
             untracked: false,
             cfg: None,
+            has_body: None,
             is_public: None,
             is_public_api: None,
             charon_def_id: None,

@@ -1343,6 +1343,7 @@ pub fn top() {}
             rust_qualified_name: rqn.map(|s| s.to_string()),
             untracked: false,
             cfg: None,
+            has_body: None,
             is_public: None,
             is_public_api: None,
             charon_def_id: None,

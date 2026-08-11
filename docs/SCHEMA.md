@@ -140,6 +140,7 @@ standardized metadata envelope:
     "charon-version": "0.1.217",
     "untracked": false,
     "cfg": "feature = \"alloc\"",
+    "has-body": true,
     "is-public": true,
     "is-public-api": true
   }
@@ -161,6 +162,7 @@ standardized metadata envelope:
 | `rust-qualified-name` | string | no | Rust-style qualified path (e.g. `my_crate::module::func`). When `--with-charon` is used, this is the Aeneas-compatible LLBC-derived name; otherwise (including the `--translation` manifest path, which does not override it) it is derived from the SCIP symbol’s module chain and the function’s `display-name`. |
 | `untracked` | bool | yes | Always `false` in probe-rust output. Downstream tools (e.g. probe-aeneas) may set this to `true` for functions that are out of scope. |
 | `cfg` | string | no | The combined item-gating `#[cfg(...)]` predicate governing the function — its own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-joined (e.g. `all(test, feature = "serde")`). Cosmetic `#[cfg_attr(...)]` is ignored. Omitted when the function has no `#[cfg]` gate. Downstream tools evaluate it against the build config to decide whether the function is compiled (and hence in scope). |
+| `has-body` | bool | no | `false` when the function is a **bodiless declaration** — a trait method signature with no default body (`fn identity() -> Self;`). There is no code to verify: the concrete impls carry the proof, so downstream tools (probe-aeneas) classify these out of verification scope. `true` for every function with real code, including trait methods that *do* have a default body. Omitted when no `syn` span resolved for the function, and for external stubs. Derived from the AST (`syn::TraitItemFn::default`), not from the span — a bodiless declaration with a multi-line signature or `where` clause still spans several lines, so `lines-start == lines-end` is **not** an equivalent test. |
 | `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used and the matched LLBC entry carries visibility (`attr_info.public`), the Charon-derived value takes precedence; a candidate without visibility (and the `--translation` manifest path, which carries none) never clobbers the SCIP value. This is item-level visibility, not crate-level API reachability. |
 | `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. By default derived from SCIP module-chain visibility walk (no external tools required). When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name` (RQN). See **Limitations** below. |
 | `charon-def-id` | integer | no | Charon `FunDeclId`, carried through the same match-key/span resolution that assigns `rust-qualified-name`. Equals Aeneas's `translation.json` `def_id`, enabling a precise integer join to the Lean translation. Populated from **either** source: with `--with-charon` it is the `Fun` key from the LLBC's `item_names`; with `--translation <manifest>` it is the `def_id` of a `functions[]` entry (charon's `FunDeclId` id-space only — `globals`/`trait_impls` are excluded). Present only when a Charon function matched **and** that source's `charon_version` was read. Its accuracy is exactly that of the underlying Charon-name match (single-candidate resolution requires a file-path match; the manifest path additionally refuses match-key-only hits) — it is not an independent oracle, so consumers should still gate on `charon-version` and may corroborate with `rust-qualified-name`/span rather than treat the id alone as ground truth. |
@@ -186,6 +188,7 @@ stub entries with:
 - `code-text`: `{"lines-start": 0, "lines-end": 0}`
 - `dependencies`: empty
 - `rust-qualified-name`: absent
+- `has-body`: absent
 - `is-public`: absent
 - `is-public-api`: absent
 - `charon-def-id`: absent

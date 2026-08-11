@@ -25,6 +25,10 @@ pub struct FunctionSpan {
     /// evaluate it against the build config to decide whether the function is
     /// compiled (and hence in verification scope).
     pub cfg: Option<String>,
+    /// Whether the function has an actual body. `false` only for a trait method
+    /// *declaration* with no default body (`fn f() -> Self;`); `true` for free
+    /// functions, impl methods, and trait methods that do have a default body.
+    pub has_body: bool,
 }
 
 // =============================================================================
@@ -66,6 +70,8 @@ pub struct SpanInfo {
     pub end_line: usize,
     /// Combined item-gating `#[cfg(...)]` predicate (see [`FunctionSpan::cfg`]).
     pub cfg: Option<String>,
+    /// Whether the function has a body (see [`FunctionSpan::has_body`]).
+    pub has_body: bool,
 }
 
 /// Extract the predicates of **all** item-gating `#[cfg(...)]` attributes on an
@@ -148,6 +154,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             start_line,
             end_line,
             cfg,
+            has_body: true,
         });
 
         syn::visit::visit_item_fn(self, node);
@@ -165,6 +172,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             start_line,
             end_line,
             cfg,
+            has_body: true,
         });
 
         syn::visit::visit_impl_item_fn(self, node);
@@ -182,6 +190,8 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             start_line,
             end_line,
             cfg,
+            // `default: None` is a bodiless declaration (`fn f() -> Self;`).
+            has_body: node.default.is_some(),
         });
 
         syn::visit::visit_trait_item_fn(self, node);
@@ -501,6 +511,7 @@ pub fn build_function_span_map(
                     SpanInfo {
                         end_line: func.end_line,
                         cfg: func.cfg.clone(),
+                        has_body: func.has_body,
                     },
                 );
             }
@@ -564,6 +575,17 @@ pub fn get_function_cfg(
     find_span_info(span_map, relative_path, function_name, start_line).and_then(|s| s.cfg.clone())
 }
 
+/// Whether the function has a body, using the same matching as
+/// [`get_function_end_line`]. `None` when no span was resolved for it.
+pub fn get_function_has_body(
+    span_map: &HashMap<(String, String, usize), SpanInfo>,
+    relative_path: &str,
+    function_name: &str,
+    start_line: usize,
+) -> Option<bool> {
+    find_span_info(span_map, relative_path, function_name, start_line).map(|s| s.has_body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,6 +616,61 @@ fn another_function(x: i32) -> i32 {{
 
         assert!(spans[0].end_line >= spans[0].start_line);
         assert!(spans[1].end_line >= spans[1].start_line);
+    }
+
+    #[test]
+    fn test_trait_method_has_body() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+trait T {{
+    fn bodiless(&self) -> u32;
+
+    fn bodiless_multiline<I>(iter: I) -> u32
+    where
+        I: IntoIterator<Item = u32>;
+
+    fn defaulted(&self) -> u32 {{
+        1
+    }}
+}}
+
+struct S;
+
+impl T for S {{
+    fn bodiless(&self) -> u32 {{
+        2
+    }}
+}}
+
+fn free() {{}}
+"#
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let get = |n: &str| spans.iter().filter(|f| f.name == n).collect::<Vec<_>>();
+
+        // The bodiless declaration and its concrete impl share a name; only the
+        // declaration is bodiless.
+        let bodiless = get("bodiless");
+        assert_eq!(bodiless.len(), 2);
+        assert_eq!(
+            bodiless.iter().filter(|f| f.has_body).count(),
+            1,
+            "exactly one `bodiless` (the impl) should have a body"
+        );
+
+        // A multi-line signature is still bodiless — end_line > start_line, so the
+        // span alone cannot be used as a proxy.
+        let ml = get("bodiless_multiline");
+        assert_eq!(ml.len(), 1);
+        assert!(!ml[0].has_body);
+        assert!(ml[0].end_line > ml[0].start_line);
+
+        assert!(get("defaulted")[0].has_body);
+        assert!(get("free")[0].has_body);
     }
 
     #[test]

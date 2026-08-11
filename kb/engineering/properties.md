@@ -151,6 +151,18 @@ Lifetime prefixes (`&'a`) and backtick quoting are stripped from the extracted t
 
 ---
 
+## Scope properties
+
+### P18 — Bodiless declarations
+
+An atom's `has-body` field is `false` **exactly when** the function is a [bodiless declaration](glossary.md#bodiless-declaration) — a trait method signature with no default body (`fn identity() -> Self;`). It is `true` for free functions, impl methods, and trait methods that do have a default body. It is omitted when no [syn](glossary.md#syn) span resolved for the function, and for [external stubs](glossary.md#external-stub) (no source to parse).
+
+Downstream consumers treat `has-body: false` as out of verification scope: there is no code to verify, the concrete impls carry the proof. Absent is *not* equivalent to `false` — it means "no information", so consumers must keep such atoms in scope.
+
+The value comes from the AST (`syn::TraitItemFn::default`), never from the line span. A bodiless declaration with a multi-line signature or a `where` clause spans several lines, so `lines-start == lines-end` is not an equivalent test; neither is an empty [dependencies](glossary.md#dependencies) set, since a default body may call nothing.
+
+**Where**: `rust_parser.rs` (`FunctionSpan::has_body`, `SpanInfo::has_body`, `visit_trait_item_fn`, `get_function_has_body`, `test_trait_method_has_body`), `lib.rs` (`AtomWithLines::has_body`, `convert_to_atoms_with_lines_internal`, `add_external_stubs`).
+
 ## Known issues
 
 ### C1 — Call after non-function def
