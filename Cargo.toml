@@ -32,6 +32,7 @@ which = "8.0.2"
 sha2 = "0.10.9"
 
 [dev-dependencies]
+filetime = "0.2"
 probe-extract-check = { git = "https://github.com/Beneficial-AI-Foundation/probe", tag = "v0.4.0" }
 tempfile = "3.10"
 

@@ -245,7 +245,7 @@ fn find_cargo_tomls_recursive(dir: &Path, remaining_depth: u32, results: &mut Ve
 }
 
 fn get_scip_json(cache: &mut ScipCache, regenerate: bool) -> ProbeResult<PathBuf> {
-    if cache.has_cached_json() && !regenerate {
+    if cache.has_cached_json() && !regenerate && !cache.is_cache_stale() {
         println!(
             "  ✓ Found existing SCIP JSON at {}",
             cache.json_path().display()
