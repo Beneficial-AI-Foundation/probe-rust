@@ -1,6 +1,6 @@
 # Glossary
 
-- **last-updated**: 2026-04-18
+- **last-updated**: 2026-08-11
 
 Every domain term used in the KB must be defined here. Terms are listed alphabetically.
 
@@ -32,6 +32,8 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **Dependencies** — The set of functions called by an [atom](#atom). Stored as a `BTreeSet<String>` of [code-names](#code-name), guaranteeing sorted output. See [P5](properties.md).
 
+**Directory owner** — A file whose `mod` children resolve as siblings in its own directory: a crate root ([target entry](#target-entry)), a `mod.rs`, or a `#[path]`-mounted file. A conventionally mounted `foo.rs` is not one — its children live under `foo/`. rustc's module-resolution rule, honored by the [mount chain](#mount-chain) walk. See `mod_chain.rs` (`resolve_mod_file`).
+
 **Disambiguation** — The process of making [code-names](#code-name) unique when multiple SCIP symbols share the same [base code-name](#base-code-name). Uses a priority chain: [type context](#type-context) → `<Type>` embed → `@line` fallback. See [P9](properties.md).
 
 **Display name** — The human-readable name shown for an [atom](#atom). For impl methods, enriched to `Type::method` form via `enrich_display_name`. See [P16](properties.md).
@@ -39,6 +41,10 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 **Envelope** — The Schema 3.0 metadata wrapper around the atoms map. Contains `schema`, `schema-version`, `tool`, `source`, `timestamp`, and `data` fields. See [P1](properties.md).
 
 **External stub** — An [atom](#atom) representing a function that is referenced (called) but not defined in the analyzed project. Has empty code-path, `{0,0}` lines, and empty [dependencies](#dependencies). See [P4](properties.md).
+
+**File gate** — The `file-cfg` atom field: the cfg predicate under which a file is mounted at all, derived from the gates on its [mount chains](#mount-chain) (`any(...)` over per-chain `all(...)` conjunctions). Absent when any chain is gate-free or the walk never reached the file. Already folded into the atom's `cfg`. See [P18](properties.md#p18--cfg-predicate-as-complete-as-visible-under-gating-only).
+
+**Foreign declaration** — A function declared inside an `extern { … }` block: a binding whose implementation lives outside Rust, flagged `is-foreign`. Bodyless trait signatures are NOT foreign (see [trait-required](#trait-required)). See [P19](properties.md#p19--conservative-unmountedforeigntrait-facts).
 
 **Function-like definition** — An [occurrence](#occurrence) of a [function-like kind](#function-like-kind) with the definition bit set in [symbol roles](#symbol-roles). Updates the `current_function_key` during [call attribution](#call-attribution). See [P8](properties.md).
 
@@ -56,11 +62,15 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **Match key** — A normalized string used to correlate [Charon](#charon) LLBC function entries with SCIP-derived [atoms](#atom). Built as `module::bare_function_name`. From the atom side: module derived from `code_path` or `code_module`, bare function name from `display_name`. From the Charon side: strip the first `::` segment (always the crate name, which may differ from `translated.crate_name` for dependency crates included via `--include`) and remove `{...}` impl blocks. When multiple Charon candidates share the same match key, [span disambiguation](#span-disambiguation) selects the best one. See `charon_names.rs`.
 
+**Mount chain** — The sequence of `mod` declarations (with their `#[cfg]` gates) through which a file is reached from a [target entry](#target-entry), including a file-level `#![cfg]`. One file can have several chains (mutually exclusive `#[path]` remounts, mounts from different targets or packages). Walked by `mod_chain.rs`.
+
 **Multi-crate LLBC** — A [Charon](#charon) LLBC file that contains functions from more than one crate. Produced when Charon is invoked with `--include` to pull in dependency crate functions alongside the target crate. The LLBC's `translated.crate_name` reflects only the target crate; included dependency functions have qualified names prefixed by their own crate name. [Match key](#match-key) construction handles this by stripping the first path segment unconditionally rather than matching against `crate_name`.
 
 **Occurrence** — A SCIP data element representing a reference to or definition of a symbol at a specific source location. Has `range`, `symbol`, and `symbol_roles` fields.
 
 **Probe URI** — See [Code-name](#code-name).
+
+**Provably complete walk** — A module-tree walk during which no valve tripped: every file read and parsed, every `mod` target resolved, no `include!`, no mod-mentioning unrecognized macro invocation, no mount cycle, no chain-cap overflow. Only such a walk (across ALL packages) may infer [unmounted](#unmounted) files. See [P19](properties.md#p19--conservative-unmountedforeigntrait-facts).
 
 **Ralph Loop** — The development quality loop: implement, audit (three auditor skills), fix, repeat until clean, then run tests. See [kb/index.md](../index.md).
 
@@ -78,6 +88,13 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **syn** — Rust parser library used to parse source files for function body spans. SCIP only provides function name locations; syn finds the actual end line of function bodies. See [architecture](architecture.md).
 
+**Target entry** — A package's lib or bin crate-root file: `[lib] path`/`src/lib.rs`, `[[bin]] path`, `src/main.rs`, `src/bin/*.rs`, `src/bin/*/main.rs`. The roots of the [mount chain](#mount-chain) walk. Test/bench/example targets are deliberately excluded. See `mod_chain.rs` (`package_entries`).
+
+**Trait-required** — The `trait-required` atom field: a bodyless trait method signature, whose proof obligations live on the implementations. Trait methods with a default body are ordinary functions. See [P19](properties.md#p19--conservative-unmountedforeigntrait-facts).
+
 **Type context** — Nearby type references (within 5 lines above a definition) used for [disambiguation](#disambiguation) when multiple SCIP symbols share the same [base code-name](#base-code-name). See [P9](properties.md).
 
 **.verilib** — The output directory structure: `.verilib/probes/` holds extracted [atom](#atom) files. Convention shared across the probe ecosystem.
+
+
+**Unmounted** — The `is-unmounted` atom field: the file is reached by no [mount chain](#mount-chain) from any analyzed package's [target entries](#target-entry), so it is not part of any lib or bin build. Inferred only from a [provably complete walk](#provably-complete-walk). See [P19](properties.md#p19--conservative-unmountedforeigntrait-facts).

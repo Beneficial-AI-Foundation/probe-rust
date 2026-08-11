@@ -4,7 +4,7 @@ Check the implementation against KB-defined properties and architectural constra
 
 ## Process
 
-1. Read `kb/engineering/properties.md` to load all invariants (P1-P16, C1-C3)
+1. Read `kb/engineering/properties.md` to load all invariants (P1-P19, C1-C3)
 2. Read `kb/engineering/architecture.md` to understand component boundaries
 3. Read `kb/engineering/glossary.md` for precise terminology
 4. For each property, verify the implementation satisfies it:
@@ -27,6 +27,9 @@ Check the implementation against KB-defined properties and architectural constra
 - **P14 (SCIP caching)**: Verify cache paths and `--regenerate-scip` flag behavior
 - **P15 (Charon non-fatal)**: Verify Charon failure produces warning, not error
 - **P16 (Display name enrichment)**: Verify both old and new SCIP symbol formats are handled
+- **P17 (Public-API override non-fatal)**: Verify `--with-public-api` failure warns and preserves SCIP-walk values
+- **P18 (cfg predicate)**: Verify `cfg` folds own + same-file + mount-chain gates, under-gating only; `file-cfg` matches the chain component
+- **P19 (Conservative facts)**: Verify unmounted inference valves (parse failure, unresolvable mod, include!, mod-mentioning macro, cycle, chain cap) and lib/bin scoping; `is-foreign`/`trait-required` AST judgments
 
 ### Architecture checks
 
