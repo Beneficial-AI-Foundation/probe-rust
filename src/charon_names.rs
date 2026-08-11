@@ -1480,6 +1480,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1556,6 +1560,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1636,6 +1644,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1715,6 +1727,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1779,6 +1795,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1876,6 +1896,10 @@ mod tests {
                 rust_qualified_name: Some("my_crate::ristretto::step_2".to_string()),
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1973,6 +1997,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1997,6 +2025,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2047,6 +2079,10 @@ mod tests {
             rust_qualified_name: None,
             untracked: false,
             cfg: None,
+            file_cfg: None,
+            is_unmounted: false,
+            is_foreign: false,
+            trait_required: false,
             is_public: Some(true),
             is_public_api: None,
             charon_def_id: None,
@@ -2082,6 +2118,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2122,6 +2162,10 @@ mod tests {
                 rust_qualified_name: Some("crate::mod::foo".to_string()),
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: Some(true),
                 is_public_api: None,
                 charon_def_id: None,
@@ -2196,6 +2240,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2272,6 +2320,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2350,6 +2402,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2427,6 +2483,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2510,6 +2570,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -2554,6 +2618,10 @@ mod tests {
             rust_qualified_name: None,
             untracked: false,
             cfg: None,
+            file_cfg: None,
+            is_unmounted: false,
+            is_foreign: false,
+            trait_required: false,
             is_public: None,
             is_public_api: None,
             charon_def_id: None,
@@ -2585,6 +2653,43 @@ mod tests {
         let back: crate::AtomWithLines = serde_json::from_value(v).unwrap();
         assert_eq!(back.charon_def_id, Some(439));
         assert_eq!(back.charon_version.as_deref(), Some("0.1.217"));
+    }
+
+    /// Serde contract for the source-fact fields: kebab-case keys, omitted
+    /// when `None`/`false`, emitted and round-tripping when set.
+    #[test]
+    fn source_fact_fields_serde_shape() {
+        // Unset -> keys omitted entirely.
+        let bare = serde_json::to_value(test_atom()).unwrap();
+        for key in ["file-cfg", "is-unmounted", "is-foreign", "trait-required"] {
+            assert!(bare.get(key).is_none(), "{key} must be omitted");
+        }
+
+        // Set -> kebab-case keys with the values.
+        let mut atom = test_atom();
+        atom.cfg = Some("all(feature = \"x\", test)".to_string());
+        atom.file_cfg = Some("feature = \"x\"".to_string());
+        atom.is_unmounted = true;
+        atom.is_foreign = true;
+        atom.trait_required = true;
+        let v = serde_json::to_value(&atom).unwrap();
+        assert_eq!(
+            v.get("file-cfg").and_then(|x| x.as_str()),
+            Some("feature = \"x\"")
+        );
+        assert_eq!(v.get("is-unmounted").and_then(|x| x.as_bool()), Some(true));
+        assert_eq!(v.get("is-foreign").and_then(|x| x.as_bool()), Some(true));
+        assert_eq!(
+            v.get("trait-required").and_then(|x| x.as_bool()),
+            Some(true)
+        );
+
+        // Round-trip.
+        let back: crate::AtomWithLines = serde_json::from_value(v).unwrap();
+        assert_eq!(back.file_cfg.as_deref(), Some("feature = \"x\""));
+        assert!(back.is_unmounted);
+        assert!(back.is_foreign);
+        assert!(back.trait_required);
     }
 
     /// Re-enrichment safety: an atom that already carries provenance from an

@@ -9,6 +9,7 @@ pub mod commands;
 pub mod constants;
 pub mod error;
 pub mod metadata;
+pub mod mod_chain;
 pub mod path_utils;
 pub mod public_api;
 pub mod rust_parser;
@@ -323,13 +324,52 @@ pub struct AtomWithLines {
     pub rust_qualified_name: Option<String>,
     #[serde(rename = "untracked", default)]
     pub untracked: bool,
-    /// Combined item-gating `#[cfg(...)]` predicate governing the function
-    /// (own gate plus enclosing `impl`/`mod`/`trait` gates, `all(...)`-joined),
-    /// if any. Emitted for downstream scope analysis (e.g. probe-aeneas decides
-    /// whether the function is compiled in the Aeneas build). Omitted when the
-    /// function has no `#[cfg]` gate.
+    /// The item-gating `#[cfg(...)]` predicate governing the function, as
+    /// completely as static analysis can see it: its own gate, a file-level
+    /// `#![cfg]`, enclosing same-file `impl`/`mod`/`trait`/`extern` gates,
+    /// and the gates on the `mod` declaration chain mounting its file (see
+    /// `mod_chain`), `all(...)`-joined. Deliberately under-gates when a gate
+    /// is invisible (`cfg_if!` branch predicates, unreached files): it may
+    /// claim "compiled" wrongly, never "not compiled" wrongly. Emitted for
+    /// downstream scope analysis (e.g. probe-aeneas decides whether the
+    /// function is compiled in the Aeneas build). Omitted when the function
+    /// is not gated at all.
     #[serde(rename = "cfg", skip_serializing_if = "Option::is_none", default)]
     pub cfg: Option<String>,
+    /// The parent-file mod-chain component of `cfg`, alone (already included
+    /// in `cfg`). Lets consumers report *why* a function is gated (file-level
+    /// vs own gate) without re-deriving the chain. Omitted when the file is
+    /// unconditionally mounted or the walk never reached it.
+    #[serde(rename = "file-cfg", skip_serializing_if = "Option::is_none", default)]
+    pub file_cfg: Option<String>,
+    /// The function's file is reached by no `mod` chain from any analyzed
+    /// package's lib or bin target entries, so it is not part of any lib/bin
+    /// build (it may still be the root of a test/bench/example target, which
+    /// the walk deliberately does not scan). Only emitted (as `true`) when
+    /// the module-tree walk was provably complete — see `mod_chain` for the
+    /// conservative valves.
+    #[serde(
+        rename = "is-unmounted",
+        skip_serializing_if = "std::ops::Not::not",
+        default
+    )]
+    pub is_unmounted: bool,
+    /// Declared inside an `extern { … }` block: a binding to another language
+    /// with no Rust body to analyze or verify.
+    #[serde(
+        rename = "is-foreign",
+        skip_serializing_if = "std::ops::Not::not",
+        default
+    )]
+    pub is_foreign: bool,
+    /// A bodyless trait method signature: proof obligations live on the
+    /// implementations. `false`/omitted for trait methods with default bodies.
+    #[serde(
+        rename = "trait-required",
+        skip_serializing_if = "std::ops::Not::not",
+        default
+    )]
+    pub trait_required: bool,
     #[serde(rename = "is-public", skip_serializing_if = "Option::is_none", default)]
     pub is_public: Option<bool>,
     #[serde(
@@ -1057,26 +1097,64 @@ pub fn convert_to_atoms_with_parsed_spans(
         .collect();
 
     let span_map = rust_parser::build_function_span_map(project_root, &relative_paths);
+    let chain_facts = mod_chain::analyze(project_root);
+    // Suppressed module-chain facts must be visible, not silent: an operator
+    // cannot tell "nothing is gated or unmounted" apart from "the walk gave
+    // up" without this.
+    if !chain_facts.taints.is_empty() {
+        eprintln!(
+            "Warning: module-tree walk not provably complete — file-cfg/is-unmounted facts \
+             suppressed. {} cause(s), e.g.: {}",
+            chain_facts.taints.len(),
+            chain_facts
+                .taints
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
 
-    convert_to_atoms_with_lines_internal(
+    let (atoms, span_misses) = convert_to_atoms_with_lines_internal(
         call_graph,
         symbol_to_display_name,
         Some(&span_map),
+        Some(&chain_facts),
         with_locations,
         module_visibility,
         is_library,
-    )
+    );
+    // A failed span-map lookup silently degrades the atom (`lines-end` falls
+    // back to the start line; `cfg` and the declaration-kind facts are lost),
+    // so it must never pass without a trace. With the SCIP staleness check in
+    // place the common cause — index line numbers drifting from edited
+    // sources — should be gone; a persistent warning points at whatever
+    // remains (unparsable file, macro-generated code, symbol/file mismatch).
+    if span_misses > 0 {
+        eprintln!(
+            "Warning: {} of {} functions missing parsed span info — their lines-end, cfg, and \
+             declaration-kind facts are degraded. The SCIP index may not match the sources \
+             (try --regenerate-scip).",
+            span_misses,
+            atoms.len()
+        );
+    }
+    atoms
 }
 
-/// Internal function that does the actual conversion.
+/// Internal function that does the actual conversion. Returns the atoms plus
+/// the number of span-map lookup misses (functions whose parsed span info was
+/// not found — callers surface this, it must never stay silent).
 fn convert_to_atoms_with_lines_internal(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
     span_map: Option<&HashMap<(String, String, usize), rust_parser::SpanInfo>>,
+    chain_facts: Option<&mod_chain::ModChainFacts>,
     with_locations: bool,
     _module_visibility: &HashMap<String, bool>,
     _is_library: bool,
-) -> Vec<AtomWithLines> {
+) -> (Vec<AtomWithLines>, usize) {
     // === Phase 1: Compute line ranges and base code_names for all nodes ===
     struct NodeData<'a> {
         node: &'a FunctionNode,
@@ -1092,6 +1170,7 @@ fn convert_to_atoms_with_lines_internal(
             .then_with(|| a.range.cmp(&b.range))
     });
 
+    let mut span_misses = 0usize;
     let node_data: Vec<NodeData> = sorted_nodes
         .into_iter()
         .map(|node| {
@@ -1102,13 +1181,18 @@ fn convert_to_atoms_with_lines_internal(
             };
 
             let lines_end = if let Some(map) = span_map {
-                rust_parser::get_function_end_line(
+                match rust_parser::get_function_end_line(
                     map,
                     &node.relative_path,
                     &node.display_name,
                     lines_start,
-                )
-                .unwrap_or(lines_start)
+                ) {
+                    Some(end) => end,
+                    None => {
+                        span_misses += 1;
+                        lines_start
+                    }
+                }
             } else {
                 match node.range.len() {
                     4 => node.range[2].max(0) as usize + 1,
@@ -1245,7 +1329,7 @@ fn convert_to_atoms_with_lines_internal(
     }
 
     // === Phase 4: Build final atoms with resolved dependencies ===
-    node_data
+    let atoms = node_data
         .into_iter()
         .zip(final_code_names)
         .map(|(data, code_name)| {
@@ -1361,14 +1445,27 @@ fn convert_to_atoms_with_lines_internal(
             let code_module = extract_code_module(&code_name);
             let rqn = derive_rust_qualified_name(&data.node.symbol, &data.node.display_name);
             let sig_public = is_signature_public(&data.node.signature_text);
-            let cfg = span_map.and_then(|map| {
-                rust_parser::get_function_cfg(
+            let span_info = span_map.and_then(|map| {
+                rust_parser::get_function_span_info(
                     map,
                     &data.node.relative_path,
                     &data.node.display_name,
                     data.lines_start,
                 )
             });
+            let own_cfg = span_info.and_then(|s| s.cfg.clone());
+            let file_cfg = chain_facts
+                .and_then(|f| f.file_gate.get(&data.node.relative_path))
+                .cloned();
+            // The complete gate: the file's mount-chain predicate AND the
+            // function's own+same-file gates.
+            let cfg = match (&file_cfg, own_cfg) {
+                (Some(fc), Some(oc)) => Some(format!("all({}, {})", fc, oc)),
+                (Some(fc), None) => Some(fc.clone()),
+                (None, oc) => oc,
+            };
+            let is_unmounted =
+                chain_facts.is_some_and(|f| f.unmounted.contains(&data.node.relative_path));
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -1385,13 +1482,18 @@ fn convert_to_atoms_with_lines_internal(
                 rust_qualified_name: rqn,
                 untracked: false,
                 cfg,
+                file_cfg,
+                is_unmounted,
+                is_foreign: span_info.is_some_and(|s| s.is_foreign),
+                trait_required: span_info.is_some_and(|s| s.trait_required),
                 is_public: Some(sig_public),
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
             }
         })
-        .collect()
+        .collect();
+    (atoms, span_misses)
 }
 
 /// Information about a duplicate code_name
@@ -1493,6 +1595,10 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1604,6 +1710,10 @@ mod tests {
                 rust_qualified_name: None,
                 untracked: false,
                 cfg: None,
+                file_cfg: None,
+                is_unmounted: false,
+                is_foreign: false,
+                trait_required: false,
                 is_public: None,
                 is_public_api: None,
                 charon_def_id: None,
@@ -1925,9 +2035,10 @@ mod tests {
             }
 
             // Now convert to atoms to test the disambiguation path
-            let atoms = convert_to_atoms_with_lines_internal(
+            let (atoms, _span_misses) = convert_to_atoms_with_lines_internal(
                 &graph,
                 &display_names,
+                None,
                 None,
                 false,
                 &module_vis,
@@ -2042,6 +2153,10 @@ mod tests {
             rust_qualified_name: None,
             untracked: false,
             cfg: None,
+            file_cfg: None,
+            is_unmounted: false,
+            is_foreign: false,
+            trait_required: false,
             is_public: None,
             is_public_api: None,
             charon_def_id: None,
@@ -2344,5 +2459,141 @@ mod tests {
         )
         .unwrap();
         assert!(is_library_crate(dir.path()));
+    }
+
+    /// A span-map that resolves nothing must be reported: one counted miss
+    /// per function, never silence (KB P14). Without a span map there is
+    /// nothing to miss.
+    #[test]
+    fn test_span_misses_are_counted() {
+        let mk_node = |symbol: &str, name: &str| FunctionNode {
+            symbol: symbol.to_string(),
+            display_name: name.to_string(),
+            signature_text: format!("fn {}()", name),
+            relative_path: "src/lib.rs".to_string(),
+            callees: HashSet::new(),
+            range: vec![3, 0, 3, 10],
+            self_type: None,
+            definition_type_context: Vec::new(),
+        };
+        let mut graph = HashMap::new();
+        graph.insert("s1".to_string(), mk_node("s1", "alpha"));
+        graph.insert("s2".to_string(), mk_node("s2", "beta"));
+
+        let empty_span_map = HashMap::new();
+        let (_, misses) = convert_to_atoms_with_lines_internal(
+            &graph,
+            &HashMap::new(),
+            Some(&empty_span_map),
+            None,
+            false,
+            &HashMap::new(),
+            true,
+        );
+        assert_eq!(misses, 2);
+
+        let (_, misses_without_map) = convert_to_atoms_with_lines_internal(
+            &graph,
+            &HashMap::new(),
+            None,
+            None,
+            false,
+            &HashMap::new(),
+            true,
+        );
+        assert_eq!(misses_without_map, 0);
+    }
+
+    /// End-to-end over the parsed-spans + mod-chain path: a crate with a
+    /// cfg-gated module file, an unmounted file, an extern block, and a trait
+    /// signature; the atoms must carry the folded `cfg`, `file-cfg`,
+    /// `is-unmounted`, `is-foreign`, and `trait-required` facts.
+    #[test]
+    fn test_convert_with_chain_facts() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let write = |rel: &str, content: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, content).unwrap();
+        };
+        write(
+            "Cargo.toml",
+            "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+        );
+        write(
+            "src/lib.rs",
+            "#[cfg(feature = \"extra\")]\nmod gated;\nmod inner_gated;\nunsafe extern \"C\" {\n    pub fn ForeignInit();\n}\npub trait T {\n    fn required(&self);\n}\n",
+        );
+        write(
+            "src/gated.rs",
+            "#[cfg(test)]\npub fn own_gate() {}\npub fn chain_only() {}\n",
+        );
+        write(
+            "src/inner_gated.rs",
+            "#![cfg(feature = \"y\")]\npub fn inner() {}\n",
+        );
+        write("src/orphan.rs", "pub fn dead() {}\n");
+
+        let mk_node = |symbol: &str, name: &str, path: &str, line0: i32| FunctionNode {
+            symbol: symbol.to_string(),
+            display_name: name.to_string(),
+            signature_text: format!("fn {}()", name),
+            relative_path: path.to_string(),
+            callees: HashSet::new(),
+            range: vec![line0, 0, line0, 10],
+            self_type: None,
+            definition_type_context: Vec::new(),
+        };
+        let mut graph = HashMap::new();
+        for (sym, name, path, line0) in [
+            ("s1", "own_gate", "src/gated.rs", 1),
+            ("s2", "chain_only", "src/gated.rs", 2),
+            ("s3", "ForeignInit", "src/lib.rs", 4),
+            ("s4", "required", "src/lib.rs", 7),
+            ("s5", "dead", "src/orphan.rs", 0),
+            ("s6", "inner", "src/inner_gated.rs", 1),
+        ] {
+            graph.insert(sym.to_string(), mk_node(sym, name, path, line0));
+        }
+
+        let atoms = convert_to_atoms_with_parsed_spans(
+            &graph,
+            &HashMap::new(),
+            root,
+            false,
+            &HashMap::new(),
+            true,
+        );
+        let by = |n: &str| atoms.iter().find(|a| a.display_name == n).unwrap();
+
+        let own = by("own_gate");
+        assert_eq!(
+            own.cfg.as_deref(),
+            Some("all(feature = \"extra\", test)"),
+            "file chain folded with own gate"
+        );
+        assert_eq!(own.file_cfg.as_deref(), Some("feature = \"extra\""));
+
+        let chain_only = by("chain_only");
+        assert_eq!(chain_only.cfg.as_deref(), Some("feature = \"extra\""));
+        assert_eq!(chain_only.file_cfg.as_deref(), Some("feature = \"extra\""));
+        assert!(!chain_only.is_unmounted);
+
+        let foreign = by("ForeignInit");
+        assert!(foreign.is_foreign);
+        assert_eq!(foreign.cfg, None);
+
+        assert!(by("required").trait_required);
+
+        // A file-level `#![cfg]` reaches its functions exactly ONCE (through
+        // their own cfg), with no file-cfg duplicate.
+        let inner = by("inner");
+        assert_eq!(inner.cfg.as_deref(), Some("feature = \"y\""));
+        assert_eq!(inner.file_cfg, None);
+
+        let dead = by("dead");
+        assert!(dead.is_unmounted);
+        assert_eq!(dead.cfg, None, "unmounted files carry no chain gate");
     }
 }

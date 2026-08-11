@@ -5,7 +5,19 @@ All notable changes to probe-rust are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2026-08-11
+
+### Fixed
+- **Stale SCIP cache no longer silently corrupts output** ([#30](https://github.com/Beneficial-AI-Foundation/probe-rust/issues/30)). The cached `data/index.scip.json` was reused purely on existence; when sources changed after indexing, the index's line numbers drifted from the fresh `syn` parse, the span-map join missed, and `cfg` / `lines-end` were dropped **silently** (observed on SymCRust-lean: cfg-bearing atoms fell 167 → 63 after a bulk reformat). The cache is now regenerated whenever any `*.rs` file, `Cargo.toml`, `Cargo.lock`, or directory (outside `target/`, `.git/`, `data/`, and probe's own `.verilib/` output dir; the project root's own mtime is excluded to avoid self-invalidation on coarse-mtime filesystems) is at least as new as it. Directories catch deletions and renames. The cache JSON is published atomically (temp file + rename), remaining span-map misses print a warning instead of passing silently, and an ambiguous span match (several same-name spans containing the SCIP line) is refused — counted as a miss — rather than guessed, so scope-changing facts are never assigned to the wrong function.
+- **Extern-block members now get real spans**: functions declared in `extern { … }` blocks previously had no `syn` span entry at all, so their `lines-end` (and any cfg gate on the block) was lost and `code-text` could point at unrelated lines.
+
+### Added
+- **Module-chain `cfg` predicates** ([#30](https://github.com/Beneficial-AI-Foundation/probe-rust/issues/30)): a new module-tree walk (`mod_chain`) resolves how each file is mounted from its package's lib/bin target entries (rustc directory-ownership rules, `#[path]` overrides, inline mods; `cfg_if!` branches are followed with their branch predicates dropped — conservative) and folds the `mod`-declaration gates along the file's mount chains, plus any file-level `#![cfg(...)]`, into each function's `cfg` predicate. The gate on `#[cfg(test)] mod tests;` in a parent file now reaches the functions inside that file. The permitted error direction is under-gating only: gates the walk cannot see (`cfg_if!` branch predicates, files it cannot reach) are omitted, never guessed, and a walk that is not provably complete (unparsable file, unresolvable `mod`, `include!`, `cfg_attr` on a `mod`, possible macro-generated mounts, mount cycles) emits no chain gates and no `is-unmounted` at all. Everything stays configuration-independent: probe-rust reports predicates, consumers evaluate them (KB P18/P19).
+- **`file-cfg` atom field**: the parent-file mod-chain component of `cfg`, alone, for consumers that report gate provenance.
+- **`is-unmounted` atom field**: the function's file is reached by no `mod` chain from any analyzed package's lib/bin target entries, so it is not part of any lib or bin build (test/bench/example targets are deliberately not scanned). Inferred only from a provably complete walk across every package (unparsable files, unresolvable `mod` targets, `include!`, `cfg_attr` on `mod` declarations, possible macro-generated mounts, mount cycles, and chain-cap overflows disable the inference — and all `file-cfg` emission — project-wide), so lib/bin-compiled code is never mislabeled.
+- **`is-foreign` / `trait-required` atom fields**: declaration-kind facts for extern-block members (no Rust body to verify) and bodyless trait method signatures (obligations live on the impls). All new fields are additive and omitted when absent/false.
+
+## [0.9.0] - 2026-07-27
 
 ### Changed
 - **`is-disabled` atom field renamed to `untracked`** (both the JSON wire name and the Rust field identifier). The semantics are unchanged — the field still means "out of verification scope" and the boolean polarity is preserved (`is-disabled: true` → `untracked: true`). This is a breaking wire-format change with no backward-compatibility alias.
@@ -219,7 +231,8 @@ Initial release.
 - CI pipeline with formatting, clippy, and unit test checks.
 - Release automation via cargo-dist for Linux, macOS, and Windows binaries.
 
-[Unreleased]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.8.1...HEAD
+[0.10.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/Beneficial-AI-Foundation/probe-rust/compare/v0.7.0...v0.7.1

@@ -43,6 +43,7 @@ src/
 ├── constants.rs     # Shared constants (SCIP kinds, prefixes)
 ├── error.rs         # Unified error types
 ├── metadata.rs      # Schema 3.0 envelope construction, project metadata
+├── mod_chain.rs     # Module-tree walk: file mount chains, cfg gates, unmounted files
 ├── path_utils.rs    # Path matching utilities
 ├── rust_parser.rs   # AST parsing using syn for function spans
 ├── scip_cache.rs    # SCIP index generation, caching
@@ -87,7 +88,7 @@ src/
 This repo has a KB in `kb/` that documents invariants, architecture, and terminology. The KB is the source of truth — if code disagrees with the KB, the code is wrong.
 
 Key files:
-- `kb/engineering/properties.md` — numbered invariants P1-P16, known issues C1-C3
+- `kb/engineering/properties.md` — numbered invariants P1-P19, known issues C1-C3
 - `kb/engineering/architecture.md` — pipeline, components, data flow
 - `kb/engineering/glossary.md` — domain terms
 

@@ -20,11 +20,18 @@ pub struct FunctionSpan {
     pub start_line: usize,
     pub end_line: usize,
     /// The combined item-gating `#[cfg(...)]` predicate governing this function
-    /// (own `#[cfg]` plus every enclosing `impl`/`mod`/`trait` gate, `all(...)`-
-    /// joined), if any. `None` when the function has no `#[cfg]` gate. Consumers
-    /// evaluate it against the build config to decide whether the function is
-    /// compiled (and hence in verification scope).
+    /// (own `#[cfg]` plus every enclosing `impl`/`mod`/`trait`/`extern` gate,
+    /// `all(...)`-joined), if any. `None` when the function has no `#[cfg]`
+    /// gate. Consumers evaluate it against the build config to decide whether
+    /// the function is compiled (and hence in verification scope).
     pub cfg: Option<String>,
+    /// Declared inside an `extern { … }` block: a binding whose implementation
+    /// lives outside Rust — there is no Rust body to analyze or verify.
+    pub is_foreign: bool,
+    /// A bodyless trait method signature: the proof obligation lives on the
+    /// implementations, not here. `false` for trait methods with a default
+    /// body.
+    pub trait_required: bool,
 }
 
 // =============================================================================
@@ -66,6 +73,10 @@ pub struct SpanInfo {
     pub end_line: usize,
     /// Combined item-gating `#[cfg(...)]` predicate (see [`FunctionSpan::cfg`]).
     pub cfg: Option<String>,
+    /// Extern-block member (see [`FunctionSpan::is_foreign`]).
+    pub is_foreign: bool,
+    /// Bodyless trait signature (see [`FunctionSpan::trait_required`]).
+    pub trait_required: bool,
 }
 
 /// Extract the predicates of **all** item-gating `#[cfg(...)]` attributes on an
@@ -73,10 +84,13 @@ pub struct SpanInfo {
 ///
 /// Multiple `#[cfg]` attributes on the same item are conjunctive — the item is
 /// compiled only if every one holds — so callers combine them with `all(...)`.
-/// Only true `#[cfg(...)]` is item-gating. `#[cfg_attr(...)]` conditionally adds
-/// a *doc/derive/allow* attribute but always compiles the item, so it is
-/// deliberately ignored — it is not a scope gate.
-fn cfg_predicates_of(attrs: &[syn::Attribute]) -> Vec<String> {
+/// Only true `#[cfg(...)]` is collected. `#[cfg_attr(cond, ...)]` is ignored:
+/// it usually injects cosmetic attributes, but it CAN inject `cfg(...)` (a
+/// real gate) — ignoring that case under-gates, which is the permitted error
+/// direction (the item is treated as compiled). A `cfg_attr`-injected `path`
+/// on a `mod` declaration is handled separately by the module walk (it taints
+/// the walk, because it can change which file is mounted).
+pub(crate) fn cfg_predicates_of(attrs: &[syn::Attribute]) -> Vec<String> {
     attrs
         .iter()
         .filter_map(|attr| {
@@ -148,6 +162,8 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             start_line,
             end_line,
             cfg,
+            is_foreign: false,
+            trait_required: false,
         });
 
         syn::visit::visit_item_fn(self, node);
@@ -165,6 +181,8 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             start_line,
             end_line,
             cfg,
+            is_foreign: false,
+            trait_required: false,
         });
 
         syn::visit::visit_impl_item_fn(self, node);
@@ -182,9 +200,30 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             start_line,
             end_line,
             cfg,
+            is_foreign: false,
+            trait_required: node.default.is_none(),
         });
 
         syn::visit::visit_trait_item_fn(self, node);
+    }
+
+    fn visit_foreign_item_fn(&mut self, node: &'ast syn::ForeignItemFn) {
+        let name = node.sig.ident.to_string();
+        let span = node.span();
+        let start_line = span.start().line;
+        let end_line = span.end().line;
+        let cfg = self.combined_cfg(&node.attrs);
+
+        self.functions.push(FunctionSpan {
+            name,
+            start_line,
+            end_line,
+            cfg,
+            is_foreign: true,
+            trait_required: false,
+        });
+
+        syn::visit::visit_foreign_item_fn(self, node);
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
@@ -199,6 +238,12 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_mod(v, node));
     }
 
+    fn visit_item_foreign_mod(&mut self, node: &'ast syn::ItemForeignMod) {
+        // An `extern { … }` block can itself be cfg-gated; its gate governs
+        // every member.
+        self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_foreign_mod(v, node));
+    }
+
     fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
         if let Some(items) = try_parse_cfg_if_items(node) {
             for item in items {
@@ -211,7 +256,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
 
 /// Try to parse a `cfg_if!` macro node and return the items from all branches.
 /// Returns `None` if the macro is not `cfg_if` or parsing fails.
-fn try_parse_cfg_if_items(node: &syn::ItemMacro) -> Option<Vec<syn::Item>> {
+pub(crate) fn try_parse_cfg_if_items(node: &syn::ItemMacro) -> Option<Vec<syn::Item>> {
     let ident = node.mac.path.get_ident()?;
     if *ident != "cfg_if" {
         return None;
@@ -285,6 +330,9 @@ pub fn parse_file_for_spans(file_path: &Path) -> Result<Vec<FunctionSpan>, Strin
         .map_err(|e| format!("Failed to parse file {}: {}", file_path.display(), e))?;
 
     let mut visitor = FunctionSpanVisitor::new();
+    // A file-level inner attribute (`#![cfg(...)]`) gates every item in the
+    // file, exactly like an enclosing mod gate.
+    visitor.cfg_stack = cfg_predicates_of(&syntax_tree.attrs);
     visitor.visit_file(&syntax_tree);
 
     Ok(visitor.functions)
@@ -501,6 +549,8 @@ pub fn build_function_span_map(
                     SpanInfo {
                         end_line: func.end_line,
                         cfg: func.cfg.clone(),
+                        is_foreign: func.is_foreign,
+                        trait_required: func.trait_required,
                     },
                 );
             }
@@ -530,17 +580,27 @@ fn find_span_info<'a>(
         return Some(span_info);
     }
 
-    // Try containment match: find a function with the same name in the same file
-    // where the SCIP start_line falls within the parsed span.
-    span_map
+    // Try containment match: find a function with the same name in the same
+    // file where the SCIP start_line falls within the parsed span. This is a
+    // heuristic recovery path — when MORE than one same-name span contains
+    // the line (nested/overlapping same-name functions), the match cannot be
+    // trusted to identify the right declaration, and a wrong match would
+    // assign scope-changing facts (`cfg`, `is-foreign`, `trait-required`) to
+    // the wrong function. Ambiguity therefore returns `None` (counted and
+    // warned as a span miss) instead of guessing.
+    let mut candidates = span_map
         .iter()
-        .find_map(|((path, name, parsed_start), span_info)| {
-            (path == relative_path
+        .filter(|((path, name, parsed_start), span_info)| {
+            path == relative_path
                 && name == bare_name
                 && start_line >= *parsed_start
-                && start_line <= span_info.end_line)
-                .then_some(span_info)
-        })
+                && start_line <= span_info.end_line
+        });
+    let first = candidates.next();
+    match (first, candidates.next()) {
+        (Some((_, span_info)), None) => Some(span_info),
+        _ => None,
+    }
 }
 
 /// Get the end line for a function given its path, name, and start line.
@@ -562,6 +622,17 @@ pub fn get_function_cfg(
     start_line: usize,
 ) -> Option<String> {
     find_span_info(span_map, relative_path, function_name, start_line).and_then(|s| s.cfg.clone())
+}
+
+/// Get the full parsed [`SpanInfo`] for a function (cfg plus declaration-kind
+/// facts), using the same matching as [`get_function_end_line`].
+pub fn get_function_span_info<'a>(
+    span_map: &'a HashMap<(String, String, usize), SpanInfo>,
+    relative_path: &str,
+    function_name: &str,
+    start_line: usize,
+) -> Option<&'a SpanInfo> {
+    find_span_info(span_map, relative_path, function_name, start_line)
 }
 
 #[cfg(test)]
@@ -645,6 +716,157 @@ mod tests_mod {{
     }
 
     #[test]
+    fn test_foreign_and_trait_required_facts() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+unsafe extern "C" {{
+    pub fn ExternalInit();
+    #[cfg(not(feature = "std"))]
+    fn ExternalAlloc(
+        n_bytes: usize,
+    ) -> *mut u8;
+}}
+
+pub trait Cipher {{
+    fn required_len(&self) -> usize;
+    fn defaulted(&self) -> usize {{
+        0
+    }}
+}}
+
+impl Cipher for Aes {{
+    fn required_len(&self) -> usize {{
+        16
+    }}
+}}
+
+pub fn plain() {{}}
+"#
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let by = |n: &str| spans.iter().filter(|s| s.name == n).collect::<Vec<_>>();
+
+        let init = &by("ExternalInit")[0];
+        assert!(init.is_foreign);
+        assert!(!init.trait_required);
+        assert_eq!(init.cfg, None);
+
+        // Extern member with its own cfg gate, spanning multiple lines.
+        let alloc = &by("ExternalAlloc")[0];
+        assert!(alloc.is_foreign);
+        assert_eq!(alloc.cfg.as_deref(), Some(r#"not (feature = "std")"#));
+        assert!(alloc.end_line > alloc.start_line, "multi-line decl span");
+
+        // Bodyless trait signature vs defaulted vs impl.
+        let required = by("required_len");
+        let sig = required
+            .iter()
+            .find(|s| s.trait_required)
+            .expect("trait signature");
+        assert!(!sig.is_foreign);
+        let imp = required
+            .iter()
+            .find(|s| !s.trait_required)
+            .expect("impl method");
+        assert!(!imp.is_foreign);
+        assert!(!by("defaulted")[0].trait_required);
+        assert!(!by("plain")[0].is_foreign);
+        assert!(!by("plain")[0].trait_required);
+    }
+
+    #[test]
+    fn test_file_inner_cfg_gates_every_function() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"#![cfg(feature = "std")]
+
+pub fn top() {{}}
+
+#[cfg(test)]
+fn gated_too() {{}}
+"#
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let by = |n: &str| spans.iter().find(|s| s.name == n).unwrap();
+        assert_eq!(by("top").cfg.as_deref(), Some(r#"feature = "std""#));
+        assert_eq!(
+            by("gated_too").cfg.as_deref(),
+            Some(r#"all(feature = "std", test)"#)
+        );
+    }
+
+    #[test]
+    fn test_extern_block_inside_gated_inline_mod() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+#[cfg(test)]
+mod harness {{
+    unsafe extern "C" {{
+        pub fn HarnessInit();
+    }}
+}}
+"#
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let init = spans.iter().find(|s| s.name == "HarnessInit").unwrap();
+        assert!(init.is_foreign);
+        assert_eq!(init.cfg.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn test_defaulted_trait_fn_with_own_cfg() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+pub trait T {{
+    #[cfg(feature = "extra")]
+    fn defaulted(&self) -> usize {{
+        0
+    }}
+}}
+"#
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let d = spans.iter().find(|s| s.name == "defaulted").unwrap();
+        assert!(!d.trait_required, "default body ⇒ not trait-required");
+        assert_eq!(d.cfg.as_deref(), Some(r#"feature = "extra""#));
+    }
+
+    #[test]
+    fn test_cfg_gated_extern_block_gates_members() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+#[cfg(feature = "ffi")]
+unsafe extern "C" {{
+    pub fn Bound();
+}}
+"#
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let bound = spans.iter().find(|s| s.name == "Bound").unwrap();
+        assert!(bound.is_foreign);
+        assert_eq!(bound.cfg.as_deref(), Some(r#"feature = "ffi""#));
+    }
+
+    #[test]
     fn test_parse_impl_methods() {
         let mut file = NamedTempFile::new().unwrap();
         writeln!(
@@ -668,6 +890,40 @@ impl Foo {{
         assert!(names.contains(&"public_func"));
         assert!(names.contains(&"private_func"));
         assert!(names.contains(&"method"));
+    }
+
+    #[test]
+    fn test_ambiguous_containment_match_returns_none() {
+        // Two same-name spans both containing the probe line: the fallback
+        // cannot know which declaration the SCIP line belongs to, and a wrong
+        // pick would assign scope-changing facts to the wrong function — it
+        // must refuse (and be counted as a miss) rather than guess.
+        let mut span_map = HashMap::new();
+        span_map.insert(
+            ("src/lib.rs".to_string(), "f".to_string(), 10),
+            SpanInfo {
+                end_line: 30,
+                cfg: Some("test".to_string()),
+                is_foreign: false,
+                trait_required: false,
+            },
+        );
+        span_map.insert(
+            ("src/lib.rs".to_string(), "f".to_string(), 12),
+            SpanInfo {
+                end_line: 20,
+                cfg: None,
+                is_foreign: false,
+                trait_required: false,
+            },
+        );
+
+        // Line 15 is inside both spans and matches neither exact key.
+        assert!(get_function_span_info(&span_map, "src/lib.rs", "f", 15).is_none());
+        // An exact key still resolves.
+        assert!(get_function_span_info(&span_map, "src/lib.rs", "f", 10).is_some());
+        // A line contained by exactly one span resolves via fallback.
+        assert!(get_function_span_info(&span_map, "src/lib.rs", "f", 25).is_some());
     }
 
     #[test]

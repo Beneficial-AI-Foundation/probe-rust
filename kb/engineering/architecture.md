@@ -1,6 +1,6 @@
 # Architecture
 
-- **last-updated**: 2026-04-18
+- **last-updated**: 2026-08-11
 
 ## Overview
 
@@ -25,9 +25,10 @@ commands/extract.rs (orchestration)
   |-- 1. validate_project()
   |      Checks for Cargo.toml; discovers project root
   |
-  |-- 2. scip_cache::generate_scip_index()              [P14]
+  |-- 2. scip_cache::get_or_generate()                  [P14]
   |      rust-analyzer + scip CLI -> index.scip -> index.scip.json
-  |      Cached in <project>/data/
+  |      Cached in <project>/data/; regenerated automatically when any
+  |      source file or directory is newer than the cache (staleness check)
   |
   |-- 3. lib.rs pipeline                                [P7, P8, P9, P10, P11, P16]
   |      parse_scip_json()          Parse SCIP JSON into ScipIndex
@@ -35,9 +36,12 @@ commands/extract.rs (orchestration)
   |             -> FunctionNode map + symbol_to_display_name map
   |             -> module_visibility map (SCIP module-chain walk)
   |        -> convert_to_atoms_with_parsed_spans()
-  |             rust_parser (syn)   Parse .rs files for function body spans
+  |             rust_parser (syn)   Parse .rs files for function body spans,
+  |                                 cfg gates, is-foreign, trait-required [P18, P19]
+  |             mod_chain (syn)     Walk module tree per package: file mount
+  |                                 chains, file gates, unmounted files [P18, P19]
   |             classify_public_api()  is-public-api from module chain  [P11, P12]
-  |             -> AtomWithLines map                    [P3, P5, P6]
+  |             -> AtomWithLines map (cfg folded, span misses warned) [P3, P5, P6, P14]
   |
   |-- 4. find_duplicate_code_names() + dedupe into BTreeMap  [P2]
   |
@@ -74,9 +78,15 @@ Parses SCIP JSON, builds the function node graph, resolves disambiguation, conve
 
 ### syn / rust_parser (internal)
 
-Refines function body end lines. SCIP only gives the definition location (function name); syn parses the actual source files to find where the function body ends.
+Refines function body end lines and extracts per-function source facts. SCIP only gives the definition location (function name); syn parses the actual source files to find where the function body ends, the item-gating `#[cfg]` predicates (own, file-level `#![cfg]`, enclosing same-file blocks), and the declaration-kind facts (`is-foreign`, `trait-required`).
 
 **Files**: `rust_parser.rs`
+
+### Module-chain walk (internal)
+
+Walks each package's module tree from its lib/bin target entries, following `mod` declarations (rustc directory-ownership rules, `#[path]` overrides, inline mods, `cfg_if!`) to derive each file's mount chains. Produces the `file-cfg` gates folded into `cfg` and the `is-unmounted` fact, with conservative valves ([P19](../engineering/properties.md#p19--conservative-unmountedforeigntrait-facts)).
+
+**Files**: `mod_chain.rs`
 
 ### Charon (optional, external)
 
@@ -120,7 +130,8 @@ src/
   error.rs             ProbeError / ProbeResult
   metadata.rs          Schema 3.0 envelope, project metadata
   path_utils.rs        Path matching utilities
-  rust_parser.rs       syn-based function span parsing
+  rust_parser.rs       syn-based function span + source-fact parsing
+  mod_chain.rs         Module-tree walk: mount chains, file gates, unmounted
   scip_cache.rs        SCIP index generation and caching
   tool_manager.rs      Auto-download for scip CLI tool
   public_api.rs        cargo-public-api integration, RQN matching

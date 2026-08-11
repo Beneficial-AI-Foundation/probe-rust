@@ -1,6 +1,6 @@
 # Properties and Invariants
 
-- **last-updated**: 2026-04-09
+- **last-updated**: 2026-08-11
 
 Every property here must hold in the implementation. If a property is violated, it is a bug in the code, not in the KB — unless a deliberate decision changes the KB first.
 
@@ -116,13 +116,15 @@ Output paths under `.verilib/probes/` are constructed from package name and vers
 
 **Where**: `metadata.rs` (`get_default_output_path`, `test_output_path_does_not_escape`).
 
-### P14 — SCIP caching
+### P14 — SCIP caching with staleness check
 
-Generated SCIP data (`index.scip`, `index.scip.json`) is cached in `<project>/data/`. The `--regenerate-scip` flag forces re-generation. Stale cache does not cause incorrect output — it causes stale output.
+Generated SCIP data (`index.scip`, `index.scip.json`) is cached in `<project>/data/`. The cache is reused only when it is **fresh**: no `*.rs` file, `Cargo.toml`, or directory under the project (outside `target/`, `.git/`, `.verilib/`, and the cache dir itself) is newer than the cached JSON. Directories are included because a file deletion or rename bumps only its parent directory's mtime. A stale cache is regenerated automatically; the `--regenerate-scip` flag forces re-generation regardless.
 
-When `--with-public-api` is used, the `cargo public-api` output is also cached in `<project>/data/public-api.txt`. The `--regenerate-scip` flag also forces regeneration of this cache.
+A stale index is not merely stale output: its line numbers no longer match the fresh `syn` parse of the sources, which silently breaks the span-map join (`cfg` and `lines-end` are dropped, see P18). This is why staleness forces regeneration rather than a warning. Any span-map misses that remain after a fresh index are reported with a warning, never silently.
 
-**Where**: `scip_cache.rs`, `public_api.rs` (`collect_public_api`, `PUBLIC_API_CACHE_FILE`), `commands/extract.rs`.
+When `--with-public-api` is used, the `cargo public-api` output is also cached in `<project>/data/public-api.txt`. The `--regenerate-scip` flag also forces regeneration of this cache (no automatic staleness check).
+
+**Where**: `scip_cache.rs` (`is_cache_stale`, `newest_source_mtime`), `lib.rs` (span-miss warning in `convert_to_atoms_with_lines_internal`), `public_api.rs` (`collect_public_api`, `PUBLIC_API_CACHE_FILE`), `commands/extract.rs`.
 
 ### P15 — Charon non-fatal
 
@@ -148,6 +150,28 @@ Lifetime prefixes (`&'a`) and backtick quoting are stripped from the extracted t
 `--with-public-api` failure (missing nightly toolchain, missing `cargo-public-api`, or `cargo public-api` execution error) produces a warning and preserves the SCIP-walk-derived `is-public-api` values. It never aborts the extract pipeline. Analogous to [P15](#p15--charon-non-fatal) for Charon.
 
 **Where**: `commands/extract.rs` (`enrich_with_public_api`), `public_api.rs` (`ensure_nightly_toolchain`, `ensure_cargo_public_api`, `collect_public_api`).
+
+## Source-fact properties
+
+### P18 — `cfg` predicate: as complete as visible, under-gating only
+
+The `cfg` field is the item-gating predicate for a function, as completely as static analysis can see it: its own `#[cfg]`, a file-level `#![cfg(...)]`, every enclosing same-file `impl`/`mod`/`trait`/`extern` gate, and the gates on the `mod` declaration chain mounting its file from its package's lib/bin target entries, `all(...)`-joined. The parent-file component is also emitted alone as `file-cfg` (provenance for consumers reporting *why* a function is gated). probe-rust never evaluates these predicates — it reports configuration-independent facts; consumers (probe-aeneas) evaluate them against their build's feature set.
+
+The permitted error direction is **under-gating only**: the predicate may claim a function is compiled when the build would exclude it, never the reverse. Known deliberate under-gating: `cfg_if!` branch predicates are dropped (the branch items are still walked), `#[cfg_attr(cond, cfg(...))]` is ignored, files the module-tree walk cannot reach contribute no chain component, and a walk that was not provably complete contributes no chain components at all (see P19 — an invisible ungated mount would otherwise let a chain gate over-state). A file-level `#![cfg(...)]` reaches its own functions exactly once (through the same-file component) and its mounted descendants through the chain component. A span-map miss loses the same-file component entirely — that case is warned, never silent (P14); an ambiguous span match (several same-name spans containing the line) is refused and counted as a miss rather than guessed.
+
+A file mounted through several chains (e.g. mutually exclusive `#[path]` remounts, or mounts from different targets/workspace members) gets `any(...)` over the per-chain `all(...)` conjunctions (sorted, deduplicated); a file with at least one gate-free chain has no file gate. `#[cfg_attr(...)]` never contributes (it is not a scope gate). Predicate strings are not whitespace-normalized (source-copied parts keep syn token spacing; synthesized combinators are tight) — consumers must parse whitespace-insensitively.
+
+**Where**: `rust_parser.rs` (`FunctionSpanVisitor`, `cfg_predicates_of`, `parse_file_for_spans` file-inner attrs), `mod_chain.rs` (`analyze`, `chains_predicate`), `lib.rs` (fold in `convert_to_atoms_with_lines_internal`).
+
+### P19 — Conservative unmounted/foreign/trait facts
+
+`is-unmounted`, `is-foreign`, and `trait-required` are configuration-independent declaration facts, emitted only when `true`:
+
+- `is-unmounted`: the file is reached by no `mod` chain from **any analyzed package's lib or bin target entries** (`[lib]`/`src/lib.rs`, `[[bin]]`/`src/main.rs`/`src/bin/*`) — it is not part of any lib or bin build. Test/bench/example targets are deliberately not scanned: a file mounted only from them is still flagged, which is the policy-aligned outcome (those targets are outside the verified build) and exactly what the field claims — no more. Inferred **only from a provably complete walk across every package**: any unparsable file, unresolvable `mod` target, `include!`, `cfg_attr` on a `mod` declaration (it can inject `path` and select a different file per configuration), any item / `macro_rules!` body / unrecognized macro invocation whose tokens mention `mod` (block-local `#[path] mod`, macro-generated mounts), unreadable or entry-less-with-src package manifest, mount cycle, or chain-cap overflow anywhere disables the inference project-wide (a `#[path]` mount may cross package boundaries). **The same completeness requirement gates `file-cfg` emission** — an invisible mount could be ungated, making any gate emitted beside it over-state. The error direction is fixed: lib/bin-compiled code must never be labeled unmounted or over-gated; dead code may be missed.
+- `is-foreign`: declared inside an `extern { … }` block (no Rust body). Judged on the AST block, so bodyless trait signatures are NOT foreign.
+- `trait-required`: a bodyless trait method signature. Trait methods with a default body are ordinary functions.
+
+**Where**: `mod_chain.rs` (walk valves, `analyze`), `rust_parser.rs` (`visit_foreign_item_fn`, `visit_trait_item_fn`), `lib.rs` (emission).
 
 ---
 
