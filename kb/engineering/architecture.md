@@ -102,7 +102,7 @@ Supports multi-crate LLBCs: when the LLBC contains functions from dependency cra
 
 Overrides `is-public-api` using `cargo-public-api` output matched via `rust-qualified-name` (RQN). Requires nightly toolchain and `cargo-public-api`. Failure is non-fatal ([P17](../engineering/properties.md#p17--public-api-override-non-fatal)). Activated with `--with-public-api`.
 
-Matching runs as additive passes over a per-entry candidate-form set (`PublicNameForms`) — `pub use` rewrite, then inherited-default-trait-method resolution, then RQN matching, then impl-descriptor resolution for entries no atom name matched (which marks the implementing atom directly, the only way RQN-less macro-generated atoms are reached). Every pass skips on ambiguity, and the two metrics reported (atoms marked, entries matched) are deliberately distinct.
+Matching runs as additive passes over a per-entry candidate-form set (`PublicNameForms`) — `pub use` rewrite, trait-default resolution, RQN matching, then impl-descriptor resolution for entries no atom name matched. Every pass skips on ambiguity. The pass sequence and guards are specified in [P11](properties.md); extract reports both metrics (atoms marked, entries matched), which are deliberately distinct.
 
 **Files**: `public_api.rs`
 

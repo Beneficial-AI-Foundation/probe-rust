@@ -109,7 +109,7 @@ Charon can override this value when `--with-charon` is used.
 
 Pass 4 is the one exception to "atoms without an RQN are unaffected": a macro-generated impl leaves a bodyless impl-evidence atom with no RQN, and a `cargo public-api` entry resolving uniquely to it proves it public. Atoms of other crates are never marked from this crate's public API.
 
-Extract prints both metrics, which are different numbers: `is-public-api: N true, M false` counts *atoms*, and `public-api entries matched: N/M` counts *entries* (several entries can share one atom, and an entry can have several candidate forms).
+Extract prints both metrics, which are different numbers: `is-public-api: N true, M false` counts *atoms*, and `public-api entries matched: N/M` counts *entries* (several entries can share one atom, and an entry can have several candidate forms). This is the canonical description of the pass sequence; `docs/PUBLIC_API_LIMITATIONS.md` catalogues what remains unmatched on the reference crate (`curve25519-dalek` 4.1.3) and why.
 
 **Where**: `lib.rs` (`build_module_visibility_map`, `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`), `public_api.rs` (`PublicNameForms`, `enrich_atoms_with_public_api`, `atom_candidate_names`, `parse_impl_key`, `is_blanket_impl_atom`), `commands/extract.rs` (`enrich_with_public_api`).
 
