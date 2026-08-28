@@ -14,36 +14,21 @@
 //! path. To reconcile them, crate-root `pub use` declarations are parsed into an
 //! `alias -> definition_path` map and each public name is rewritten to its
 //! definition form before matching (see `collect_reexport_aliases` /
-//! `expand_public_names_with_aliases`).
+//! [`PublicNameForms::expand_with_aliases`]). The rewrite is additive: it only
+//! *adds* definition-form candidates, and a match still requires a real atom
+//! carrying that RQN. Given a correctly resolved crate root (see
+//! `resolve_crate_root_file`), the added candidates are genuine public
+//! re-exports, so they cannot mislabel a private atom.
 //!
-//! The rewrite is additive: it only *adds* definition-form candidates, and a
-//! match still requires a real atom carrying that RQN. Given a correctly
-//! resolved crate root (see `resolve_crate_root_file`), the added candidates are
-//! genuine public re-exports, so they cannot mislabel a private atom. If the
-//! wrong crate root were parsed, that guarantee would not hold — which is why
-//! root resolution is package-name checked.
-//!
-//! Two further candidate-expansion passes run over the same accumulated forms
-//! (`PublicNameForms`), each considering only entries still unmatched:
-//!
-//! - **pub-use**: the re-export rewrite above.
-//! - **trait-default**: an entry `path::Type::method` where `Type` has impl
-//!   evidence for exactly one trait providing `method`, no atom defines
-//!   `Type::method` itself, exactly one atom answers to `Trait::method`, and
-//!   that atom is itself public API. Impl evidence + no-override evidence + a
-//!   unique providing trait means the inherited default body IS what a public
-//!   caller invokes, so naming that atom cannot mislabel a private one; the
-//!   public-body guard keeps a private default out. Any ambiguity skips.
-//!
-//! Both stay additive — they only add candidate names, and an atom flips to
-//! `true` only when one of its *own* names equals such a candidate.
-//!
-//! A final pass, `PublicNameForms::resolve_unmatched_to_atoms`, handles public
-//! functions that have no atom carrying their name at all (macro-generated
-//! impl-evidence atoms without an RQN, blanket-impl atoms named after the
-//! impl's generic parameter): it resolves the entry to the crate's single atom
-//! bearing that impl descriptor and marks *that* atom public. See its docs for
-//! the uniqueness and blanket guards.
+//! Matching runs in additive passes over per-entry candidate forms
+//! (`PublicNameForms`): the `pub use` rewrite, inherited-default-trait-method
+//! resolution, RQN matching, then `resolve_unmatched_to_atoms` for entries no
+//! atom name matched (macro-generated and blanket impls), which marks the
+//! implementing atom directly. Every pass considers only still-unmatched
+//! entries and skips on any ambiguity. The canonical specification of the pass
+//! sequence and its guards is KB property P11
+//! (`kb/engineering/properties.md`); `PublicNameForms` and
+//! `resolve_unmatched_to_atoms` document the pass-local details.
 
 use crate::{AtomWithLines, ProbeError, ProbeResult};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -649,23 +634,6 @@ fn use_path_to_def(segments: &[String], crate_name: &str) -> Option<String> {
         return None;
     }
     Some(segments.join("::"))
-}
-
-/// Expand a set of public-API names with their re-export definition forms.
-///
-/// For each public name whose first path segment after the crate is a known
-/// re-export alias, add the rewritten definition-path form so it can join with
-/// an atom's definition-derived `rust-qualified-name`. Original names are kept.
-///
-/// Flat convenience wrapper over [`PublicNameForms::expand_with_aliases`].
-pub fn expand_public_names_with_aliases(
-    public_names: &HashSet<String>,
-    crate_name: &str,
-    aliases: &BTreeMap<String, String>,
-) -> HashSet<String> {
-    let mut forms = PublicNameForms::new(public_names);
-    forms.expand_with_aliases(crate_name, aliases);
-    forms.flat()
 }
 
 /// Rewrite a single public name to its definition form via the alias map.
@@ -1655,6 +1623,18 @@ pub fn top() {}
         assert!(aliases.is_empty());
     }
 
+    /// Test-only convenience: run the `pub use` expansion pass and flatten.
+    /// Production code drives `PublicNameForms` directly (`extract.rs`).
+    fn expanded_with_aliases(
+        public: &HashSet<String>,
+        crate_name: &str,
+        aliases: &BTreeMap<String, String>,
+    ) -> HashSet<String> {
+        let mut forms = PublicNameForms::new(public);
+        forms.expand_with_aliases(crate_name, aliases);
+        forms.flat()
+    }
+
     #[test]
     fn test_expand_module_lift() {
         let mut aliases = BTreeMap::new();
@@ -1667,7 +1647,7 @@ pub fn top() {}
             .map(|s| s.to_string())
             .collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert!(expanded.contains("spqr::chain::ChainParams::default"));
         assert!(expanded.contains("spqr::ChainParams::default"));
@@ -1685,7 +1665,7 @@ pub fn top() {}
             .map(|s| s.to_string())
             .collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert!(expanded.contains("spqr::serialize::Error::from"));
     }
@@ -1698,7 +1678,7 @@ pub fn top() {}
             .map(|s| s.to_string())
             .collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert_eq!(expanded, public);
     }
@@ -1713,7 +1693,7 @@ pub fn top() {}
         // `send` is not an alias, so no rewritten form is added.
         let public: HashSet<String> = ["spqr::send"].iter().map(|s| s.to_string()).collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert_eq!(expanded.len(), 1);
         assert!(expanded.contains("spqr::send"));
@@ -1823,7 +1803,7 @@ pub fn top() {}
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         let mut atoms = BTreeMap::new();
         atoms.insert(
@@ -1858,7 +1838,7 @@ pub fn top() {}
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         // Only a hand-written atom in a different module exists; no proto atom.
         let mut atoms = BTreeMap::new();
