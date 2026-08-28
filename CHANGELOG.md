@@ -5,6 +5,18 @@ All notable changes to probe-rust are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-28
+
+### Fixed
+- **`--with-public-api` no longer misses public functions whose atom carries a different name**. Matching an entry against atom `rust-qualified-name`s only cannot reach three real shapes: a concrete type inheriting a trait's **default** method body (the body exists once, in the trait, and SCIP emits no per-type symbol), a **macro-generated** impl whose atom is bodyless with no RQN at all, and the crate's own **blanket impl** (`impl<T> Trait for T`), whose atom is named after the impl's generic parameter (`…::T::is_identity`) — a name no public entry carries, so it was marked `is-public-api: false`. On `curve25519-dalek` 4.1.3, `is-public-api: true` atoms go 130 → 142 (11 macro-generated atoms previously left `null`, plus the blanket impl corrected from `false`) and entries matched go 123/169 (73%) → 147/169 (87%).
+
+### Added
+- **Candidate-form passes for `--with-public-api`**: matching now runs over a per-entry candidate-name set (`PublicNameForms`) instead of one flat name set — the existing `pub use` rewrite, then a **trait-default** pass (an entry `Type::method` gains the providing trait atom's RQN), then RQN matching, then **impl-descriptor resolution**, which marks the implementing atom directly for entries no name matched, via the SCIP impl descriptor embedded in the atom key (`…impl#[SelfType][Trait]method()`). Every pass is additive, considers only still-unmatched entries, and skips on ambiguity (zero or several candidates never resolve); resolution is restricted to the analyzed crate's own atoms, and bare `T::method` / trait-level entries additionally require `syn` verification that the impl self type is one of the impl's own generic parameters — a concrete type named `T` must not be resolved as a blanket impl. Marking an RQN-less atom is a deliberate, documented exception to "atoms without an RQN are unaffected" (KB P11).
+- **`public-api entries matched: N/M` output line**: the entry-level metric, distinct from the atom-level `is-public-api: N true, M false`. Several entries can share one atom and one entry can have several candidate forms, so the two numbers move independently — previous documentation conflated them (reporting "130 of 169 matched" against 46 unmatched, which does not sum).
+
+### Documentation
+- `docs/PUBLIC_API_LIMITATIONS.md` rewritten (v3.0) with four corrections verified against pristine crates.io sources: the type-alias direction was inverted (`pub type EdwardsBasepointTableRadix16 = EdwardsBasepointTable` — the aliased name is the one SCIP indexes, so the previously-proposed `pub type` mapping pass would have fixed zero entries), `Vartime{Edwards,Ristretto}Precomputation` are `pub struct` newtypes rather than aliases, `BasepointTable::{create, basepoint, mul_base}` are required rather than default methods, and the statistics conflated atoms with entries. Remaining unmatched: 22 entries in two categories (19 macro-generated with no atom of any kind, 3 bodyless required trait signatures).
+
 ## [0.10.0] - 2026-08-11
 
 ### Fixed

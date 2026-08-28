@@ -1,6 +1,6 @@
 # Properties and Invariants
 
-- **last-updated**: 2026-08-11
+- **last-updated**: 2026-08-28
 
 Every property here must hold in the implementation. If a property is violated, it is a bug in the code, not in the KB — unless a deliberate decision changes the KB first.
 
@@ -98,9 +98,20 @@ Charon can override this value when `--with-charon` is used.
 | `false` | Not public API: function is non-public, or at least one ancestor module is non-public |
 | absent (`null`) | External stubs only (no code-path to analyze) |
 
-**Optional override (`--with-public-api`):** When the flag is set, `is-public-api` is overridden for all atoms that have a `rust-qualified-name` (RQN). The RQN is looked up in the set of qualified names parsed from `cargo public-api -sss` output. Atoms without an RQN (external stubs) are unaffected. On failure (missing tools, nightly, or `cargo public-api` error), the override is skipped and SCIP-walk values are preserved (non-fatal, see [P17](#p17--public-api-override-non-fatal)).
+**Optional override (`--with-public-api`):** When the flag is set, `is-public-api` is overridden for all atoms that have a `rust-qualified-name` (RQN). The RQN is looked up in the set of qualified names parsed from `cargo public-api -sss` output. On failure (missing tools, nightly, or `cargo public-api` error), the override is skipped and SCIP-walk values are preserved (non-fatal, see [P17](#p17--public-api-override-non-fatal)).
 
-**Where**: `lib.rs` (`build_module_visibility_map`, `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`), `public_api.rs` (`enrich_atoms_with_public_api`), `commands/extract.rs` (`enrich_with_public_api`).
+`cargo public-api` names items by their public *use* path; atom RQNs use the *definition* path, and some public functions have no atom carrying their name at all. Reconciliation therefore runs in passes over a per-entry candidate-form set (`PublicNameForms`: entry → the names it may match under, always including itself). Every pass is additive and considers only entries still unmatched, and every pass skips on ambiguity — zero or several candidates never resolve:
+
+1. **pub-use**: rewrite an entry through the crate-root `pub use` alias map to its definition form.
+2. **trait-default**: an entry `path::Type::method` gains the RQN of the trait atom providing `method` when the atom keys show impl evidence for exactly one trait providing it, no atom defines `Type::method` itself, exactly one atom answers to `Trait::method`, and that atom is itself public API. The inherited default body is what a public caller invokes, so it is the entry's only implementation.
+3. **name matching**: `enrich_atoms_with_public_api` sets `true`/`false` for every atom with an RQN, from the flattened candidate forms.
+4. **impl-descriptor resolution**: for an entry that *no* name matched, the atom implementing it is marked `true` directly — resolved through the SCIP impl descriptor embedded in the atom key, restricted to the analyzed crate's own atoms. `path::Type::method` resolves to the crate's single `impl#[Type][…]method()` atom; a bare `T::method` (printed by `cargo public-api` for a blanket impl) and a trait-level `path::Trait::method` resolve to the single `impl#[…][Trait]method()` atom only when `syn` verifies the impl self type is one of the impl's own generic parameters (`impl<T> Trait for T`) — the key alone cannot tell a generic parameter named `T` from a concrete type named `T`.
+
+Pass 4 is the one exception to "atoms without an RQN are unaffected": a macro-generated impl leaves a bodyless impl-evidence atom with no RQN, and a `cargo public-api` entry resolving uniquely to it proves it public. Atoms of other crates are never marked from this crate's public API.
+
+Extract prints both metrics, which are different numbers: `is-public-api: N true, M false` counts *atoms*, and `public-api entries matched: N/M` counts *entries* (several entries can share one atom, and an entry can have several candidate forms).
+
+**Where**: `lib.rs` (`build_module_visibility_map`, `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`), `public_api.rs` (`PublicNameForms`, `enrich_atoms_with_public_api`, `atom_candidate_names`, `parse_impl_key`, `is_blanket_impl_atom`), `commands/extract.rs` (`enrich_with_public_api`).
 
 ### P12 — Binary crate detection
 
