@@ -523,7 +523,7 @@ fn enrich_display_name(scip_symbol: &str, base_display_name: &str) -> String {
 ///
 /// Input like `[CompressedEdwardsY][ConstantTimeEq]ct_eq()` → `"CompressedEdwardsY"`.
 /// Strips lifetime prefixes (`&'a `) and backtick quoting.
-fn extract_bracket_type(s: &str) -> Option<String> {
+pub(crate) fn extract_bracket_type(s: &str) -> Option<String> {
     if !s.starts_with('[') {
         return None;
     }

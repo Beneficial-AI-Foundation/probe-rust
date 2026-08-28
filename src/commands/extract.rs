@@ -361,6 +361,13 @@ fn enrich_from_manifest(translation: &Path, atoms_dict: &mut BTreeMap<String, At
     }
 }
 
+fn count_public_api(atoms: &BTreeMap<String, AtomWithLines>, value: bool) -> usize {
+    atoms
+        .values()
+        .filter(|a| a.is_public_api == Some(value))
+        .count()
+}
+
 fn enrich_with_public_api(
     project_path: &Path,
     auto_install: bool,
@@ -388,16 +395,39 @@ fn enrich_with_public_api(
                 public_names.len()
             );
 
+            let mut forms = public_api::PublicNameForms::new(&public_names);
+
             // Resolve crate-root `pub use` re-exports (and renames) so functions
             // reported by cargo-public-api under their public path still match
             // atoms carrying the definition-path `rust-qualified-name`.
             let aliases = public_api::collect_reexport_aliases(project_path, pkg_name);
-            let public_names =
-                public_api::expand_public_names_with_aliases(&public_names, pkg_name, &aliases);
+            forms.expand_with_aliases(pkg_name, &aliases);
 
-            let (set_true, set_false) =
-                public_api::enrich_atoms_with_public_api(atoms_dict, &public_names);
+            // Entries naming an inherited default trait method resolve to the
+            // trait's atom, the only place that body exists.
+            let atom_names = public_api::atom_candidate_names(atoms_dict);
+            forms.expand_with_trait_defaults(atoms_dict, &atom_names);
+
+            public_api::enrich_atoms_with_public_api(atoms_dict, &forms.flat());
+
+            // Entries with no atom carrying their name (macro-generated impls,
+            // blanket impls) are resolved to the atom that implements them,
+            // which is marked public directly. Runs after the name-based
+            // enrichment so its marks are not overwritten.
+            let marked =
+                forms.resolve_unmatched_to_atoms(atoms_dict, &atom_names, pkg_name, project_path);
+            if marked > 0 {
+                println!("  ✓ {marked} atom(s) marked public via impl-descriptor resolution");
+            }
+
+            let set_true = count_public_api(atoms_dict, true);
+            let set_false = count_public_api(atoms_dict, false);
             println!("  ✓ is-public-api: {} true, {} false", set_true, set_false);
+            println!(
+                "  ✓ public-api entries matched: {}/{}",
+                forms.matched_count(&atom_names),
+                forms.len()
+            );
         }
         Err(e) => {
             eprintln!("  ⚠ cargo-public-api failed: {e}");
