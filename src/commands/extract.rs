@@ -40,7 +40,7 @@ pub fn cmd_extract(
 
     let scip_index = parse_scip_json(&json_path)?;
 
-    let (call_graph, symbol_to_display_name, module_visibility) = build_call_graph(&scip_index);
+    let (call_graph, symbol_to_display_name) = build_call_graph(&scip_index);
     println!("  ✓ Call graph built with {} functions", call_graph.len());
     println!();
 
@@ -55,8 +55,6 @@ pub fn cmd_extract(
         &symbol_to_display_name,
         &project_path,
         with_locations,
-        &module_visibility,
-        is_library,
     );
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
     if with_locations {
@@ -122,35 +120,34 @@ pub fn cmd_extract(
         );
     }
 
-    if is_library {
-        let public_count = atoms_dict
+    let public_count = atoms_dict
+        .values()
+        .filter(|a| a.is_public == Some(true))
+        .count();
+    let non_public_count = atoms_dict
+        .values()
+        .filter(|a| a.is_public == Some(false))
+        .count();
+    println!(
+        "  \u{2713} is-public: {} public, {} not public (from SCIP signatures)",
+        public_count, non_public_count
+    );
+    if with_public_api {
+        let api_true = atoms_dict
             .values()
-            .filter(|a| a.is_public == Some(true))
+            .filter(|a| a.is_public_api == Some(true))
             .count();
-        let non_public_count = atoms_dict
+        let api_false = atoms_dict
             .values()
-            .filter(|a| a.is_public == Some(false))
+            .filter(|a| a.is_public_api == Some(false))
             .count();
         println!(
-            "  ✓ is-public: {} public, {} not public (SCIP module-chain walk)",
-            public_count, non_public_count
+            "  \u{2713} is-public-api: {} in public API, {} not (cargo-public-api)",
+            api_true, api_false
         );
-        if with_public_api {
-            let api_true = atoms_dict
-                .values()
-                .filter(|a| a.is_public_api == Some(true))
-                .count();
-            let api_false = atoms_dict
-                .values()
-                .filter(|a| a.is_public_api == Some(false))
-                .count();
-            println!(
-                "  ✓ is-public-api: {} in public API, {} not (cargo-public-api)",
-                api_true, api_false
-            );
-        }
-    } else {
-        println!("  ℹ Binary-only crate — is-public: false for all atoms");
+    }
+    if !is_library {
+        println!("  \u{2139} Binary-only crate (no [lib] target)");
     }
 
     let output = output.unwrap_or_else(|| get_default_output_path(&project_path, &metadata, ""));

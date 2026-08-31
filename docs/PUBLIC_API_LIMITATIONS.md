@@ -9,7 +9,7 @@ Date: 2026-08-31
 cross-referencing function atoms (from SCIP/rust-analyzer) against the output of
 `cargo public-api`. Matching runs in additive passes with ambiguity guards,
 specified canonically in
-[P11](../kb/engineering/properties.md#p11--is-public-api-from-scip-module-walk);
+[P11](../kb/engineering/properties.md#p11--is-public-api-from-cargo-public-api);
 this document catalogues the entries that remain unmatched and why. Examples are
 drawn from `curve25519-dalek` 4.1.3 (member directory, not the workspace root).
 
@@ -37,9 +37,8 @@ improving the other.
 
 The "Before" and "Now" atom counts are computed under slightly different
 semantics: 0.10.0 counted what the RQN enrichment pass wrote, while the current
-count is the final state of every atom (including SCIP-walk values kept on
-atoms the override never touched). On this crate the two agree, but the
-comparison is not exact by construction.
+count is the final state of every atom. On this crate they coincide, because an
+atom the enrichment never touches simply keeps `is-public-api: null`.
 
 The 22 remaining unmatched entries fall into the two structural categories
 below. There are zero unexplained gaps.

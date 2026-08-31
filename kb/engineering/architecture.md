@@ -34,13 +34,11 @@ commands/extract.rs (orchestration)
   |      parse_scip_json()          Parse SCIP JSON into ScipIndex
   |        -> build_call_graph()    Walk documents/symbols/occurrences
   |             -> FunctionNode map + symbol_to_display_name map
-  |             -> module_visibility map (SCIP module-chain walk)
   |        -> convert_to_atoms_with_parsed_spans()
   |             rust_parser (syn)   Parse .rs files for function body spans,
   |                                 cfg gates, is-foreign, trait-required [P18, P19]
   |             mod_chain (syn)     Walk module tree per package: file mount
   |                                 chains, file gates, unmounted files [P18, P19]
-  |             classify_public_api()  is-public-api from module chain  [P11, P12]
   |             -> AtomWithLines map (cfg folded, span misses warned) [P3, P5, P6, P14]
   |
   |-- 4. find_duplicate_code_names() + dedupe into BTreeMap  [P2]
@@ -170,13 +168,11 @@ rust-analyzer ──> index.scip ──> scip CLI ──> index.scip.json
                                                     |
                                                     v
                                             build_call_graph()
-                                              + module_visibility_map
                                                     |
                               .rs files ──> syn ──> span_map
                                                     |
                                                     v
                                     convert_to_atoms_with_parsed_spans()
-                                      + classify_public_api() per atom
                                                     |
                                                     v
                                             BTreeMap<code-name, AtomWithLines>
