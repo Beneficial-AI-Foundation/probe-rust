@@ -406,7 +406,7 @@ fn enrich_with_public_api(
             // Entries naming an inherited default trait method resolve to the
             // trait's atom, the only place that body exists.
             let atom_names = public_api::atom_candidate_names(atoms_dict);
-            forms.expand_with_trait_defaults(atoms_dict, &atom_names);
+            forms.expand_with_trait_defaults(atoms_dict, &atom_names, pkg_name);
 
             public_api::enrich_atoms_with_public_api(atoms_dict, &forms.flat());
 

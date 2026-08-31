@@ -550,6 +550,7 @@ fn lib_src_path_from_metadata(json: &str, crate_name: &str) -> Option<PathBuf> {
 /// I/O and parse errors yield an empty map (graceful no-op).
 pub fn collect_reexport_aliases(project_path: &Path, crate_name: &str) -> BTreeMap<String, String> {
     let mut aliases = BTreeMap::new();
+    let mut conflicting: BTreeSet<String> = BTreeSet::new();
     let crate_name = crate_name.replace('-', "_");
 
     let Some(root) = resolve_crate_root_file(project_path, &crate_name) else {
@@ -576,11 +577,23 @@ pub fn collect_reexport_aliases(project_path: &Path, crate_name: &str) -> BTreeM
         collect_use_tree(&item_use.tree, Vec::new(), &mut leaves);
         for (alias, segments) in leaves {
             if let Some(def) = use_path_to_def(&segments, &crate_name) {
-                aliases.insert(alias, def);
+                // Ambiguity skips: an alias claimed for two different
+                // definitions resolves to neither.
+                match aliases.get(&alias) {
+                    Some(prev) if *prev != def => {
+                        conflicting.insert(alias);
+                    }
+                    _ => {
+                        aliases.insert(alias, def);
+                    }
+                }
             }
         }
     }
 
+    for alias in conflicting {
+        aliases.remove(&alias);
+    }
     aliases
 }
 
@@ -750,14 +763,20 @@ impl PublicNameForms {
         &mut self,
         atoms: &BTreeMap<String, AtomWithLines>,
         atom_names: &HashSet<String>,
+        crate_name: &str,
     ) {
         // Impl-chain truth straight from the atom keys, whose SCIP descriptors
         // embed `impl#[SelfType][Trait]method()`. Stubs count: an impl-evidence
         // key with no body still proves `Type: Trait`, and a key for
-        // `Type::method` still proves an override.
+        // `Type::method` still proves an override. Only the analyzed crate's
+        // keys are evidence: a dependency's impls neither prove nor veto.
+        let crate_name = crate_name.replace('-', "_");
         let mut impl_traits: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut overridden: HashSet<(String, String)> = HashSet::new();
         for key in atoms.keys() {
+            if key_crate(key).map(|c| c.replace('-', "_")).as_deref() != Some(&crate_name) {
+                continue;
+            }
             let Some((self_type, trait_name, method)) = parse_impl_key(key) else {
                 continue;
             };
@@ -768,6 +787,8 @@ impl PublicNameForms {
         }
 
         // (owner, method) -> distinct RQNs of atoms whose RQN ends `owner::method`.
+        // Needs no crate scoping: the public-output guard below already rejects
+        // any RQN absent from this crate's `cargo public-api` surface.
         let mut trait_atoms: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
         for atom in atoms.values() {
             let Some(rqn) = &atom.rust_qualified_name else {
@@ -829,7 +850,9 @@ impl PublicNameForms {
     /// entry that resolves to exactly one of them proves it public.
     ///
     /// Resolution is by SCIP impl descriptor from the atom key, restricted to
-    /// `crate_name`'s own atoms, and only for entries no name matched:
+    /// `crate_name`'s own atoms, and only for entries no name matched. A
+    /// qualified entry's module segments must also equal the atom key's module
+    /// path (see [`key_module_path`]):
     ///
     /// - `path::Type::method` → the crate's single `impl#[Type][…]method()`
     ///   atom. A bare two-segment entry (`T::method`, printed by
@@ -883,19 +906,31 @@ impl PublicNameForms {
             // `T::method`: no module path, so the receiver may be a generic param.
             let bare = entry.split("::").count() < 3;
 
+            // The entry's module segments (between crate and type/trait) must
+            // equal the atom key's module path: a lone `bar::Table::new` atom
+            // must not answer for a public `foo::Table::new`. Bare entries have
+            // no path; the blanket check guards them instead.
+            let entry_mods: Option<String> = (!bare).then(|| {
+                let segs: Vec<&str> = entry.split("::").collect();
+                segs[1..segs.len() - 2].join("/")
+            });
+            let path_ok = |key: &String| match &entry_mods {
+                None => true,
+                Some(mods) => key_module_path(key) == Some(mods.as_str()),
+            };
             let blanket = |key: &String| {
                 atoms
                     .get(key)
                     .is_some_and(|a| is_blanket_impl_atom(a, project_path))
             };
             if let [key] = one(by_self.get(&index_key)) {
-                if !bare || blanket(key) {
+                if path_ok(key) && (!bare || blanket(key)) {
                     resolutions.push((entry.clone(), key.clone()));
                     continue;
                 }
             }
             if let [key] = one(by_trait.get(&index_key)) {
-                if blanket(key) {
+                if path_ok(key) && blanket(key) {
                     resolutions.push((entry.clone(), key.clone()));
                 }
             }
@@ -924,6 +959,33 @@ impl PublicNameForms {
 /// The crate segment of an atom key (`probe:<crate>/<version>/…`).
 fn key_crate(key: &str) -> Option<&str> {
     key.strip_prefix("probe:")?.split('/').next()
+}
+
+/// The module path of an atom key: the segments between `probe:<crate>/<version>/`
+/// and the final descriptor segment. Empty for crate-root items; multi-segment
+/// (`backend/serial/u64/field`) stays `/`-joined.
+///
+/// The boundary is the *last `/` at top level*: `/` also occurs inside the
+/// descriptor's bracketed generics (`impl<[u8;/{const}]>#…`) and backticked
+/// types (`` [`&'a/Table`] ``), which must not count. A key this scan misparses
+/// can only fail the caller's equality check and skip — never resolve wrongly.
+fn key_module_path(key: &str) -> Option<&str> {
+    let rest = key.strip_prefix("probe:")?;
+    let rest = &rest[rest.find('/')? + 1..]; // past <crate>/
+    let tail = &rest[rest.find('/')? + 1..]; // past <version>/
+    let mut depth = 0usize;
+    let mut in_backtick = false;
+    let mut last_slash = None;
+    for (i, c) in tail.char_indices() {
+        match c {
+            '`' => in_backtick = !in_backtick,
+            '[' | '<' | '{' | '(' if !in_backtick => depth += 1,
+            ']' | '>' | '}' | ')' if !in_backtick => depth = depth.saturating_sub(1),
+            '/' if !in_backtick && depth == 0 => last_slash = Some(i),
+            _ => {}
+        }
+    }
+    Some(last_slash.map_or("", |i| &tail[..i]))
 }
 
 /// Borrow an index bucket as a slice (empty when absent), for slice patterns.
@@ -1486,6 +1548,55 @@ impl IsIdentity for T {
         assert_eq!(forms.matched_count(&names), 1);
     }
 
+    /// A lone atom in another module must not answer for the entry: the
+    /// entry's module segments and the key's module path have to agree.
+    #[test]
+    fn test_resolve_module_path_mismatch_skipped() {
+        let mut atoms = BTreeMap::from([(
+            "probe:c/1.0/bar/impl#[Table][BasepointTable]create()".to_string(),
+            stub_atom(None, "", (0, 0)),
+        )]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["c::foo::Table::create"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", Path::new("."));
+
+        assert_eq!(marked, 0);
+        assert!(atoms.values().all(|a| a.is_public_api.is_none()));
+    }
+
+    #[test]
+    fn test_key_module_path_shapes() {
+        // Plain and multi-segment paths.
+        assert_eq!(
+            key_module_path("probe:c/1.0/edwards/impl#[Table][BasepointTable]create()"),
+            Some("edwards")
+        );
+        assert_eq!(
+            key_module_path("probe:c/1.0/backend/serial/u64/field/&F#impl<X>#[F][Debug]fmt()"),
+            Some("backend/serial/u64/field")
+        );
+        // Crate-root item: empty module path.
+        assert_eq!(
+            key_module_path("probe:c/1.0/impl<&Formatter<'_>>#[DalekBits][Display]fmt()"),
+            Some("")
+        );
+        // Receiver-decorated descriptor with no `/impl#` to search for.
+        assert_eq!(
+            key_module_path("probe:c/1.0/traits/&T#impl<bool>#[T][IsIdentity]is_identity()"),
+            Some("traits")
+        );
+        // `/` inside bracketed generics and backticked types must not count.
+        assert_eq!(
+            key_module_path("probe:c/1.0/edwards/impl<[u8;/{const}]>#[Point]mul_base_clamped()"),
+            Some("edwards")
+        );
+        assert_eq!(
+            key_module_path("probe:c/1.0/edwards/impl#[`&'a/Table`][`Mul<&'b/Scalar>`]mul()"),
+            Some("edwards")
+        );
+    }
+
     /// Write a minimal single-crate project (`Cargo.toml` + `src/<file>`) into
     /// `dir` so `resolve_crate_root_file` takes the manifest fast path.
     fn write_crate(dir: &Path, pkg_name: &str, lib_rel: &str, lib_src: &str) {
@@ -1547,6 +1658,30 @@ pub fn top() {}
         assert!(!aliases.contains_key("Hidden"));
         assert!(!aliases.contains_key("Gated"));
         assert_eq!(aliases.len(), 5);
+    }
+
+    /// An alias claimed for two different definitions resolves to neither.
+    #[test]
+    fn test_collect_reexport_aliases_conflicting_alias_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        write_crate(
+            dir.path(),
+            "spqr",
+            "src/lib.rs",
+            "\
+pub use crate::a::Foo;
+pub use crate::b::Foo;
+pub use crate::c::Bar;
+",
+        );
+
+        let aliases = collect_reexport_aliases(dir.path(), "spqr");
+
+        assert!(
+            !aliases.contains_key("Foo"),
+            "conflicting alias must be dropped, not last-write-win"
+        );
+        assert_eq!(aliases.get("Bar").map(String::as_str), Some("spqr::c::Bar"));
     }
 
     #[test]
@@ -1929,7 +2064,7 @@ pub fn top() {}
         ]));
         assert_eq!(forms.matched_count(&names), 1);
 
-        forms.expand_with_trait_defaults(&atoms, &names);
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
 
         assert_eq!(forms.matched_count(&names), 2);
         assert_eq!(forms.len(), 2);
@@ -1958,7 +2093,7 @@ pub fn top() {}
             "c::edwards::Table::mul_base_clamped",
         ]));
 
-        forms.expand_with_trait_defaults(&atoms, &names);
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
 
         assert_eq!(
             forms.matched_count(&names),
@@ -1995,7 +2130,7 @@ pub fn top() {}
             "c::edwards::Table::mul_base_clamped",
         ]));
 
-        forms.expand_with_trait_defaults(&atoms, &names);
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
 
         assert_eq!(
             forms.matched_count(&names),
@@ -2021,12 +2156,43 @@ pub fn top() {}
         // The trait method itself is absent from the public API surface.
         let mut forms = PublicNameForms::new(&public(&["c::edwards::Table::mul_base_clamped"]));
 
-        forms.expand_with_trait_defaults(&atoms, &names);
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
 
         assert_eq!(forms.matched_count(&names), 0);
         assert!(!forms
             .flat()
             .contains("c::traits::BasepointTable::mul_base_clamped"));
+    }
+
+    /// A dependency's impl keys are not evidence: they neither prove the
+    /// `Type: Trait` link nor veto with a phantom override.
+    #[test]
+    fn test_trait_default_ignores_dependency_impl_evidence() {
+        let atoms = atom_map(&[
+            // The only impl evidence for `Table: BasepointTable` is a
+            // dependency's — it must not enable the match.
+            (
+                "probe:dep/1.0/edwards/impl#[Table][BasepointTable]create()",
+                Some("dep::edwards::Table::create"),
+            ),
+            (
+                "probe:c/1.0/traits/&Self#BasepointTable<[u8;/{const}]>#mul_base_clamped()",
+                Some("c::traits::BasepointTable::mul_base_clamped"),
+            ),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&[
+            "c::traits::BasepointTable::mul_base_clamped",
+            "c::edwards::Table::mul_base_clamped",
+        ]));
+
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
+
+        assert_eq!(
+            forms.matched_count(&names),
+            1,
+            "dependency impl evidence must not resolve the concrete-type entry"
+        );
     }
 
     #[test]

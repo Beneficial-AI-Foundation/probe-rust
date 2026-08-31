@@ -5,6 +5,11 @@ All notable changes to probe-rust are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Tightened `--with-public-api` resolution guards** (no behavior change on the reference crate): impl-descriptor resolution now also requires the entry's module segments to equal the atom key's module path (a lone `bar::Table::new` atom can no longer answer for a public `foo::Table::new`); trait-default resolution reads impl evidence only from the analyzed crate's own atom keys; a crate-root `pub use` alias claimed for two different definitions resolves to neither. See KB P11.
+
 ## [0.11.0] - 2026-08-28
 
 ### Fixed
