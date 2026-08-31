@@ -1,6 +1,6 @@
 # Architecture
 
-- **last-updated**: 2026-08-28
+- **last-updated**: 2026-08-31
 
 ## Overview
 
