@@ -1,6 +1,6 @@
 # Glossary
 
-- **last-updated**: 2026-08-28
+- **last-updated**: 2026-08-31
 
 Every domain term used in the KB must be defined here. Terms are listed alphabetically.
 

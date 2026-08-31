@@ -1,7 +1,7 @@
 # Public API Detection: Known Limitations
 
-Version: 3.1
-Date: 2026-08-28
+Version: 3.2
+Date: 2026-08-31
 
 ## Overview
 

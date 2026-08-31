@@ -1,6 +1,6 @@
 # Properties and Invariants
 
-- **last-updated**: 2026-08-28
+- **last-updated**: 2026-08-31
 
 Every property here must hold in the implementation. If a property is violated, it is a bug in the code, not in the KB — unless a deliberate decision changes the KB first.
 
@@ -96,7 +96,7 @@ Charon can override this value when `--with-charon` is used.
 |-------|---------|
 | `true` | Function is reachable from the crate root: either a direct `pub` function with all ancestor modules `pub`, or a trait impl method whose implementing type is in a public module chain |
 | `false` | Not public API: function is non-public, or at least one ancestor module is non-public |
-| absent (`null`) | External stubs only (no code-path to analyze) |
+| absent (`null`) | Atoms with no code-path to analyze: external stubs, and the analyzed crate's own bodyless stubs (impl evidence, required trait signatures) |
 
 **Optional override (`--with-public-api`):** When the flag is set, `is-public-api` is overridden for all atoms that have a `rust-qualified-name` (RQN). The RQN is looked up in the set of qualified names parsed from `cargo public-api -sss` output. On failure (missing tools, nightly, or `cargo public-api` error), the override is skipped and SCIP-walk values are preserved (non-fatal, see [P17](#p17--public-api-override-non-fatal)).
 
