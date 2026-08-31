@@ -362,10 +362,10 @@ major version.
 
 ### Changelog
 
-- **3.0** (2026-08-28, clarification — no wire change): `--with-public-api` can
-  now set `is-public-api: true` on an analyzed-crate atom with no
-  `rust-qualified-name` (impl-descriptor resolution; see KB P11). Field types
-  and names are unchanged, so `schema-version` stays `3.0`.
+- **3.0 — doc clarification** (2026-08-28, no wire change, `schema-version`
+  stays `3.0`): `--with-public-api` can now set `is-public-api: true` on an
+  analyzed-crate atom with no `rust-qualified-name` (impl-descriptor
+  resolution; see KB P11). Field types and names are unchanged.
 - **3.0** (2026-07-27): Renamed the `is-disabled` atom field to `untracked`
   (both the JSON wire name and the Rust field). Semantics and boolean polarity
   are unchanged (`is-disabled: true` → `untracked: true`). Breaking wire-format

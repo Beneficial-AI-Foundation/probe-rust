@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--with-public-api` no longer misses public functions whose atom carries a different name** — inherited trait defaults, macro-generated impls (bodyless atoms with no RQN), and the crate's own blanket impl are now resolved. On `curve25519-dalek` 4.1.3, `is-public-api: true` atoms go 130 → 142 and entries matched go 123/169 (73%) → 147/169 (87%).
 
 ### Added
-- **Candidate-form passes for `--with-public-api`**: matching runs over per-entry candidate names (`PublicNameForms` — `pub use` rewrite, trait-default resolution), then impl-descriptor resolution marks the implementing atom directly for entries no name matched. Every pass is additive and skips on ambiguity; the specification is KB P11, the case study `docs/PUBLIC_API_LIMITATIONS.md` (rewritten v3.0; earlier versions' alias/type-claims were corrected against pristine crates.io sources).
+- **Candidate-form passes for `--with-public-api`**: matching runs over per-entry candidate names (`PublicNameForms` — `pub use` rewrite, trait-default resolution), then impl-descriptor resolution marks the implementing atom directly for entries no name matched. Every pass is additive and skips on ambiguity; the specification is KB P11, the case study `docs/PUBLIC_API_LIMITATIONS.md` (rewritten v3.1; earlier versions' alias/type-claims were corrected against pristine crates.io sources).
 - **`public-api entries matched: N/M` output line**: the entry-level metric, distinct from the atom-level `is-public-api: N true, M false` (several entries can share one atom, so the numbers move independently).
 
 ## [0.10.0] - 2026-08-11

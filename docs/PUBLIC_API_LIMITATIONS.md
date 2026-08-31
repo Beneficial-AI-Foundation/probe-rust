@@ -35,8 +35,25 @@ improving the other.
 | Entries unmatched | 46 | **22** |
 | **Atoms marked `is-public-api: true`** | 130 | **142** |
 
+The "Before" and "Now" atom counts are computed under slightly different
+semantics: 0.10.0 counted what the RQN enrichment pass wrote, while the current
+count is the final state of every atom (including SCIP-walk values kept on
+atoms the override never touched). On this crate the two agree, but the
+comparison is not exact by construction.
+
 The 22 remaining unmatched entries fall into the two structural categories
 below. There are zero unexplained gaps.
+
+> **Historical note — why there is no type-alias pass.** Versions ≤ 2.2 of this
+> document proposed mapping `pub type` aliases to their underlying types
+> ("Category B: Type Alias Re-Exports"), with the alias direction inverted:
+> `src/edwards.rs:1112` actually reads
+> `pub type EdwardsBasepointTableRadix16 = EdwardsBasepointTable;` — the
+> macro-generated struct carries the name `cargo public-api` reports, and the
+> `…Radix16` alias is the derived one. An alias-mapping pass would therefore
+> have resolved zero entries on this crate, and was dropped; the entries it was
+> meant to cover are handled by the trait-default and impl-descriptor passes
+> instead.
 
 ---
 

@@ -6,8 +6,11 @@
 //!
 //! When `--with-public-api` is used, every atom with a non-`None` RQN gets a
 //! definitive `is-public-api` value (`true` if the RQN appears in the
-//! `cargo public-api` output, `false` otherwise). Atoms without an RQN
-//! (external stubs) keep `is-public-api: None`.
+//! `cargo public-api` output, `false` otherwise). Atoms without an RQN keep
+//! `is-public-api: None`, with one exception: an analyzed-crate atom that
+//! impl-descriptor resolution proves public (see
+//! [`PublicNameForms::resolve_unmatched_to_atoms`]) is set `true` even
+//! without an RQN — macro-generated impls leave exactly such atoms.
 //!
 //! `cargo public-api` names items by their public *re-export* path (following
 //! `pub use`, applying `as` renames), whereas atom RQNs use the *definition*
@@ -24,8 +27,10 @@
 //! (`PublicNameForms`): the `pub use` rewrite, inherited-default-trait-method
 //! resolution, RQN matching, then `resolve_unmatched_to_atoms` for entries no
 //! atom name matched (macro-generated and blanket impls), which marks the
-//! implementing atom directly. Every pass considers only still-unmatched
-//! entries and skips on any ambiguity. The canonical specification of the pass
+//! implementing atom directly. Every pass is additive — an entry can gain
+//! candidate forms but never lose one — no pass resolves an ambiguity, and
+//! the resolution passes act only on still-unmatched entries. The canonical
+//! specification of the pass
 //! sequence and its guards is KB property P11
 //! (`kb/engineering/properties.md`); `PublicNameForms` and
 //! `resolve_unmatched_to_atoms` document the pass-local details.
@@ -385,7 +390,7 @@ fn unwrap_ref_type(s: &str) -> String {
 /// Set `is-public-api` for all atoms that have a `rust-qualified-name`.
 ///
 /// For each atom:
-/// - If `rust-qualified-name` is `None` (external stubs) → leave `is-public-api` unchanged
+/// - If `rust-qualified-name` is `None` → leave `is-public-api` unchanged
 /// - If RQN (or its normalized form) is in `public_names` → `is-public-api = Some(true)`
 /// - Otherwise → `is-public-api = Some(false)`
 ///
