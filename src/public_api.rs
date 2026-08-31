@@ -393,31 +393,19 @@ fn unwrap_ref_type(s: &str) -> String {
 /// - If `rust-qualified-name` is `None` → leave `is-public-api` unchanged
 /// - If RQN (or its normalized form) is in `public_names` → `is-public-api = Some(true)`
 /// - Otherwise → `is-public-api = Some(false)`
-///
-/// Returns `(set_true, set_false)` counts.
 pub fn enrich_atoms_with_public_api(
     atoms: &mut BTreeMap<String, AtomWithLines>,
     public_names: &HashSet<String>,
-) -> (usize, usize) {
-    let mut set_true = 0;
-    let mut set_false = 0;
-
+) {
     for atom in atoms.values_mut() {
         let Some(rqn) = &atom.rust_qualified_name else {
             continue;
         };
 
         let normalized = normalize_rqn_for_public_api(rqn);
-        if public_names.contains(rqn) || public_names.contains(&normalized) {
-            atom.is_public_api = Some(true);
-            set_true += 1;
-        } else {
-            atom.is_public_api = Some(false);
-            set_false += 1;
-        }
+        let is_public = public_names.contains(rqn) || public_names.contains(&normalized);
+        atom.is_public_api = Some(is_public);
     }
-
-    (set_true, set_false)
 }
 
 // =============================================================================
@@ -466,7 +454,7 @@ fn resolve_crate_root_file(project_path: &Path, crate_name: &str) -> Option<Path
 /// `[package]`, or none of the candidate files exist — so a workspace root (or a
 /// manifest for a different crate) falls through to the `cargo metadata` path.
 fn crate_root_from_manifest(project_path: &Path, crate_name: &str) -> Option<PathBuf> {
-    let normalize = |s: &str| s.replace('-', "_");
+    let normalize = normalize_crate_name;
     let manifest = std::fs::read_to_string(project_path.join("Cargo.toml")).ok()?;
     let table: toml::Table = manifest.parse().ok()?;
 
@@ -504,7 +492,7 @@ fn crate_root_from_manifest(project_path: &Path, crate_name: &str) -> Option<Pat
 fn lib_src_path_from_metadata(json: &str, crate_name: &str) -> Option<PathBuf> {
     const LIB_KINDS: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"];
 
-    let normalize = |s: &str| s.replace('-', "_");
+    let normalize = normalize_crate_name;
     let wanted = normalize(crate_name);
 
     let root: serde_json::Value = serde_json::from_str(json).ok()?;
@@ -556,7 +544,7 @@ fn lib_src_path_from_metadata(json: &str, crate_name: &str) -> Option<PathBuf> {
 pub fn collect_reexport_aliases(project_path: &Path, crate_name: &str) -> BTreeMap<String, String> {
     let mut aliases = BTreeMap::new();
     let mut conflicting: BTreeSet<String> = BTreeSet::new();
-    let crate_name = crate_name.replace('-', "_");
+    let crate_name = normalize_crate_name(crate_name);
 
     let Some(root) = resolve_crate_root_file(project_path, &crate_name) else {
         return aliases;
@@ -693,8 +681,8 @@ fn rewrite_public_name(
 /// its forms names a real atom. That is a different metric from the count of
 /// atoms marked `is-public-api: true` (several entries can share one atom, e.g.
 /// macro-generated types, and one atom can be reached by several forms).
-#[derive(Debug, Default)]
-pub struct PublicNameForms {
+#[derive(Debug)]
+pub(crate) struct PublicNameForms {
     forms: BTreeMap<String, BTreeSet<String>>,
     /// Entries resolved straight to an implementing atom (see
     /// [`PublicNameForms::resolve_unmatched_to_atoms`]) rather than by name.
@@ -703,7 +691,7 @@ pub struct PublicNameForms {
 
 impl PublicNameForms {
     /// Start with each entry mapping to just itself.
-    pub fn new(entries: &HashSet<String>) -> Self {
+    pub(crate) fn new(entries: &HashSet<String>) -> Self {
         Self {
             forms: entries
                 .iter()
@@ -714,23 +702,19 @@ impl PublicNameForms {
     }
 
     /// Number of `cargo public-api` entries tracked.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.forms.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.forms.is_empty()
-    }
-
     /// All candidate forms of all entries, flattened for the matcher.
-    pub fn flat(&self) -> HashSet<String> {
+    pub(crate) fn flat(&self) -> HashSet<String> {
         self.forms.values().flatten().cloned().collect()
     }
 
     /// Number of entries backed by a real atom: at least one form naming one
     /// (`atom_names` from [`atom_candidate_names`]), or a direct resolution to
     /// an implementing atom.
-    pub fn matched_count(&self, atom_names: &HashSet<String>) -> usize {
+    pub(crate) fn matched_count(&self, atom_names: &HashSet<String>) -> usize {
         self.forms
             .iter()
             .filter(|(entry, forms)| {
@@ -740,11 +724,15 @@ impl PublicNameForms {
     }
 
     /// Add re-export definition forms (see [`collect_reexport_aliases`]).
-    pub fn expand_with_aliases(&mut self, crate_name: &str, aliases: &BTreeMap<String, String>) {
+    pub(crate) fn expand_with_aliases(
+        &mut self,
+        crate_name: &str,
+        aliases: &BTreeMap<String, String>,
+    ) {
         if aliases.is_empty() {
             return;
         }
-        let crate_name = crate_name.replace('-', "_");
+        let crate_name = normalize_crate_name(crate_name);
         let additions: Vec<(String, String)> = self
             .forms
             .keys()
@@ -764,7 +752,7 @@ impl PublicNameForms {
     /// caller reaches lives in the trait, and that trait's atom is the only
     /// atom there is. This pass adds that trait atom's RQN as a candidate form
     /// for the entry, under uniqueness guards (see the module docs).
-    pub fn expand_with_trait_defaults(
+    pub(crate) fn expand_with_trait_defaults(
         &mut self,
         atoms: &BTreeMap<String, AtomWithLines>,
         atom_names: &HashSet<String>,
@@ -775,11 +763,11 @@ impl PublicNameForms {
         // key with no body still proves `Type: Trait`, and a key for
         // `Type::method` still proves an override. Only the analyzed crate's
         // keys are evidence: a dependency's impls neither prove nor veto.
-        let crate_name = crate_name.replace('-', "_");
+        let crate_name = normalize_crate_name(crate_name);
         let mut impl_traits: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut overridden: HashSet<(String, String)> = HashSet::new();
         for key in atoms.keys() {
-            if key_crate(key).map(|c| c.replace('-', "_")).as_deref() != Some(&crate_name) {
+            if key_crate(key).map(normalize_crate_name).as_deref() != Some(&crate_name) {
                 continue;
             }
             let Some((self_type, trait_name, method)) = parse_impl_key(key) else {
@@ -831,14 +819,17 @@ impl PublicNameForms {
             let [rqns] = candidates[..] else {
                 continue;
             };
-            let [rqn] = &rqns.iter().collect::<Vec<_>>()[..] else {
+            if rqns.len() != 1 {
+                continue;
+            }
+            let Some(rqn) = rqns.first() else {
                 continue;
             };
             // The default body must itself be public API.
-            if !public.contains(*rqn) && !public.contains(&normalize_rqn_for_public_api(rqn)) {
+            if !public.contains(rqn) && !public.contains(&normalize_rqn_for_public_api(rqn)) {
                 continue;
             }
-            additions.push((entry.clone(), (*rqn).clone()));
+            additions.push((entry.clone(), rqn.clone()));
         }
         for (entry, form) in additions {
             self.add(&entry, form);
@@ -870,18 +861,18 @@ impl PublicNameForms {
     ///
     /// Ambiguity (zero or several candidate atoms) always skips. Returns the
     /// number of atoms whose `is-public-api` changed to `true`.
-    pub fn resolve_unmatched_to_atoms(
+    pub(crate) fn resolve_unmatched_to_atoms(
         &mut self,
         atoms: &mut BTreeMap<String, AtomWithLines>,
         atom_names: &HashSet<String>,
         crate_name: &str,
         project_path: &Path,
     ) -> usize {
-        let crate_name = crate_name.replace('-', "_");
+        let crate_name = normalize_crate_name(crate_name);
         let mut by_self: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
         let mut by_trait: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
         for key in atoms.keys() {
-            if key_crate(key).map(|c| c.replace('-', "_")).as_deref() != Some(&crate_name) {
+            if key_crate(key).map(normalize_crate_name).as_deref() != Some(&crate_name) {
                 continue; // never speak for a dependency's atoms
             }
             let Some((self_type, trait_name, method)) = parse_impl_key(key) else {
@@ -899,6 +890,8 @@ impl PublicNameForms {
             }
         }
 
+        // The same source file backs many candidate atoms; parse it once.
+        let mut parsed: BTreeMap<PathBuf, Option<syn::File>> = BTreeMap::new();
         let mut resolutions: Vec<(String, String)> = Vec::new();
         for (entry, forms) in &self.forms {
             if forms.iter().any(|f| atom_names.contains(f)) {
@@ -919,22 +912,22 @@ impl PublicNameForms {
                 let segs: Vec<&str> = entry.split("::").collect();
                 segs[1..segs.len() - 2].join("/")
             });
-            let path_ok = |key: &String| match &entry_mods {
+            let path_ok = |key: &str| match &entry_mods {
                 None => true,
                 Some(mods) => key_module_path(key) == Some(mods.as_str()),
             };
-            let blanket = |key: &String| {
+            let mut blanket = |key: &str| {
                 atoms
                     .get(key)
-                    .is_some_and(|a| is_blanket_impl_atom(a, project_path))
+                    .is_some_and(|a| is_blanket_impl_atom(a, project_path, &mut parsed))
             };
-            if let [key] = one(by_self.get(&index_key)) {
+            if let [key] = by_self.get(&index_key).map_or(&[][..], Vec::as_slice) {
                 if path_ok(key) && (!bare || blanket(key)) {
                     resolutions.push((entry.clone(), key.clone()));
                     continue;
                 }
             }
-            if let [key] = one(by_trait.get(&index_key)) {
+            if let [key] = by_trait.get(&index_key).map_or(&[][..], Vec::as_slice) {
                 if path_ok(key) && blanket(key) {
                     resolutions.push((entry.clone(), key.clone()));
                 }
@@ -959,6 +952,11 @@ impl PublicNameForms {
             forms.insert(form);
         }
     }
+}
+
+/// Cargo package names use `-`; Rust paths and SCIP atom keys use `_`.
+fn normalize_crate_name(name: &str) -> String {
+    name.replace('-', "_")
 }
 
 /// The crate segment of an atom key (`probe:<crate>/<version>/…`).
@@ -993,26 +991,29 @@ fn key_module_path(key: &str) -> Option<&str> {
     Some(last_slash.map_or("", |i| &tail[..i]))
 }
 
-/// Borrow an index bucket as a slice (empty when absent), for slice patterns.
-fn one(bucket: Option<&Vec<String>>) -> &[String] {
-    bucket.map_or(&[], Vec::as_slice)
-}
-
 /// Whether the atom's enclosing `impl` implements its trait for one of the
 /// impl's own generic parameters (`impl<T> Trait for T`) — a blanket impl.
 ///
 /// Verified with syn against the real source, because the atom key alone cannot
 /// tell a generic parameter named `T` from a concrete type named `T`. An atom
-/// with no usable span (a bodyless stub) is never treated as blanket.
-fn is_blanket_impl_atom(atom: &AtomWithLines, project_path: &Path) -> bool {
+/// with no usable span (a bodyless stub) is never treated as blanket. Parsed
+/// files are memoized in `parsed` (`None` records an unreadable/unparsable
+/// file, so it is not retried).
+fn is_blanket_impl_atom(
+    atom: &AtomWithLines,
+    project_path: &Path,
+    parsed: &mut BTreeMap<PathBuf, Option<syn::File>>,
+) -> bool {
     let (start, end) = (atom.code_text.lines_start, atom.code_text.lines_end);
     if start == 0 || end < start {
         return false;
     }
-    let Ok(src) = std::fs::read_to_string(project_path.join(&atom.code_path)) else {
-        return false;
-    };
-    let Ok(file) = syn::parse_file(&src) else {
+    let path = project_path.join(&atom.code_path);
+    let file = parsed.entry(path).or_insert_with_key(|p| {
+        let src = std::fs::read_to_string(p).ok()?;
+        syn::parse_file(&src).ok()
+    });
+    let Some(file) = file else {
         return false;
     };
     let mut impls = Vec::new();
@@ -1053,7 +1054,7 @@ fn impl_self_is_generic_param(imp: &syn::ItemImpl) -> bool {
 }
 
 /// Every name an atom can be matched under: its RQN and the normalized form.
-pub fn atom_candidate_names(atoms: &BTreeMap<String, AtomWithLines>) -> HashSet<String> {
+pub(crate) fn atom_candidate_names(atoms: &BTreeMap<String, AtomWithLines>) -> HashSet<String> {
     let mut names = HashSet::new();
     for atom in atoms.values() {
         if let Some(rqn) = &atom.rust_qualified_name {
@@ -1340,10 +1341,8 @@ pub fn my_crate::real_function()
         let public_names: HashSet<String> =
             ["c::m::public_fn"].iter().map(|s| s.to_string()).collect();
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &public_names);
+        enrich_atoms_with_public_api(&mut atoms, &public_names);
 
-        assert_eq!(set_true, 1);
-        assert_eq!(set_false, 1);
         assert_eq!(atoms["probe:c/1.0/m/public_fn()"].is_public_api, Some(true));
         assert_eq!(
             atoms["probe:c/1.0/m/private_fn()"].is_public_api,
@@ -1385,10 +1384,8 @@ pub fn my_crate::real_function()
         .map(|s| s.to_string())
         .collect();
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &public_names);
+        enrich_atoms_with_public_api(&mut atoms, &public_names);
 
-        assert_eq!(set_true, 2);
-        assert_eq!(set_false, 0);
         assert_eq!(
             atoms["probe:c/1.0/edwards/compress()"].is_public_api,
             Some(true)
@@ -1955,10 +1952,8 @@ pub use crate::c::Bar;
             ),
         );
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &expanded);
+        enrich_atoms_with_public_api(&mut atoms, &expanded);
 
-        assert_eq!(set_true, 1);
-        assert_eq!(set_false, 0);
         assert_eq!(
             atoms["probe:spqr/1.0/chain/default()"].is_public_api,
             Some(true)
@@ -1987,10 +1982,8 @@ pub use crate::c::Bar;
             make_atom("switch", "src/lib.rs", Some("spqr::Direction::switch")),
         );
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &expanded);
+        enrich_atoms_with_public_api(&mut atoms, &expanded);
 
-        assert_eq!(set_true, 0);
-        assert_eq!(set_false, 1);
         assert_eq!(
             atoms["probe:spqr/1.0/lib/switch()"].is_public_api,
             Some(false)
