@@ -763,16 +763,9 @@ impl PublicNameForms {
         // key with no body still proves `Type: Trait`, and a key for
         // `Type::method` still proves an override. Only the analyzed crate's
         // keys are evidence: a dependency's impls neither prove nor veto.
-        let crate_name = normalize_crate_name(crate_name);
         let mut impl_traits: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         let mut overridden: HashSet<(String, String)> = HashSet::new();
-        for key in atoms.keys() {
-            if key_crate(key).map(normalize_crate_name).as_deref() != Some(&crate_name) {
-                continue;
-            }
-            let Some((self_type, trait_name, method)) = parse_impl_key(key) else {
-                continue;
-            };
+        for (_, (self_type, trait_name, method)) in crate_impl_keys(atoms, crate_name) {
             overridden.insert((self_type.clone(), method));
             if let Some(trait_name) = trait_name {
                 impl_traits.entry(self_type).or_default().insert(trait_name);
@@ -868,16 +861,9 @@ impl PublicNameForms {
         crate_name: &str,
         project_path: &Path,
     ) -> usize {
-        let crate_name = normalize_crate_name(crate_name);
         let mut by_self: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
         let mut by_trait: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
-        for key in atoms.keys() {
-            if key_crate(key).map(normalize_crate_name).as_deref() != Some(&crate_name) {
-                continue; // never speak for a dependency's atoms
-            }
-            let Some((self_type, trait_name, method)) = parse_impl_key(key) else {
-                continue;
-            };
+        for (key, (self_type, trait_name, method)) in crate_impl_keys(atoms, crate_name) {
             by_self
                 .entry((self_type, method.clone()))
                 .or_default()
@@ -957,6 +943,22 @@ impl PublicNameForms {
 /// Cargo package names use `-`; Rust paths and SCIP atom keys use `_`.
 fn normalize_crate_name(name: &str) -> String {
     name.replace('-', "_")
+}
+
+/// The analyzed crate's own impl descriptors, parsed from the atom keys:
+/// `(key, (self_type, trait, method))`. Dependency keys are excluded — both
+/// resolution passes may only take impl evidence from `crate_name`'s atoms.
+fn crate_impl_keys<'a>(
+    atoms: &'a BTreeMap<String, AtomWithLines>,
+    crate_name: &str,
+) -> impl Iterator<Item = (&'a String, (String, Option<String>, String))> {
+    let crate_name = normalize_crate_name(crate_name);
+    atoms.keys().filter_map(move |key| {
+        if key_crate(key).map(normalize_crate_name).as_deref() != Some(&crate_name) {
+            return None;
+        }
+        Some((key, parse_impl_key(key)?))
+    })
 }
 
 /// The crate segment of an atom key (`probe:<crate>/<version>/…`).

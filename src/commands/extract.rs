@@ -132,20 +132,6 @@ pub fn cmd_extract(
         "  \u{2713} is-public: {} public, {} not public (from SCIP signatures)",
         public_count, non_public_count
     );
-    if with_public_api {
-        let api_true = atoms_dict
-            .values()
-            .filter(|a| a.is_public_api == Some(true))
-            .count();
-        let api_false = atoms_dict
-            .values()
-            .filter(|a| a.is_public_api == Some(false))
-            .count();
-        println!(
-            "  \u{2713} is-public-api: {} in public API, {} not (cargo-public-api)",
-            api_true, api_false
-        );
-    }
     if !is_library {
         println!("  \u{2139} Binary-only crate (no [lib] target)");
     }
