@@ -1,6 +1,6 @@
 # Properties and Invariants
 
-- **last-updated**: 2026-08-31
+- **last-updated**: 2026-09-01
 
 Every property here must hold in the implementation. If a property is violated, it is a bug in the code, not in the KB — unless a deliberate decision changes the KB first.
 
@@ -192,6 +192,22 @@ A file mounted through several chains (e.g. mutually exclusive `#[path]` remount
 - `trait-required`: a bodyless trait method signature. Trait methods with a default body are ordinary functions.
 
 **Where**: `mod_chain.rs` (walk valves, `analyze`), `rust_parser.rs` (`visit_foreign_item_fn`, `visit_trait_item_fn`), `lib.rs` (emission).
+
+### P20 — Charon candidate resolution never picks arbitrarily
+
+When several Charon entries share one atom's match key (several impl blocks with the same method name in the same module, e.g. `TryFrom<u8|i32|u32> for DeviceId` all keyed `address::try_from`), resolution narrows by successive filters — same normalized file, self-type match (atom `display_name` `Type::` prefix vs. the candidate's impl-segment self type), dedup on `(def_id, qualified_name)` (Manifest loop helpers share the parent's `def_id`), then strict-maximum positive span overlap. A lone survivor is still validated against the atom's file and span (Manifest fails closed on candidates without file proof, per the `charon-def-id` join contract).
+
+Three outcomes, three behaviors:
+
+- **Match** — exactly one validated candidate: enrich. What is stamped depends on the source: the LLBC path (`--with-charon`) overrides `rust-qualified-name` and `is-public` (when carried) and stamps `charon-def-id`/`charon-version`; the Manifest path (`--translation`, an Aeneas `translation.json`) stamps only `charon-def-id`/`charon-version` and never touches the RQN.
+- **Ambiguous** — distinct candidates confirmed (by normalized file path) to be in the atom's file that no signal (self type, span) can split: the atom's `rust-qualified-name` is **cleared** (even the SCIP heuristic) and no `charon-def-id` is stamped, on both sources. A wrong RQN is worse than none — probe-aeneas would link the wrong Lean translation; clearing lets its fallback strategies take over.
+- **NoMatch** — no candidate is confirmable to the atom's file, or every usable span provably excludes the atom (e.g. a trait's provided method vs. its impls further down the file): the atom keeps its heuristic RQN.
+
+There is no first-match-wins fallback: an arbitrary pick once stamped one impl's qualified name onto every colliding atom in a file (the libsignal `eq`/`try_from` collision). Trait-impl qualified names must carry the trait's type arguments — LLBC literal types appear both as strings (`"Bool"`) and objects (`{"UInt": "U8"}`); dropping the object form collapsed distinct impls (`TryFrom<u8>` vs `TryFrom<i32>`) into one identical RQN.
+
+The `charon-def-id` join contract (coupling with `charon-version`, integer join against Aeneas) is specified in [`docs/SCHEMA.md`](../../docs/SCHEMA.md).
+
+**Where**: `charon_names.rs` (`resolve_charon_candidate`, `validate_single_candidate`, `span_overlap`, `self_type_from_qualified_name`, `self_type_from_display_name`, `format_type`).
 
 ---
 

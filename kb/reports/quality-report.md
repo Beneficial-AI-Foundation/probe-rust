@@ -1,105 +1,132 @@
 ---
 auditor: code-quality-auditor
-date: 2026-08-11
-status: resolved (was: 1 critical, 4 warnings, 10 info)
+date: 2026-09-01
+status: resolved 2026-09-01 — 0 open (was 0 critical, 2 warnings, 2 info; Info 2 acknowledged as won't-fix)
 ---
 
-Scope: working-tree changeset on `fix/scip-staleness-source-facts` (SCIP staleness check, `mod_chain` module-tree walk, foreign/trait-required span facts, new atom fields `file-cfg`/`is-unmounted`/`is-foreign`/`trait-required`, 0.10.0 bump). Audited against P1–P19 and C1–C3. `cargo test` (206 lib + 3 integration) passes; `cargo clippy --all-targets -- -D warnings` is clean.
+Scope: uncommitted working-tree changeset — multi-candidate Charon resolution
+reworked into a filter pipeline in `src/charon_names.rs` (`resolve_charon_candidate`,
+`validate_single_candidate`, `ResolveOutcome`, `span_overlap`, self-type helpers,
+object-form literal handling in `format_type`), new property P20, and KB updates
+(properties/architecture/glossary/index/CLAUDE.md). Deep verification on P20, P10,
+P15, and change-introduced doc staleness; grep-level sanity pass on P1-P9, P11-P14,
+P16-P19 (only `charon_names.rs` changed in `src/`, so those properties' code paths
+are untouched). `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings`
+clean, 239 lib + 3 integration tests pass.
 
 ## Critical
 
-1. **P18 (Complete `cfg` predicate) — file-level inner `#![cfg(...)]` attributes are invisible to both gate collectors.** `rust_parser.rs:329-330` (`parse_file_for_spans` runs `FunctionSpanVisitor` which never folds `syn::File::attrs` into `cfg_stack` — gates are only pushed for `impl`/`trait`/`mod`/`extern` items, `rust_parser.rs:226-242`) and `mod_chain.rs:283-285` (`scan_file` iterates `ast.items` only, ignoring `ast.attrs`). A file whose whole contents are gated by an inner attribute header (`#![cfg(feature = "std")]`, `#![cfg(unix)]` — a common real-world pattern) produces functions whose `cfg` omits that gate entirely, and any `mod` declarations inside such a file are walked ungated. The emitted predicate is therefore not the "complete item-gating predicate" P18 promises, and consumers will treat never-compiled functions as compiled. Fix direction: treat `File::attrs` as an enclosing gate in `FunctionSpanVisitor` and as a chain gate on the file's own mount in `mod_chain`.
+None. P20 as written in `kb/engineering/properties.md` is satisfied by the
+implementation; every edge case checked holds:
+
+- **Filter order** — `resolve_charon_candidate` (`charon_names.rs:834-923`) applies
+  exactly the documented sequence: same-file → self-type → dedup on
+  `(def_id, qualified_name)` → strict-maximum positive span overlap.
+- **Empty candidate lists** — cannot occur in `by_match_key` (`entry().or_default().push`
+  always pushes ≥1), and an empty slice would still fall through to the same-file
+  filter and return `NoMatch`, never panic or pick.
+- **Atoms with `lines_start == 0`** — `span_overlap` returns `None` (line 662-663);
+  a lone candidate is then accepted on file-path proof alone, and a multi-candidate
+  collision becomes `Ambiguous` (missing span data = undecidable), matching the
+  glossary's "tie or missing span data leaves the collision ambiguous".
+- **`file_path` `Some("")` vs `None`** — both rejected under Manifest
+  (`has_usable_file`, lines 788-791: fail-closed, no `charon-def-id` without file
+  proof); both lenient-accepted only for a *lone* LLBC candidate; both excluded
+  from the multi-candidate same-file filter (lines 846-850), so an unverifiable
+  candidate is never picked under a collision.
+- **Manifest fail-closed survives the multi→1 reduction** — the dedup-to-single
+  path re-routes through `validate_single_candidate` (line 892); the span-stage
+  winner (line 916) bypasses it but by construction already carries a non-empty
+  file path matching the atom (same-file filter) plus a positive overlap, i.e.
+  strictly more evidence than `validate_single_candidate` demands.
+- **Tie handling** — equal best overlaps among deduped survivors → `Ambiguous`
+  (line 917); all spans usable and none positive → `NoMatch` (line 920); any
+  missing span with no positive winner → `Ambiguous` (line 921). Matches P20's
+  three-outcome table exactly.
+- **Ambiguous clears everything, both sources** — `enrich_atoms` pre-clears
+  `charon_def_id`/`charon_version` for every atom (lines 1081-1082) and the
+  `Ambiguous` arm sets `rust_qualified_name = None` with no source check
+  (line 1137). Pinned by `test_enrich_ambiguous_clears_rqn_and_stamps_nothing`,
+  which iterates over both `EnrichmentSource::Llbc` and `::Manifest` and asserts
+  all three fields are `None`.
+- **No first-match-wins path remains** — no arbitrary index into the candidate
+  list anywhere in the resolution pipeline; `disambiguate_by_span` is gone.
+- **`format_type` object-form literals** — `{"UInt":"U8"}`/`{"Int":"I32"}`/
+  `{"Float":"F64"}` → lowercased primitive name (lines 249-253), pinned by
+  `test_format_type_literal_object_forms`; string-form (`"Bool"`, `"Char"`)
+  unchanged.
+- **Test coverage** — 12 new/updated resolution tests cover cross-file rejection,
+  same-file span mismatch, span-less lone candidates (accepted for LLBC), the
+  eq/try_from collisions, self-type splitting, all-spans-elsewhere NoMatch,
+  dedup, and the file filter.
 
 ## Warnings
 
-1. **P19 (unmounted error direction) — internal tension for sources mounted only from excluded targets.** `mod_chain.rs:151-155` deliberately excludes test/bench/example targets from `package_entries`, and those files are never scanned, so no valve fires for them. A `src/**.rs` file mounted *only* from such a target (e.g. `tests/common.rs` doing `#[path = "../src/util.rs"] mod util;`, or a package whose only targets are integration tests) is compiled by cargo yet gets `is-unmounted: true` whenever every lib/bin walk is clean. P19's definition ("reached by no `mod` chain from its package's target entries (lib and bin roots)") is satisfied, but its own guarantee sentence ("compiled code must never be labeled unmounted") is not. Either the KB should narrow the guarantee to lib/bin compilation, or excluded-target files should be scanned as an additional unmounted-inference valve.
+1. **CHANGELOG has no entry for an output-affecting behavior change.** The last
+   entry is `[0.10.0] - 2026-08-11` and there is no `[Unreleased]` section, yet
+   this changeset changes emitted atoms: an ambiguous collision now *clears*
+   `rust-qualified-name` (previously a first-match candidate's RQN or the SCIP
+   heuristic was kept), and object-form literal types change trait-impl RQN
+   strings (`TryFrom<u8>` vs one collapsed name). Consumers diffing probe output
+   across versions need this recorded. If the entry is planned for the release
+   commit, add it before merging.
 
-2. **P3 (Deterministic output) — `find_span_info` containment fallback iterates a `HashMap`.** `rust_parser.rs:579-588`: when the exact `(path, name, start_line)` key misses and more than one same-name span in the same file contains the SCIP start line (nested same-name functions; same-named functions from `cfg_if!` both-branch expansion with overlapping spans), the chosen `SpanInfo` depends on `HashMap` iteration order. Pre-existing mechanism, but this changeset widens its blast radius: it now decides `is-foreign` and `trait-required` (and `file-cfg`-independent `cfg`) in addition to `lines-end`. A `BTreeMap` span map or a deterministic tie-break (smallest containing span, then lowest start line) would close it.
-
-3. **Architecture doc drift — `mod_chain.rs` undocumented.** `kb/engineering/architecture.md` (last-updated 2026-04-18) has no entry for `mod_chain.rs` in the source-file map, no mod-chain step in the extract pipeline or data-flow diagram, no component-boundary section, and pipeline step 2 does not mention the new P14 staleness check. `CLAUDE.md`'s project-structure listing also lacks `mod_chain.rs` and `public_api.rs`/`charon_*.rs`. Per the KB rule the code/doc mismatch must be resolved by updating the doc deliberately.
-
-4. **Glossary drift — new domain terms undefined.** `kb/engineering/glossary.md` ("Every domain term used in the KB must be defined here") defines none of the terms P18/P19/SCHEMA.md now rely on: *mount chain*, *file gate* / `file-cfg`, *unmounted*, *foreign (extern-block member)*, *trait-required*, *target entry*, *directory ownership*.
+2. **Auditor checklists not updated to P20.**
+   `.cursor/rules/auditors/code-quality-auditor.md:7` still reads "P1-P19, C1-C3"
+   and has no P20 check item; `.cursor/rules/auditors/test-quality-auditor.md`
+   (lines 7 and 26) likewise stops at P19. The changeset updated `CLAUDE.md` and
+   `kb/engineering/index.md` to P1-P20 but missed the auditor briefs — the same
+   drift the 2026-08-11 round fixed for P17-P19.
 
 ## Info
 
-1. **P14 text understates the implemented check.** `newest_source_mtime` (`scip_cache.rs:268+`) now also includes **directory** mtimes so deletions/renames invalidate the cache (`test_file_deletion_is_stale`) — strictly safer than the KB/CHANGELOG wording ("no `*.rs` file or `Cargo.toml` ... is newer"). Worth folding into P14's text so the KB stays the source of truth.
+1. **Stale comment referencing removed `disambiguate_by_span`** —
+   `src/charon_names.rs:2776` (inside
+   `test_resolve_single_candidate_real_file_zero_lines_accepted`): "must be
+   treated as 'no span' (like disambiguate_by_span's `s > 0`)". The function no
+   longer exists; the live equivalent is `span_overlap`'s `s > 0` guard. The
+   `CHANGELOG.md:72` mention is a historical 0.6.3 entry and is correct as a
+   record; the plan doc `docs/charon-enrichment-from-manifest-plan.md` describes
+   `resolve_charon_candidate` at design time and reads fine against the new code.
+   No other stale references to the removed function or the first-match-wins
+   fallback found in code comments, `docs/`, or `kb/` (the P20/glossary mentions
+   are deliberate descriptions of the *removed* behavior).
 
-2. **`is_cache_stale` residual edges** (`scip_cache.rs:103-114`): strict `newest > cache_mtime` means an edit landing in the same mtime-granularity tick as the cache write passes as fresh; unreadable source mtimes are skipped (acknowledged in the doc comment, mildly anti-conservative); `Cargo.lock`/toolchain changes never invalidate (consistent with P14 as written). Also the staleness walk runs twice on the fresh path (`commands/extract.rs:248` and again inside `get_or_generate`) — cost only.
+2. **Untracked debris at repo root** — `has-body.json` and `no-body.json` are
+   untracked at the project root and look like manual-testing leftovers; delete
+   or gitignore before committing.
 
-3. **CHANGELOG link definitions**: no `[0.10.0]` link at the bottom; the `[Unreleased]` definition is now dangling (its section was renamed) and stale (`v0.8.1...HEAD`); `[0.9.0]` was already missing (pre-existing).
+## Verified clean
 
-4. **Auditor checklist stale**: `.cursor/rules/auditors/code-quality-auditor.md` still says "P1-P16, C1-C3" and has no check items for P17–P19.
+- **P10 (is-public from SCIP, Charon override only when carried)** —
+  `is_signature_public` (`lib.rs:162`) unchanged; `enrich_atoms` overrides
+  `is_public` only inside `if let Some(is_public) = best.is_public`
+  (`charon_names.rs:1118-1120`), never clobbering the SCIP value with `None`
+  (Manifest candidates always carry `is_public: None`). Pinned by
+  `test_enrich_does_not_clobber_is_public_with_none` and
+  `test_enrich_propagates_visibility`. The `Ambiguous` arm touches only RQN,
+  never `is_public`.
+- **P15 (Charon non-fatal)** — `enrich_with_charon` (`commands/extract.rs:287-322`)
+  warns and returns on both LLBC generation failure and parse failure;
+  `enrich_from_translation_manifest` warns and skips on manifest read/parse
+  errors without falling back to a charon run. Pinned by
+  `test_charon_failure_is_non_fatal`.
+- **Sanity pass (grep-level)** — P1 (schema `"3.0"` in `metadata.rs:13` matches
+  `docs/SCHEMA.md`), P4 (`add_external_stubs` present, untouched), P5
+  (`dependencies: BTreeSet<String>`), P6 (`normalize_code_name` call sites
+  present), P7 (`is_function_like_kind` in `constants.rs`), P13
+  (`sanitize_for_filename` in `metadata.rs`), P14 (`regenerate` flag honored in
+  `scip_cache.rs:126-131`). P2-P3, P8-P9, P11-P12, P16-P19 live entirely outside
+  the changed file and their tests are in the passing suite; no re-verification
+  needed beyond the 2026-08-11 audit.
+- **KB consistency** — the updated glossary ("Match key", "Span disambiguation"),
+  `architecture.md` Charon section, `index.md`, and `CLAUDE.md` all agree with
+  the P20 text and with the code; the glossary's `#span-disambiguation` anchor
+  still resolves.
 
-5. **Mixed predicate rendering**: source-derived gates carry token-stream spacing (`all (test , not (feature = "x"))`, see `mod_chain.rs` tests) while synthesized combinators are compact (`all({}, {})` in `lib.rs:1437-1441`, `any(...)`/`all(...)` in `chains_predicate`). Deterministic, so no P3 issue, but `docs/SCHEMA.md`'s example implies the compact style; consumers must parse `cfg` as cfg syntax, never compare strings. A note in SCHEMA.md would prevent surprises.
+## Resolution (2026-09-01)
 
-6. **`find_package_dirs` prunes any directory named `data` at any depth** (`mod_chain.rs:138-149`): a workspace member rooted under some `data/` directory silently gets no mod-chain facts (cfg incomplete for it; never unmounted — safe direction). Inconsistent with `newest_source_mtime`, which exempts only the top-level cache dir (`test_nested_data_dir_is_not_ignored`).
-
-7. **`cfg_if!` branch predicates are dropped by both walkers** (`rust_parser.rs:244-251`, `mod_chain.rs:345-355`). Conservative (under-gating) and documented in `mod_chain`'s module docs, but P18 and SCHEMA.md present `cfg` as complete without noting this exception.
-
-8. **`file_cfg` doc comment incomplete** (`lib.rs`, `AtomWithLines::file_cfg`): says "Omitted when the file is unconditionally mounted"; SCHEMA.md correctly adds "or was not reachable by the module-tree walk".
-
-9. **Canonicalized keys vs SCIP textual paths**: `relative_key` (`mod_chain.rs:229-232`) strips the canonicalized root from canonicalized file paths; if SCIP's `relative_path` traverses a symlink the `file_gate`/`unmounted` lookups in `lib.rs:1432-1443` silently miss (no gate, no unmounted — conservative direction, same failure mode as the span map's canonicalization guard).
-
-10. **Verified clean**: P1 (schema-version `"3.0"` consistent, `metadata.rs:13` ↔ `docs/SCHEMA.md`); P2/P5–P13/P15–P17 unchanged and spot-checked; **P4** — `add_external_stubs` defaults all four new fields to `None`/`false` so stubs stay `{empty path, {0,0}, no deps}` with the new fields omitted; **serde/schema consistency** — wire names `file-cfg`/`is-unmounted`/`is-foreign`/`trait-required` and skip rules (`Option::is_none`, `Not::not` ⇒ omitted when absent/false) match SCHEMA.md exactly, and `default` attrs keep old JSON deserializable; **cfg folding** — no double-count possible (file component comes only from parent-file `mod` chains via `mod_chain`, own component only from same-file gates via `rust_parser`; disjoint by construction), fold order `all(file, own)` is fixed and `chains_predicate` sorts+dedups alternatives, so output is deterministic; **cross-package soundness** — `analyze` (`mod_chain.rs:73-136`) unions chains across all packages and requires *every* walk clean before any unmounted inference, closing the cross-package `#[path]`-mount and nested-package holes, and making `file_gate` order-independent; **P14 routing** — staleness enforced both in `commands/extract.rs:248` (`get_scip_json`) and in `ScipCache::get_or_generate` (library path), `--regenerate-scip` still forces, `generation_reason` covers the new case; span-map misses now warn (`lib.rs:1185-1192`), never silent; version bump coherent (Cargo.toml = Cargo.lock = CHANGELOG `0.10.0`); C1–C3 unchanged with their regression tests still present.
-
----
-
-## Resolution round (2026-08-11, same day)
-
-Every finding above was addressed in the same working-tree changeset and the
-closure verified by a re-audit against the final code:
-
-- File-level `#![cfg(...)]`: folded in both collectors (`rust_parser.rs`
-  `parse_file_for_spans` seeds `cfg_stack` from `File::attrs`; `mod_chain.rs`
-  `scan_file` returns `inner_gates` joined into the mount chain before
-  recording). Tests in both modules, including descendant propagation.
-- Cross-package mounts: `mod_chain::analyze` now unions chains across ALL
-  packages and infers unmounted only when EVERY package's walk is clean.
-  Tests: `cross_package_path_mount_is_not_unmounted`,
-  `cross_package_gated_mount_unions_with_own_ungated_mount`.
-- `find_span_info` containment fallback made deterministic
-  (innermost-candidate rule via `max_by_key`, never map iteration order).
-- Staleness check: `>=` comparison, directory mtimes included (deletions/
-  renames), docs aligned (P14, SCHEMA, CHANGELOG, doc comments).
-- Span-map misses surfaced: internal conversion returns the miss count,
-  warning emitted by the public wrapper, count pinned by test.
-- Serde shape of the four new fields pinned
-  (`source_fact_fields_serde_shape`).
-- Dirty-file gate stripping valve added (mounts kept, gates dropped) with
-  test; cycle guard, chain-cap, and inline-mod-shadowing tests added.
-- Docs: P18 reworded to "as complete as visible, under-gating only" with the
-  cfg_if/unreached-file caveats; P19 scoped to lib/bin target entries with the
-  test/bench/example exclusion and the known cross-file macro limitation;
-  predicate-format note in SCHEMA; glossary entries added (mount chain, file
-  gate, target entry, provably complete walk, directory owner, unmounted,
-  foreign declaration, trait-required); architecture/index/CLAUDE.md/auditor
-  checklists updated to P1-P19.
-
-Final state: `cargo fmt --check` clean, `cargo clippy --all-targets
--- -D warnings` clean, 219 lib + 3 integration tests pass.
-
-## Codex adversarial round (2026-08-11, cross-model review)
-
-An independent Codex review over the full diff surfaced further soundness
-gaps, all fixed and re-validated (229 tests, clippy clean; SymCRust and dalek
-keep full facts, zero regressions):
-
-- Dirty walks could still emit `file-cfg` (cross-file over-gating): now ANY
-  completeness taint suppresses BOTH facts project-wide; per-file gate
-  stripping removed as redundant. Taint causes are collected and printed
-  (structural: the `mod` IDENT token, so doc comments/strings do not taint).
-- Macro valve hardened: `macro_rules!` definition bodies, block-local
-  `#[path] mod` (any item's tokens), and `cfg_attr` on `mod` declarations now
-  taint the walk.
-- `#[path]` resolution fixed inside inline modules (inline segments + dir
-  ownership) and for `#[path]` on the inline module itself (directory
-  segment override). Decoy-file tests added.
-- Chain pruning is now keyed on (gates, dir-ownership); a cap overflow no
-  longer records the unwalked chain.
-- Package guards: unreadable manifests and entry-less packages with src
-  files taint the walk. `collect_rs_files` no longer follows symlinked dirs.
-- Staleness: `Cargo.lock` tracked; project root's own mtime excluded (self-
-  invalidation loop on coarse-mtime filesystems); cache JSON published
-  atomically (temp + rename).
-- Ambiguous span containment matches are refused (counted as warned misses)
-  instead of guessing scope-changing facts.
+- **[W1] RESOLVED** — CHANGELOG.md now has an `[Unreleased]` section with a Fixed entry covering both output-affecting changes: RQN clearing on ambiguous collisions (filter pipeline, no first-match-wins) and object-form literal types in `format_type` (`TryFrom<u8>` vs collapsed RQNs).
+- **[W2] RESOLVED** — `.cursor/rules/auditors/code-quality-auditor.md` and `test-quality-auditor.md` both read "P1-P20, C1-C3"; code-quality-auditor.md line 33 adds a dedicated P20 check item (filter pipeline, three outcomes, Manifest fail-closed, object-form literals).
+- **[I1] RESOLVED** — `grep disambiguate_by_span src/charon_names.rs` returns no matches; the stale test comment is gone.
+- **[I2] ACKNOWLEDGED (won't-fix)** — `has-body.json` and `no-body.json` are pre-existing user files at the repo root, deliberately kept; not part of this changeset.

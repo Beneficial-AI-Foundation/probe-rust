@@ -5,6 +5,13 @@ All notable changes to probe-rust are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Distinct impl blocks no longer share one `rust-qualified-name`** (Charon RQN impl-block collision, observed on libsignal-verify). Two defects fixed:
+  - `format_type` only understood the string form of LLBC literal types (`"Bool"`, `"Char"`); integer/float literals are objects (`{"UInt": "U8"}`) and were silently dropped from trait type arguments, collapsing e.g. `TryFrom<u8> for DeviceId`, `TryFrom<i32> for DeviceId`, and `TryFrom<u32> for DeviceId` into one identical RQN (only the first colliding atom got a probe-aeneas translation link). Object-form literals now format (`u8`, `i32`, …), and self types that are primitives (e.g. `impl From<DeviceId> for u8`) now resolve instead of degrading to the type-less `{impl Trait}` form.
+  - Multi-candidate match-key resolution had a first-match-wins fallback that could stamp one impl's qualified name onto every colliding atom in a file. It is replaced by a filter pipeline — same normalized file, self-type match, dedup on `(def_id, qualified_name)`, strict-maximum span overlap — that never picks arbitrarily (KB P20). An unresolvable collision now **clears** the atom's `rust-qualified-name` (a wrong RQN is worse than none: probe-aeneas would link the wrong Lean translation) and stamps no `charon-def-id`; a key whose candidates are provably elsewhere (or unverifiable span-less items) keeps the heuristic RQN as before.
+
 ## [0.11.0] - 2026-08-31
 
 ### Fixed
