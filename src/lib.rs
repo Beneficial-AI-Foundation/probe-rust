@@ -20,7 +20,7 @@ pub use error::{ProbeError, ProbeResult};
 
 use constants::{
     is_definition, is_external_function_symbol, is_function_like_kind, PROBE_URI_PREFIX,
-    SCIP_KIND_MODULE, SCIP_SYMBOL_PREFIX, TYPE_CONTEXT_LOOKBACK_LINES,
+    SCIP_SYMBOL_PREFIX, TYPE_CONTEXT_LOOKBACK_LINES,
 };
 
 // =============================================================================
@@ -167,116 +167,6 @@ pub fn is_signature_public(sig: &str) -> bool {
     } else {
         false
     }
-}
-
-/// Build a map from SCIP module path to `pub` visibility.
-///
-/// Iterates all symbols with kind == Module (29), skipping `extern crate`
-/// entries. The key is the module's path descriptor (e.g. `"edwards/"`,
-/// `"backend/vector/"`), and the value is whether the module is unrestricted
-/// `pub` (not `pub(crate)`, `pub(super)`, etc.).
-#[must_use]
-pub fn build_module_visibility_map(scip_data: &ScipIndex) -> HashMap<String, bool> {
-    let mut map = HashMap::new();
-    for doc in &scip_data.documents {
-        for symbol in &doc.symbols {
-            if symbol.kind != SCIP_KIND_MODULE {
-                continue;
-            }
-            let sig = &symbol.signature_documentation.text;
-            if sig.contains("extern crate") {
-                continue;
-            }
-            let Some(after_prefix) = symbol.symbol.strip_prefix(SCIP_SYMBOL_PREFIX) else {
-                continue;
-            };
-            let parts: Vec<&str> = after_prefix.splitn(3, ' ').collect();
-            if parts.len() < 3 {
-                continue;
-            }
-            let mod_path = parts[2];
-            map.insert(mod_path.to_string(), is_signature_public(sig));
-        }
-    }
-    map
-}
-
-/// Determine `is-public-api` for a function using the SCIP module-chain walk.
-///
-/// Rules:
-/// - External stubs (empty code-path) → `None`
-/// - Direct `pub` function with every ancestor module `pub` → `Some(true)`
-/// - Trait impl method (two `[...]` groups in symbol) with ancestor chain all `pub` → `Some(true)`
-/// - Everything else → `Some(false)`
-#[must_use]
-pub fn classify_public_api(
-    scip_symbol: &str,
-    is_public: bool,
-    code_path: &str,
-    module_visibility: &HashMap<String, bool>,
-    is_library: bool,
-) -> Option<bool> {
-    if code_path.is_empty() {
-        return None;
-    }
-    if !is_library {
-        return Some(false);
-    }
-    let module_chain_pub = is_module_chain_public(scip_symbol, module_visibility);
-    if is_public && module_chain_pub {
-        return Some(true);
-    }
-    if is_trait_impl_symbol(scip_symbol) && module_chain_pub {
-        return Some(true);
-    }
-    Some(false)
-}
-
-/// Check whether all ancestor modules in a SCIP symbol's path are `pub`.
-fn is_module_chain_public(scip_symbol: &str, module_visibility: &HashMap<String, bool>) -> bool {
-    let Some(after_prefix) = scip_symbol.strip_prefix(SCIP_SYMBOL_PREFIX) else {
-        return false;
-    };
-    let parts: Vec<&str> = after_prefix.splitn(3, ' ').collect();
-    if parts.len() < 3 {
-        return false;
-    }
-    let descriptor = parts[2];
-    let segments: Vec<&str> = descriptor.split('/').collect();
-    if segments.len() <= 1 {
-        return true;
-    }
-    for i in 0..segments.len() - 1 {
-        let mod_path: String = segments[..=i].iter().map(|s| format!("{}/", s)).collect();
-        if !module_visibility.get(&mod_path).copied().unwrap_or(false) {
-            return false;
-        }
-    }
-    true
-}
-
-/// Detect whether a SCIP symbol represents a trait impl method.
-///
-/// Trait impls have two bracket groups: `impl#[Type][Trait]method()`
-/// or old format: `Type#Trait<...>#method()` (two `#` separators).
-fn is_trait_impl_symbol(scip_symbol: &str) -> bool {
-    let Some(after_prefix) = scip_symbol.strip_prefix(SCIP_SYMBOL_PREFIX) else {
-        return false;
-    };
-    let parts: Vec<&str> = after_prefix.splitn(3, ' ').collect();
-    if parts.len() < 3 {
-        return false;
-    }
-    let descriptor = parts[2];
-    let last_segment = descriptor.rsplit('/').next().unwrap_or(descriptor);
-    if last_segment.starts_with("impl#[") || last_segment.starts_with("`impl`#[") {
-        return last_segment.matches('[').count() >= 2;
-    }
-    if let Some(hash_pos) = last_segment.find('#') {
-        let after_first_hash = &last_segment[hash_pos + 1..];
-        return after_first_hash.contains('#');
-    }
-    false
 }
 
 /// Check whether a project is a library crate (has a `[lib]` target).
@@ -523,7 +413,7 @@ fn enrich_display_name(scip_symbol: &str, base_display_name: &str) -> String {
 ///
 /// Input like `[CompressedEdwardsY][ConstantTimeEq]ct_eq()` → `"CompressedEdwardsY"`.
 /// Strips lifetime prefixes (`&'a `) and backtick quoting.
-fn extract_bracket_type(s: &str) -> Option<String> {
+pub(crate) fn extract_bracket_type(s: &str) -> Option<String> {
     if !s.starts_with('[') {
         return None;
     }
@@ -649,12 +539,7 @@ fn collect_self_types(scip_data: &ScipIndex) -> HashMap<String, Vec<String>> {
 #[must_use]
 pub fn build_call_graph(
     scip_data: &ScipIndex,
-) -> (
-    HashMap<String, FunctionNode>,
-    HashMap<String, String>,
-    HashMap<String, bool>,
-) {
-    let module_visibility = build_module_visibility_map(scip_data);
+) -> (HashMap<String, FunctionNode>, HashMap<String, String>) {
     let mut call_graph: HashMap<String, FunctionNode> = HashMap::new();
     let mut all_function_symbols: HashSet<String> = HashSet::new();
     let mut symbol_to_display_name: HashMap<String, String> = HashMap::new();
@@ -744,7 +629,7 @@ pub fn build_call_graph(
         &mut symbol_to_display_name,
     );
 
-    (call_graph, symbol_to_display_name, module_visibility)
+    (call_graph, symbol_to_display_name)
 }
 
 /// Walk through occurrences to assign ranges and connect callers to callees.
@@ -1086,8 +971,6 @@ pub fn convert_to_atoms_with_parsed_spans(
     symbol_to_display_name: &HashMap<String, String>,
     project_root: &Path,
     with_locations: bool,
-    module_visibility: &HashMap<String, bool>,
-    is_library: bool,
 ) -> Vec<AtomWithLines> {
     let relative_paths: Vec<String> = call_graph
         .values()
@@ -1122,8 +1005,6 @@ pub fn convert_to_atoms_with_parsed_spans(
         Some(&span_map),
         Some(&chain_facts),
         with_locations,
-        module_visibility,
-        is_library,
     );
     // A failed span-map lookup silently degrades the atom (`lines-end` falls
     // back to the start line; `cfg` and the declaration-kind facts are lost),
@@ -1152,8 +1033,6 @@ fn convert_to_atoms_with_lines_internal(
     span_map: Option<&HashMap<(String, String, usize), rust_parser::SpanInfo>>,
     chain_facts: Option<&mod_chain::ModChainFacts>,
     with_locations: bool,
-    _module_visibility: &HashMap<String, bool>,
-    _is_library: bool,
 ) -> (Vec<AtomWithLines>, usize) {
     // === Phase 1: Compute line ranges and base code_names for all nodes ===
     struct NodeData<'a> {
@@ -1896,7 +1775,7 @@ mod tests {
             }],
         };
 
-        let (graph, _, _) = build_call_graph(&scip);
+        let (graph, _) = build_call_graph(&scip);
 
         // Find fn_a's callees
         let fn_a_node = graph.values().find(|n| n.display_name == "fn_a");
@@ -1945,7 +1824,7 @@ mod tests {
             }],
         };
 
-        let (graph, _, _) = build_call_graph(&scip);
+        let (graph, _) = build_call_graph(&scip);
 
         // With C2, current_function_key is None at line 2, so the call is dropped.
         // Verify fn_a does NOT have target as callee (call was before fn_a's def).
@@ -2012,7 +1891,7 @@ mod tests {
             }],
         };
 
-        let (graph, display_names, module_vis) = build_call_graph(&scip);
+        let (graph, display_names) = build_call_graph(&scip);
 
         // The caller at line 35 has a type hint "Scalar" (from scalar_type ref).
         // method_sym has two definitions: one at line 10 (context Scalar),
@@ -2035,15 +1914,8 @@ mod tests {
             }
 
             // Now convert to atoms to test the disambiguation path
-            let (atoms, _span_misses) = convert_to_atoms_with_lines_internal(
-                &graph,
-                &display_names,
-                None,
-                None,
-                false,
-                &module_vis,
-                true,
-            );
+            let (atoms, _span_misses) =
+                convert_to_atoms_with_lines_internal(&graph, &display_names, None, None, false);
 
             let caller_atom = atoms.iter().find(|a| a.display_name == "caller");
             if let Some(atom) = caller_atom {
@@ -2165,230 +2037,6 @@ mod tests {
     }
 
     // =========================================================================
-    // Module visibility map tests
-    // =========================================================================
-
-    fn make_module_symbol(symbol: &str, sig: &str) -> Symbol {
-        Symbol {
-            symbol: symbol.to_string(),
-            kind: constants::SCIP_KIND_MODULE,
-            display_name: None,
-            documentation: None,
-            signature_documentation: SignatureDocumentation {
-                language: "rust".to_string(),
-                text: sig.to_string(),
-            },
-            enclosing_symbol: None,
-        }
-    }
-
-    fn make_scip_with_modules(modules: Vec<Symbol>) -> ScipIndex {
-        ScipIndex {
-            metadata: ScipMetadata {
-                tool_info: ScipToolInfo {
-                    name: "rust-analyzer".to_string(),
-                    version: "0.0.0".to_string(),
-                },
-                project_root: String::new(),
-                text_document_encoding: 0,
-            },
-            documents: vec![Document {
-                language: "rust".to_string(),
-                relative_path: "src/lib.rs".to_string(),
-                symbols: modules,
-                occurrences: vec![],
-            }],
-        }
-    }
-
-    #[test]
-    fn test_build_module_visibility_map_pub_modules() {
-        let scip = make_scip_with_modules(vec![
-            make_module_symbol(
-                "rust-analyzer cargo my-crate 1.0.0 edwards/",
-                "pub mod edwards",
-            ),
-            make_module_symbol(
-                "rust-analyzer cargo my-crate 1.0.0 backend/",
-                "pub(crate) mod backend",
-            ),
-        ]);
-        let map = build_module_visibility_map(&scip);
-        assert_eq!(map.get("edwards/"), Some(&true));
-        assert_eq!(map.get("backend/"), Some(&false));
-    }
-
-    #[test]
-    fn test_build_module_visibility_map_skips_extern_crate() {
-        let scip = make_scip_with_modules(vec![make_module_symbol(
-            "rust-analyzer cargo my-crate 1.0.0 some_dep/",
-            "extern crate some_dep",
-        )]);
-        let map = build_module_visibility_map(&scip);
-        assert!(map.is_empty());
-    }
-
-    #[test]
-    fn test_build_module_visibility_map_nested() {
-        let scip = make_scip_with_modules(vec![
-            make_module_symbol("rust-analyzer cargo my-crate 1.0.0 a/", "pub mod a"),
-            make_module_symbol("rust-analyzer cargo my-crate 1.0.0 a/b/", "pub mod b"),
-            make_module_symbol("rust-analyzer cargo my-crate 1.0.0 a/c/", "mod c"),
-        ]);
-        let map = build_module_visibility_map(&scip);
-        assert_eq!(map.get("a/"), Some(&true));
-        assert_eq!(map.get("a/b/"), Some(&true));
-        assert_eq!(map.get("a/c/"), Some(&false));
-    }
-
-    // =========================================================================
-    // Trait impl detection tests
-    // =========================================================================
-
-    #[test]
-    fn test_is_trait_impl_symbol_new_format() {
-        let sym =
-            "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/impl#[EdwardsPoint][Add]add().";
-        assert!(is_trait_impl_symbol(sym));
-    }
-
-    #[test]
-    fn test_is_trait_impl_symbol_old_format() {
-        let sym = "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/CompressedEdwardsY#ConstantTimeEq<&CompressedEdwardsY>#ct_eq().";
-        assert!(is_trait_impl_symbol(sym));
-    }
-
-    #[test]
-    fn test_is_trait_impl_symbol_inherent_method() {
-        let sym =
-            "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/impl#[EdwardsPoint]compress().";
-        assert!(!is_trait_impl_symbol(sym));
-    }
-
-    #[test]
-    fn test_is_trait_impl_symbol_free_function() {
-        let sym = "rust-analyzer cargo curve25519-dalek 4.1.3 edwards/decompress().";
-        assert!(!is_trait_impl_symbol(sym));
-    }
-
-    // =========================================================================
-    // classify_public_api tests
-    // =========================================================================
-
-    #[test]
-    fn test_classify_external_stub_returns_none() {
-        let map = HashMap::new();
-        assert_eq!(
-            classify_public_api("rust-analyzer cargo x 1.0 foo()", true, "", &map, true),
-            None
-        );
-    }
-
-    #[test]
-    fn test_classify_binary_crate_always_false() {
-        let map = HashMap::new();
-        assert_eq!(
-            classify_public_api(
-                "rust-analyzer cargo x 1.0 main()",
-                true,
-                "src/main.rs",
-                &map,
-                false
-            ),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn test_classify_pub_fn_in_root() {
-        let map = HashMap::new();
-        let sym = "rust-analyzer cargo my-crate 1.0 my_fn().";
-        assert_eq!(
-            classify_public_api(sym, true, "src/lib.rs", &map, true),
-            Some(true)
-        );
-    }
-
-    #[test]
-    fn test_classify_pub_fn_in_pub_module() {
-        let mut map = HashMap::new();
-        map.insert("edwards/".to_string(), true);
-        let sym = "rust-analyzer cargo my-crate 1.0 edwards/compress().";
-        assert_eq!(
-            classify_public_api(sym, true, "src/edwards.rs", &map, true),
-            Some(true)
-        );
-    }
-
-    #[test]
-    fn test_classify_pub_fn_in_private_module() {
-        let mut map = HashMap::new();
-        map.insert("internal/".to_string(), false);
-        let sym = "rust-analyzer cargo my-crate 1.0 internal/helper().";
-        assert_eq!(
-            classify_public_api(sym, true, "src/internal.rs", &map, true),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn test_classify_private_fn_in_pub_module() {
-        let mut map = HashMap::new();
-        map.insert("edwards/".to_string(), true);
-        let sym = "rust-analyzer cargo my-crate 1.0 edwards/helper().";
-        assert_eq!(
-            classify_public_api(sym, false, "src/edwards.rs", &map, true),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn test_classify_trait_impl_in_pub_module() {
-        let mut map = HashMap::new();
-        map.insert("edwards/".to_string(), true);
-        let sym = "rust-analyzer cargo my-crate 1.0 edwards/impl#[EdwardsPoint][Add]add().";
-        assert_eq!(
-            classify_public_api(sym, false, "src/edwards.rs", &map, true),
-            Some(true)
-        );
-    }
-
-    #[test]
-    fn test_classify_trait_impl_in_private_module() {
-        let mut map = HashMap::new();
-        map.insert("backend/".to_string(), false);
-        let sym = "rust-analyzer cargo my-crate 1.0 backend/impl#[Point][Add]add().";
-        assert_eq!(
-            classify_public_api(sym, false, "src/backend.rs", &map, true),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn test_classify_nested_pub_chain() {
-        let mut map = HashMap::new();
-        map.insert("a/".to_string(), true);
-        map.insert("a/b/".to_string(), true);
-        let sym = "rust-analyzer cargo my-crate 1.0 a/b/func().";
-        assert_eq!(
-            classify_public_api(sym, true, "src/a/b.rs", &map, true),
-            Some(true)
-        );
-    }
-
-    #[test]
-    fn test_classify_nested_broken_chain() {
-        let mut map = HashMap::new();
-        map.insert("a/".to_string(), false);
-        map.insert("a/b/".to_string(), true);
-        let sym = "rust-analyzer cargo my-crate 1.0 a/b/func().";
-        assert_eq!(
-            classify_public_api(sym, true, "src/a/b.rs", &map, true),
-            Some(false)
-        );
-    }
-
-    // =========================================================================
     // P7 — SCIP function kinds
     // =========================================================================
 
@@ -2487,20 +2135,11 @@ mod tests {
             Some(&empty_span_map),
             None,
             false,
-            &HashMap::new(),
-            true,
         );
         assert_eq!(misses, 2);
 
-        let (_, misses_without_map) = convert_to_atoms_with_lines_internal(
-            &graph,
-            &HashMap::new(),
-            None,
-            None,
-            false,
-            &HashMap::new(),
-            true,
-        );
+        let (_, misses_without_map) =
+            convert_to_atoms_with_lines_internal(&graph, &HashMap::new(), None, None, false);
         assert_eq!(misses_without_map, 0);
     }
 
@@ -2557,14 +2196,7 @@ mod tests {
             graph.insert(sym.to_string(), mk_node(sym, name, path, line0));
         }
 
-        let atoms = convert_to_atoms_with_parsed_spans(
-            &graph,
-            &HashMap::new(),
-            root,
-            false,
-            &HashMap::new(),
-            true,
-        );
+        let atoms = convert_to_atoms_with_parsed_spans(&graph, &HashMap::new(), root, false);
         let by = |n: &str| atoms.iter().find(|a| a.display_name == n).unwrap();
 
         let own = by("own_gate");

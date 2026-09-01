@@ -1,6 +1,6 @@
 # Architecture
 
-- **last-updated**: 2026-08-11
+- **last-updated**: 2026-08-31
 
 ## Overview
 
@@ -34,13 +34,11 @@ commands/extract.rs (orchestration)
   |      parse_scip_json()          Parse SCIP JSON into ScipIndex
   |        -> build_call_graph()    Walk documents/symbols/occurrences
   |             -> FunctionNode map + symbol_to_display_name map
-  |             -> module_visibility map (SCIP module-chain walk)
   |        -> convert_to_atoms_with_parsed_spans()
   |             rust_parser (syn)   Parse .rs files for function body spans,
   |                                 cfg gates, is-foreign, trait-required [P18, P19]
   |             mod_chain (syn)     Walk module tree per package: file mount
   |                                 chains, file gates, unmounted files [P18, P19]
-  |             classify_public_api()  is-public-api from module chain  [P11, P12]
   |             -> AtomWithLines map (cfg folded, span misses warned) [P3, P5, P6, P14]
   |
   |-- 4. find_duplicate_code_names() + dedupe into BTreeMap  [P2]
@@ -53,6 +51,8 @@ commands/extract.rs (orchestration)
   |
   |-- 7. [optional] public_api (--with-public-api)      [P11, P17]
   |      Runs cargo public-api, overrides is-public-api via RQN matching
+  |      Candidate forms per entry (pub-use, trait-default) then
+  |      impl-descriptor resolution for entries no name matched
   |      Cached in <project>/data/public-api.txt            [P14]
   |
   |-- 8. metadata::wrap_in_envelope()                   [P1, P13]
@@ -99,6 +99,8 @@ Supports multi-crate LLBCs: when the LLBC contains functions from dependency cra
 ### Public API override (optional, external)
 
 Overrides `is-public-api` using `cargo-public-api` output matched via `rust-qualified-name` (RQN). Requires nightly toolchain and `cargo-public-api`. Failure is non-fatal ([P17](../engineering/properties.md#p17--public-api-override-non-fatal)). Activated with `--with-public-api`.
+
+Matching runs as additive passes over a per-entry candidate-form set (`PublicNameForms`) — `pub use` rewrite, trait-default resolution, RQN matching, then impl-descriptor resolution for entries no atom name matched. Every pass skips on ambiguity. The pass sequence and guards are specified in [P11](properties.md); extract reports both metrics (atoms marked, entries matched), which are deliberately distinct.
 
 **Files**: `public_api.rs`
 
@@ -166,13 +168,11 @@ rust-analyzer ──> index.scip ──> scip CLI ──> index.scip.json
                                                     |
                                                     v
                                             build_call_graph()
-                                              + module_visibility_map
                                                     |
                               .rs files ──> syn ──> span_map
                                                     |
                                                     v
                                     convert_to_atoms_with_parsed_spans()
-                                      + classify_public_api() per atom
                                                     |
                                                     v
                                             BTreeMap<code-name, AtomWithLines>

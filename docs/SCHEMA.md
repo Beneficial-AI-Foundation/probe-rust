@@ -168,7 +168,7 @@ standardized metadata envelope:
 
 > **Predicate format.** `cfg`/`file-cfg` values are not whitespace-normalized: predicates copied from source attributes keep syn's token-stream spacing (`not (feature = "std")`, `all (test , not (feature = "verify"))`), while combinators synthesized by probe-rust are tight (`all(a, b)`, `any(a, b)`), so one value can mix both regimes. Consumers must parse whitespace-insensitively (probe-aeneas's `cfg_eval` does).
 | `is-public` | bool | no | `true` if the function is declared `pub`. Derived from the SCIP signature (e.g. `pub fn` vs `fn`). Always present for internal atoms; absent for external stubs. When `--with-charon` is used and the matched LLBC entry carries visibility (`attr_info.public`), the Charon-derived value takes precedence; a candidate without visibility (and the `--translation` manifest path, which carries none) never clobbers the SCIP value. This is item-level visibility, not crate-level API reachability. |
-| `is-public-api` | bool | no | `true` = function is reachable from the crate root (direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain). `false` = not in the public API. Absent only for external stubs. For binary-only crates, always `false`. By default derived from SCIP module-chain visibility walk (no external tools required). When `--with-public-api` is used, overridden by `cargo-public-api` output matched via `rust-qualified-name` (RQN). See **Limitations** below. |
+| `is-public-api` | bool | no | Set **only** by `--with-public-api` (absent for every atom otherwise): `true` = a `cargo public-api` entry proves the function public — RQN match after the candidate-form passes, or a public entry resolving uniquely to the atom's impl descriptor (which can mark an RQN-less same-crate atom); `false` = the atom has an RQN no public entry matches. Absent for stub atoms (no analyzed source) the resolution never reaches. See **Limitations** below. |
 | `charon-def-id` | integer | no | Charon `FunDeclId`, carried through the same match-key/span resolution that assigns `rust-qualified-name`. Equals Aeneas's `translation.json` `def_id`, enabling a precise integer join to the Lean translation. Populated from **either** source: with `--with-charon` it is the `Fun` key from the LLBC's `item_names`; with `--translation <manifest>` it is the `def_id` of a `functions[]` entry (charon's `FunDeclId` id-space only — `globals`/`trait_impls` are excluded). Present only when a Charon function matched **and** that source's `charon_version` was read. Its accuracy is exactly that of the underlying Charon-name match (single-candidate resolution requires a file-path match; the manifest path additionally refuses match-key-only hits) — it is not an independent oracle, so consumers should still gate on `charon-version` and may corroborate with `rust-qualified-name`/span rather than treat the id alone as ground truth. |
 | `charon-version` | string | no | The charon version that produced `charon-def-id` — the top-level `charon_version` of the LLBC (`--with-charon`) or of the `translation.json` (`--translation`). Lets consumers provenance-gate the join — trust `charon-def-id` only when this matches the charon version behind their manifest. |
 
@@ -195,39 +195,46 @@ stub entries with:
 - `is-public`: absent
 - `cfg`, `file-cfg`, `is-unmounted`, `is-foreign`, `trait-required`: absent
   (there is no analyzed source to derive them from)
-- `is-public-api`: absent
+- `is-public-api`: absent — unless `--with-public-api` resolves a public entry to
+  this atom's impl descriptor, which happens only for the analyzed crate's own
+  atoms (a macro-generated impl leaves a definition-less atom of exactly this
+  shape); stubs from other crates always stay absent
 - `charon-def-id`: absent
 - `charon-version`: absent
 
 ### Limitations: `is-public-api`
 
-#### Default (SCIP module-chain walk)
+Without `--with-public-api`, `is-public-api` is absent for every atom — no
+default derivation exists. (An earlier SCIP module-chain walk default was
+removed; `is-public` carries the signature-derived visibility instead.)
 
-`is-public-api` is determined by walking the SCIP module visibility chain.
-This is accurate for most cases but has known limitations:
+#### With `--with-public-api` (cargo-public-api)
 
-- **Re-exports**: A function defined in a private module but re-exported via
-  `pub use` from a public module will be classified as `false` because the
-  definition module is not public. In practice, this is rare for function
-  definitions (most re-exports are for types, not functions).
-- **Trait impl heuristic**: Trait impl methods are classified as public API if
-  the implementing type is in a public module chain. This may produce a false
-  positive if a private same-crate trait is implemented on a public type (rare).
-- **Binary-only crates**: All atoms are `is-public-api: false` since binaries
-  have no public API surface.
-
-#### With `--with-public-api` (cargo-public-api override)
-
-When `--with-public-api` is used, `is-public-api` is overridden for all atoms
+When `--with-public-api` is used, `is-public-api` is set for all atoms
 that have a `rust-qualified-name` (RQN). Matching is RQN-based: each atom's RQN
 is checked against the set of qualified names parsed from `cargo public-api -sss`
 output. This provides ground-truth public API surface from `rustdoc`.
+
+Names are reconciled in additive passes because `cargo public-api` names items
+by their public *use* path while atoms carry the *definition* path: crate-root
+`pub use` rewriting, inherited-default-trait-method resolution, then
+impl-descriptor resolution for entries no atom name matched — which marks the
+implementing atom (possibly RQN-less) directly. Every pass is additive,
+no pass resolves an ambiguity, and the resolution passes act only on entries
+still unmatched. The pass sequence and its
+guards are specified canonically in KB property P11
+(`kb/engineering/properties.md`); `docs/PUBLIC_API_LIMITATIONS.md` catalogues
+what remains unmatched and why.
 
 - Standard blanket impl entries (`Into`, `TryFrom`, `TryInto`, `Borrow`,
   `BorrowMut`, `Any`, `ToOwned`, `CloneInto`, `From`) are filtered from the
   `cargo public-api` output since they have no corresponding atoms.
 - Requires nightly toolchain and `cargo-public-api` (use `--auto-install`).
-- External stubs (no RQN) are unaffected — `is-public-api` stays absent.
+- Stubs from other crates (no RQN) are unaffected — `is-public-api` stays absent.
+- Two different metrics are printed: `is-public-api: N true, M false` counts
+  atoms; `public-api entries matched: N/M` counts `cargo public-api` entries
+  backed by an atom. Several entries can share one atom, so the numbers move
+  independently. See `docs/PUBLIC_API_LIMITATIONS.md`.
 
 ---
 
@@ -345,6 +352,16 @@ major version.
 
 ### Changelog
 
+- **3.0 — doc clarification** (2026-08-31, no wire change, `schema-version`
+  stays `3.0`): `is-public-api` is emitted only under `--with-public-api`;
+  without the flag it is absent for every atom. This has been the wire
+  behavior since 2026-04-09 — the 2.3 note below saying "SCIP walk remains
+  the zero-dependency default" never took effect (the walk was unwired the
+  same day, and its dead code removed in 0.11.0).
+- **3.0 — doc clarification** (2026-08-28, no wire change, `schema-version`
+  stays `3.0`): `--with-public-api` can now set `is-public-api: true` on an
+  analyzed-crate atom with no `rust-qualified-name` (impl-descriptor
+  resolution; see KB P11). Field types and names are unchanged.
 - **3.0** (2026-07-27): Renamed the `is-disabled` atom field to `untracked`
   (both the JSON wire name and the Rust field). Semantics and boolean polarity
   are unchanged (`is-disabled: true` → `untracked: true`). Breaking wire-format

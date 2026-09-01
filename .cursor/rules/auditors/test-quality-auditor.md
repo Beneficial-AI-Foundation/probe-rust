@@ -26,7 +26,7 @@ Find tests in:
 - **Every property (P1-P19) has a corresponding test** — or is explicitly flagged as untested
 - **Known issues (C1-C3) have regression tests** — tests should document the current behavior and expected fix
 - **Edge cases from SCHEMA.md are tested** — stubs, empty projects, binary-only crates, workspace projects
-- **Visibility logic tested** — `is_signature_public` edge cases, `classify_public_api` module-chain walk, trait impl detection, `is_library_crate`
+- **Visibility logic tested** — `is_signature_public` edge cases, `is_library_crate`, the `--with-public-api` pass guards (`public_api.rs` tests)
 - **Disambiguation tested** — type context matching, `@line` fallback, substring false-match risk (C3)
 - **SCIP format compatibility** — both old (`Type#Trait`) and new (`impl#[Type]`) formats tested for `enrich_display_name`
 

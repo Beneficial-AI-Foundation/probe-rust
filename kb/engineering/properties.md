@@ -1,6 +1,6 @@
 # Properties and Invariants
 
-- **last-updated**: 2026-08-11
+- **last-updated**: 2026-08-31
 
 Every property here must hold in the implementation. If a property is violated, it is a bug in the code, not in the KB — unless a deliberate decision changes the KB first.
 
@@ -88,25 +88,45 @@ Charon can override this value when `--with-charon` is used.
 
 **Where**: `lib.rs` (`is_signature_public`).
 
-### P11 — is-public-api from SCIP module walk
+### P11 — is-public-api from cargo-public-api
 
-**Default (no flags):** `is-public-api` is binary (`true` / `false`) for all internal atoms. Derived from SCIP data at call-graph build time — no external tools required.
+`is-public-api` is set **only** by `--with-public-api`. Without the flag it is absent (`null`)
+for every atom. (An earlier SCIP module-chain walk default was deliberately removed in `43cdc96`,
+which separated signature-derived `is-public` — [P10](#p10--is-public-from-scip) — from
+`is-public-api`; the dead classifier was deleted in 0.11.0.)
+
+With the flag, values mean:
 
 | Value | Meaning |
 |-------|---------|
-| `true` | Function is reachable from the crate root: either a direct `pub` function with all ancestor modules `pub`, or a trait impl method whose implementing type is in a public module chain |
-| `false` | Not public API: function is non-public, or at least one ancestor module is non-public |
-| absent (`null`) | External stubs only (no code-path to analyze) |
+| `true` | A `cargo public-api` entry proves the atom public: its RQN matches a public name (directly, via `pub use` rewrite, or via trait-default resolution), or an entry resolves uniquely to it through its impl descriptor |
+| `false` | The atom has an RQN and no public entry matches it |
+| absent (`null`) | No RQN and no impl-descriptor resolution reached it: external stubs, the analyzed crate's own bodyless stubs (unresolved impl evidence, required trait signatures) — or the flag was off or its tooling failed ([P17](#p17--public-api-override-non-fatal)) |
 
-**Optional override (`--with-public-api`):** When the flag is set, `is-public-api` is overridden for all atoms that have a `rust-qualified-name` (RQN). The RQN is looked up in the set of qualified names parsed from `cargo public-api -sss` output. Atoms without an RQN (external stubs) are unaffected. On failure (missing tools, nightly, or `cargo public-api` error), the override is skipped and SCIP-walk values are preserved (non-fatal, see [P17](#p17--public-api-override-non-fatal)).
+The RQN is looked up in the set of qualified names parsed from `cargo public-api -sss` output. On failure (missing tools, nightly, or `cargo public-api` error), the enrichment is skipped and `is-public-api` stays unset (non-fatal, see [P17](#p17--public-api-override-non-fatal)).
 
-**Where**: `lib.rs` (`build_module_visibility_map`, `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`), `public_api.rs` (`enrich_atoms_with_public_api`), `commands/extract.rs` (`enrich_with_public_api`).
+`cargo public-api` names items by their public *use* path; atom RQNs use the *definition* path, and some public functions have no atom carrying their name at all. Reconciliation therefore runs in passes over a per-entry candidate-form set (`PublicNameForms`: entry → the names it may match under, always including itself). Every pass is additive — an entry can gain candidate forms but never lose one — no pass resolves an ambiguity (zero or several candidates never resolve, and a `pub use` alias claimed for two definitions resolves to neither), and the resolution passes (2 and 4) act only on entries still unmatched:
 
-### P12 — Binary crate detection
+1. **pub-use**: rewrite an entry through the crate-root `pub use` alias map to its definition form.
+2. **trait-default**: an entry `path::Type::method` gains the RQN of the trait atom providing `method` when the atom keys show impl evidence for exactly one trait providing it, no atom defines `Type::method` itself, exactly one atom answers to `Trait::method`, and that atom is itself public API. The inherited default body is what a public caller invokes, so it is the entry's only implementation. Impl evidence is read only from the analyzed crate's own atom keys — a dependency's impls neither prove the `Type: Trait` link nor veto with a phantom override. The `Trait::method` atom lookup by RQN is not crate-scoped: the atom-is-itself-public-API guard means a dependency RQN can never *resolve* an entry, though one ending in the same `Trait::method` suffix can still add ambiguity and make the pass skip — the conservative direction.
+3. **name matching**: `enrich_atoms_with_public_api` sets `true`/`false` for every atom with an RQN, from the flattened candidate forms.
+4. **impl-descriptor resolution**: for an entry that *no* name matched, the atom implementing it is marked `true` directly — resolved through the SCIP impl descriptor embedded in the atom key, restricted to the analyzed crate's own atoms. A qualified entry's module segments (between crate and type/trait) must equal the atom key's module path, so a lone `bar::Table::new` atom never answers for a public `foo::Table::new`; bare `T::method` entries carry no module path and rely on the blanket verification instead. `path::Type::method` resolves to the crate's single `impl#[Type][…]method()` atom; a bare `T::method` (printed by `cargo public-api` for a blanket impl) and a trait-level `path::Trait::method` resolve to the single `impl#[…][Trait]method()` atom only when `syn` verifies the impl self type is one of the impl's own generic parameters (`impl<T> Trait for T`) — the key alone cannot tell a generic parameter named `T` from a concrete type named `T`.
 
-For crates without a `[lib]` target (binary-only), all atoms are marked `is-public-api: false` since binaries have no public API surface.
+Pass 4 is the one exception to "atoms without an RQN are unaffected": a macro-generated impl leaves a bodyless impl-evidence atom with no RQN, and a `cargo public-api` entry resolving uniquely to it proves it public. Atoms of other crates are never marked from this crate's public API.
 
-**Where**: `lib.rs` (`is_library_crate`, `classify_public_api`).
+Extract prints both metrics, which are different numbers: `is-public-api: N true, M false` counts *atoms*, and `public-api entries matched: N/M` counts *entries* (several entries can share one atom, and an entry can have several candidate forms). This is the canonical description of the pass sequence; `docs/PUBLIC_API_LIMITATIONS.md` catalogues what remains unmatched on the reference crate (`curve25519-dalek` 4.1.3) and why.
+
+**Where**: `public_api.rs` (`PublicNameForms`, `enrich_atoms_with_public_api`, `atom_candidate_names`, `parse_impl_key`, `is_blanket_impl_atom`), `commands/extract.rs` (`enrich_with_public_api`).
+
+### P12 — retired (0.11.0)
+
+Previously: "binary-only crates have all atoms marked `is-public-api: false`". That was behavior
+of the SCIP module-chain walk default, unwired in `43cdc96` and deleted in 0.11.0. Binary-only
+crates now get `is-public-api` like any crate: `null` without `--with-public-api`, and the flag's
+enrichment runs regardless of crate type. `is_library_crate` survives only to label the extract
+summary. Retired, not renumbered.
+
+**Where**: `lib.rs` (`is_library_crate`), `commands/extract.rs` (summary print).
 
 ## Infrastructure properties
 
@@ -147,7 +167,7 @@ Lifetime prefixes (`&'a`) and backtick quoting are stripped from the extracted t
 
 ### P17 — Public-API override non-fatal
 
-`--with-public-api` failure (missing nightly toolchain, missing `cargo-public-api`, or `cargo public-api` execution error) produces a warning and preserves the SCIP-walk-derived `is-public-api` values. It never aborts the extract pipeline. Analogous to [P15](#p15--charon-non-fatal) for Charon.
+`--with-public-api` failure (missing nightly toolchain, missing `cargo-public-api`, or `cargo public-api` execution error) produces a warning and leaves `is-public-api` unset (`null`). It never aborts the extract pipeline. Analogous to [P15](#p15--charon-non-fatal) for Charon.
 
 **Where**: `commands/extract.rs` (`enrich_with_public_api`), `public_api.rs` (`ensure_nightly_toolchain`, `ensure_cargo_public_api`, `collect_public_api`).
 

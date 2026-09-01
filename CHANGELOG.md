@@ -5,6 +5,20 @@ All notable changes to probe-rust are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-31
+
+### Fixed
+- **`--with-public-api` no longer misses public functions whose atom carries a different name** — inherited trait defaults, macro-generated impls (bodyless atoms with no RQN), and the crate's own blanket impl are now resolved. On `curve25519-dalek` 4.1.3, `is-public-api: true` atoms go 130 → 142 and entries matched go 123/169 (73%) → 147/169 (87%).
+- **Tightened `--with-public-api` resolution guards** (no behavior change on the reference crate): impl-descriptor resolution also requires the entry's module segments to equal the atom key's module path (a lone `bar::Table::new` atom can no longer answer for a public `foo::Table::new`); trait-default resolution reads impl evidence only from the analyzed crate's own atom keys; a crate-root `pub use` alias claimed for two different definitions resolves to neither. See KB P11.
+- **Extract summary labels tell the truth**: the `is-public` count line is labeled as signature-derived (it never came from a module walk), the false "Binary-only crate — is-public: false for all atoms" claim is gone (real counts print for every crate type), and the KB/SCHEMA/glossary passages describing a "default SCIP module-walk" for `is-public-api` were rewritten — without `--with-public-api` the field is absent for every atom, as it has been since `43cdc96` (P11 rewritten, P12 retired, P17 corrected).
+
+### Added
+- **Candidate-form passes for `--with-public-api`**: matching runs over per-entry candidate names (`PublicNameForms` — `pub use` rewrite, trait-default resolution), then impl-descriptor resolution marks the implementing atom directly for entries no name matched. Every pass is additive and never resolves an ambiguity; the specification is KB P11, the case study `docs/PUBLIC_API_LIMITATIONS.md` (earlier versions' alias/type-claims were corrected against pristine crates.io sources).
+- **`public-api entries matched: N/M` output line**: the entry-level metric, distinct from the atom-level `is-public-api: N true, M false` (several entries can share one atom, so the numbers move independently).
+
+### Removed
+- **Dead SCIP module-chain walk classifier** (unwired since `43cdc96`, 2026-04): `classify_public_api`, `is_module_chain_public`, `is_trait_impl_symbol`, `build_module_visibility_map`, and the unused `module_visibility`/`is_library` parameter threading. Library-API visible: `build_call_graph` now returns a 2-tuple and `convert_to_atoms_with_parsed_spans` takes two fewer arguments. JSON output is byte-identical (the walk never wrote to it).
+
 ## [0.10.0] - 2026-08-11
 
 ### Fixed

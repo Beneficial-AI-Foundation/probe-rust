@@ -40,7 +40,7 @@ pub fn cmd_extract(
 
     let scip_index = parse_scip_json(&json_path)?;
 
-    let (call_graph, symbol_to_display_name, module_visibility) = build_call_graph(&scip_index);
+    let (call_graph, symbol_to_display_name) = build_call_graph(&scip_index);
     println!("  ✓ Call graph built with {} functions", call_graph.len());
     println!();
 
@@ -55,8 +55,6 @@ pub fn cmd_extract(
         &symbol_to_display_name,
         &project_path,
         with_locations,
-        &module_visibility,
-        is_library,
     );
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
     if with_locations {
@@ -122,35 +120,20 @@ pub fn cmd_extract(
         );
     }
 
-    if is_library {
-        let public_count = atoms_dict
-            .values()
-            .filter(|a| a.is_public == Some(true))
-            .count();
-        let non_public_count = atoms_dict
-            .values()
-            .filter(|a| a.is_public == Some(false))
-            .count();
-        println!(
-            "  ✓ is-public: {} public, {} not public (SCIP module-chain walk)",
-            public_count, non_public_count
-        );
-        if with_public_api {
-            let api_true = atoms_dict
-                .values()
-                .filter(|a| a.is_public_api == Some(true))
-                .count();
-            let api_false = atoms_dict
-                .values()
-                .filter(|a| a.is_public_api == Some(false))
-                .count();
-            println!(
-                "  ✓ is-public-api: {} in public API, {} not (cargo-public-api)",
-                api_true, api_false
-            );
-        }
-    } else {
-        println!("  ℹ Binary-only crate — is-public: false for all atoms");
+    let public_count = atoms_dict
+        .values()
+        .filter(|a| a.is_public == Some(true))
+        .count();
+    let non_public_count = atoms_dict
+        .values()
+        .filter(|a| a.is_public == Some(false))
+        .count();
+    println!(
+        "  \u{2713} is-public: {} public, {} not public (from SCIP signatures)",
+        public_count, non_public_count
+    );
+    if !is_library {
+        println!("  \u{2139} Binary-only crate (no [lib] target)");
     }
 
     let output = output.unwrap_or_else(|| get_default_output_path(&project_path, &metadata, ""));
@@ -361,6 +344,13 @@ fn enrich_from_manifest(translation: &Path, atoms_dict: &mut BTreeMap<String, At
     }
 }
 
+fn count_public_api(atoms: &BTreeMap<String, AtomWithLines>, value: bool) -> usize {
+    atoms
+        .values()
+        .filter(|a| a.is_public_api == Some(value))
+        .count()
+}
+
 fn enrich_with_public_api(
     project_path: &Path,
     auto_install: bool,
@@ -388,16 +378,39 @@ fn enrich_with_public_api(
                 public_names.len()
             );
 
+            let mut forms = public_api::PublicNameForms::new(&public_names);
+
             // Resolve crate-root `pub use` re-exports (and renames) so functions
             // reported by cargo-public-api under their public path still match
             // atoms carrying the definition-path `rust-qualified-name`.
             let aliases = public_api::collect_reexport_aliases(project_path, pkg_name);
-            let public_names =
-                public_api::expand_public_names_with_aliases(&public_names, pkg_name, &aliases);
+            forms.expand_with_aliases(pkg_name, &aliases);
 
-            let (set_true, set_false) =
-                public_api::enrich_atoms_with_public_api(atoms_dict, &public_names);
+            // Entries naming an inherited default trait method resolve to the
+            // trait's atom, the only place that body exists.
+            let atom_names = public_api::atom_candidate_names(atoms_dict);
+            forms.expand_with_trait_defaults(atoms_dict, &atom_names, pkg_name);
+
+            public_api::enrich_atoms_with_public_api(atoms_dict, &forms.flat());
+
+            // Entries with no atom carrying their name (macro-generated impls,
+            // blanket impls) are resolved to the atom that implements them,
+            // which is marked public directly. Runs after the name-based
+            // enrichment so its marks are not overwritten.
+            let marked =
+                forms.resolve_unmatched_to_atoms(atoms_dict, &atom_names, pkg_name, project_path);
+            if marked > 0 {
+                println!("  ✓ {marked} atom(s) marked public via impl-descriptor resolution");
+            }
+
+            let set_true = count_public_api(atoms_dict, true);
+            let set_false = count_public_api(atoms_dict, false);
             println!("  ✓ is-public-api: {} true, {} false", set_true, set_false);
+            println!(
+                "  ✓ public-api entries matched: {}/{}",
+                forms.matched_count(&atom_names),
+                forms.len()
+            );
         }
         Err(e) => {
             eprintln!("  ⚠ cargo-public-api failed: {e}");

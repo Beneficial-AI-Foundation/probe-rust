@@ -1,6 +1,6 @@
 # Glossary
 
-- **last-updated**: 2026-08-11
+- **last-updated**: 2026-08-31
 
 Every domain term used in the KB must be defined here. Terms are listed alphabetically.
 
@@ -14,7 +14,11 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **Blanket impl** — A standard library trait implementation automatically provided for all types (e.g. `Into`, `TryFrom`, `Borrow`). `cargo public-api` output includes blanket impl entries that have no corresponding [atoms](#atom) in the call graph. These are filtered out during `--with-public-api` processing. See [P11](properties.md), `public_api.rs` (`BLANKET_IMPL_TRAITS`).
 
-**Binary-only crate** — A Cargo package that has no `[lib]` target (only `[[bin]]` targets). All atoms are marked `is-public-api: false` since binaries have no public API surface. See [P12](properties.md), [library crate](#library-crate).
+A crate's *own* blanket impl (`impl<T> Trait for T`) does produce an atom, resolved by [impl-descriptor resolution](#impl-descriptor-resolution), not filtered.
+
+**Binary-only crate** — A Cargo package that has no `[lib]` target (only `[[bin]]` targets). Gets [is-public-api](#is-public-api) like any crate (`null` without `--with-public-api`); `is_library_crate` only labels the extract summary. See [P12](properties.md) (retired), [library crate](#library-crate).
+
+**Candidate form** — One of the names a [cargo-public-api](#cargo-public-api) entry may be matched under during `--with-public-api` processing; an entry is matched when any of its forms names a real atom. Held per entry in `PublicNameForms`. See [P11](properties.md).
 
 **cargo-public-api** — External tool that lists a crate's public API surface by running `rustdoc` and parsing the output. Invoked via `cargo public-api -sss -p <pkg>`. Requires a nightly Rust toolchain. Used by `--with-public-api` to override [is-public-api](#is-public-api) values via [RQN](#rqn-rust-qualified-name) matching. See [P11](properties.md), [P17](properties.md), `public_api.rs`.
 
@@ -38,6 +42,8 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **Display name** — The human-readable name shown for an [atom](#atom). For impl methods, enriched to `Type::method` form via `enrich_display_name`. See [P16](properties.md).
 
+**Entries matched (vs atoms marked)** — The two distinct `--with-public-api` metrics: *entries matched* counts [cargo-public-api](#cargo-public-api) entries backed by some atom (`public-api entries matched: N/M`); *atoms marked* counts atoms whose `is-public-api` is `true` (`is-public-api: N true, M false`). Several entries can share one atom, so they move independently. See [P11](properties.md).
+
 **Envelope** — The Schema 3.0 metadata wrapper around the atoms map. Contains `schema`, `schema-version`, `tool`, `source`, `timestamp`, and `data` fields. See [P1](properties.md).
 
 **External stub** — An [atom](#atom) representing a function that is referenced (called) but not defined in the analyzed project. Has empty code-path, `{0,0}` lines, and empty [dependencies](#dependencies). See [P4](properties.md).
@@ -52,11 +58,13 @@ Every domain term used in the KB must be defined here. Terms are listed alphabet
 
 **FunctionNode** — Internal Rust type representing a node in the call graph. Contains symbol, display name, signature text, callees (`HashSet<CalleeInfo>`), source range, and type context. Not serialized directly; converted to [AtomWithLines](#atom) for output.
 
+**Impl-descriptor resolution** — The last `--with-public-api` pass: for an entry no atom *name* matched, the atom that implements it is found through the SCIP impl descriptor embedded in the atom key (`…impl#[SelfType][Trait]method()`) and marked `is-public-api: true` directly. This is what reaches macro-generated impl-evidence atoms, which have no [RQN](#rqn-rust-qualified-name) to match on. See [P11](properties.md), `public_api.rs` (`resolve_unmatched_to_atoms`).
+
+**Inherited default trait method** — A trait method with a default body that an implementing type does not override. The body exists once, in the trait; SCIP creates no per-type symbol, so `cargo public-api`'s per-type entry is matched to the trait's atom by the trait-default pass. See [P11](properties.md).
+
 **is-public** — Boolean field on [atoms](#atom) indicating whether the function's SCIP signature starts with an unrestricted `pub` prefix. Derived from `signature_documentation.text`. Does not indicate public API membership. See [P10](properties.md).
 
-**is-public-api** — Boolean field indicating whether a function is reachable from the crate root. By default, derived from SCIP module-chain visibility walk: `true` = direct `pub` function with all ancestor modules `pub`, or trait impl method whose implementing type is in a public module chain; `false` = non-public function or non-public ancestor module. Absent/`null` only for [external stubs](#external-stub). When `--with-public-api` is used, overridden for atoms with a [RQN](#rqn-rust-qualified-name) by matching against [cargo-public-api](#cargo-public-api) output. See [P11](properties.md), [P17](properties.md).
-
-**Module visibility map** — A `HashMap<String, bool>` built from SCIP module symbols (kind 29) during `build_call_graph`. Maps module path descriptors (e.g. `"edwards/"`) to whether the module is unrestricted `pub`. Used by `classify_public_api` to walk ancestor module chains. See [P11](properties.md).
+**is-public-api** — Boolean field set **only** by `--with-public-api`, by matching atoms against [cargo-public-api](#cargo-public-api) output: `true` when a public entry proves the atom public (RQN match after the candidate-form passes, or [impl-descriptor resolution](#impl-descriptor-resolution)); `false` when the atom has an [RQN](#rqn-rust-qualified-name) that no public entry matches. Absent/`null` without the flag (for every atom), and with it for [external stubs](#external-stub) and analyzed-crate atoms with no SCIP definition occurrence (bodyless stubs, unresolved macro-generated impl evidence). Not derived from any SCIP walk — that mechanism was removed (`43cdc96`, deleted 0.11.0); contrast [is-public](#is-public). See [P11](properties.md), [P17](properties.md).
 
 **Library crate** — A Cargo package that has a `[lib]` target. Functions in library crates can be public API; [binary-only crates](#binary-only-crate) always have `is-public-api: false`. See [P12](properties.md).
 

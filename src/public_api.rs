@@ -6,27 +6,40 @@
 //!
 //! When `--with-public-api` is used, every atom with a non-`None` RQN gets a
 //! definitive `is-public-api` value (`true` if the RQN appears in the
-//! `cargo public-api` output, `false` otherwise). Atoms without an RQN
-//! (external stubs) keep `is-public-api: None`.
+//! `cargo public-api` output, `false` otherwise). Atoms without an RQN keep
+//! `is-public-api: None`, with one exception: an analyzed-crate atom that
+//! impl-descriptor resolution proves public (see
+//! [`PublicNameForms::resolve_unmatched_to_atoms`]) is set `true` even
+//! without an RQN — macro-generated impls leave exactly such atoms.
 //!
 //! `cargo public-api` names items by their public *re-export* path (following
 //! `pub use`, applying `as` renames), whereas atom RQNs use the *definition*
 //! path. To reconcile them, crate-root `pub use` declarations are parsed into an
 //! `alias -> definition_path` map and each public name is rewritten to its
 //! definition form before matching (see `collect_reexport_aliases` /
-//! `expand_public_names_with_aliases`).
+//! [`PublicNameForms::expand_with_aliases`]). The rewrite is additive: it only
+//! *adds* definition-form candidates, and a match still requires a real atom
+//! carrying that RQN. Given a correctly resolved crate root (see
+//! `resolve_crate_root_file`), the added candidates are genuine public
+//! re-exports, so they cannot mislabel a private atom.
 //!
-//! The rewrite is additive: it only *adds* definition-form candidates, and a
-//! match still requires a real atom carrying that RQN. Given a correctly
-//! resolved crate root (see `resolve_crate_root_file`), the added candidates are
-//! genuine public re-exports, so they cannot mislabel a private atom. If the
-//! wrong crate root were parsed, that guarantee would not hold — which is why
-//! root resolution is package-name checked.
+//! Matching runs in additive passes over per-entry candidate forms
+//! (`PublicNameForms`): the `pub use` rewrite, inherited-default-trait-method
+//! resolution, RQN matching, then `resolve_unmatched_to_atoms` for entries no
+//! atom name matched (macro-generated and blanket impls), which marks the
+//! implementing atom directly. Every pass is additive — an entry can gain
+//! candidate forms but never lose one — no pass resolves an ambiguity, and
+//! the resolution passes act only on still-unmatched entries. The canonical
+//! specification of the pass
+//! sequence and its guards is KB property P11
+//! (`kb/engineering/properties.md`); `PublicNameForms` and
+//! `resolve_unmatched_to_atoms` document the pass-local details.
 
 use crate::{AtomWithLines, ProbeError, ProbeResult};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use syn::spanned::Spanned;
 
 const PUBLIC_API_CACHE_FILE: &str = "public-api.txt";
 const DATA_DIR: &str = "data";
@@ -377,34 +390,22 @@ fn unwrap_ref_type(s: &str) -> String {
 /// Set `is-public-api` for all atoms that have a `rust-qualified-name`.
 ///
 /// For each atom:
-/// - If `rust-qualified-name` is `None` (external stubs) → leave `is-public-api` unchanged
+/// - If `rust-qualified-name` is `None` → leave `is-public-api` unchanged
 /// - If RQN (or its normalized form) is in `public_names` → `is-public-api = Some(true)`
 /// - Otherwise → `is-public-api = Some(false)`
-///
-/// Returns `(set_true, set_false)` counts.
 pub fn enrich_atoms_with_public_api(
     atoms: &mut BTreeMap<String, AtomWithLines>,
     public_names: &HashSet<String>,
-) -> (usize, usize) {
-    let mut set_true = 0;
-    let mut set_false = 0;
-
+) {
     for atom in atoms.values_mut() {
         let Some(rqn) = &atom.rust_qualified_name else {
             continue;
         };
 
         let normalized = normalize_rqn_for_public_api(rqn);
-        if public_names.contains(rqn) || public_names.contains(&normalized) {
-            atom.is_public_api = Some(true);
-            set_true += 1;
-        } else {
-            atom.is_public_api = Some(false);
-            set_false += 1;
-        }
+        let is_public = public_names.contains(rqn) || public_names.contains(&normalized);
+        atom.is_public_api = Some(is_public);
     }
-
-    (set_true, set_false)
 }
 
 // =============================================================================
@@ -453,7 +454,7 @@ fn resolve_crate_root_file(project_path: &Path, crate_name: &str) -> Option<Path
 /// `[package]`, or none of the candidate files exist — so a workspace root (or a
 /// manifest for a different crate) falls through to the `cargo metadata` path.
 fn crate_root_from_manifest(project_path: &Path, crate_name: &str) -> Option<PathBuf> {
-    let normalize = |s: &str| s.replace('-', "_");
+    let normalize = normalize_crate_name;
     let manifest = std::fs::read_to_string(project_path.join("Cargo.toml")).ok()?;
     let table: toml::Table = manifest.parse().ok()?;
 
@@ -491,7 +492,7 @@ fn crate_root_from_manifest(project_path: &Path, crate_name: &str) -> Option<Pat
 fn lib_src_path_from_metadata(json: &str, crate_name: &str) -> Option<PathBuf> {
     const LIB_KINDS: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"];
 
-    let normalize = |s: &str| s.replace('-', "_");
+    let normalize = normalize_crate_name;
     let wanted = normalize(crate_name);
 
     let root: serde_json::Value = serde_json::from_str(json).ok()?;
@@ -542,7 +543,8 @@ fn lib_src_path_from_metadata(json: &str, crate_name: &str) -> Option<PathBuf> {
 /// I/O and parse errors yield an empty map (graceful no-op).
 pub fn collect_reexport_aliases(project_path: &Path, crate_name: &str) -> BTreeMap<String, String> {
     let mut aliases = BTreeMap::new();
-    let crate_name = crate_name.replace('-', "_");
+    let mut conflicting: BTreeSet<String> = BTreeSet::new();
+    let crate_name = normalize_crate_name(crate_name);
 
     let Some(root) = resolve_crate_root_file(project_path, &crate_name) else {
         return aliases;
@@ -568,11 +570,23 @@ pub fn collect_reexport_aliases(project_path: &Path, crate_name: &str) -> BTreeM
         collect_use_tree(&item_use.tree, Vec::new(), &mut leaves);
         for (alias, segments) in leaves {
             if let Some(def) = use_path_to_def(&segments, &crate_name) {
-                aliases.insert(alias, def);
+                // Ambiguity skips: an alias claimed for two different
+                // definitions resolves to neither.
+                match aliases.get(&alias) {
+                    Some(prev) if *prev != def => {
+                        conflicting.insert(alias);
+                    }
+                    _ => {
+                        aliases.insert(alias, def);
+                    }
+                }
             }
         }
     }
 
+    for alias in conflicting {
+        aliases.remove(&alias);
+    }
     aliases
 }
 
@@ -628,29 +642,6 @@ fn use_path_to_def(segments: &[String], crate_name: &str) -> Option<String> {
     Some(segments.join("::"))
 }
 
-/// Expand a set of public-API names with their re-export definition forms.
-///
-/// For each public name whose first path segment after the crate is a known
-/// re-export alias, add the rewritten definition-path form so it can join with
-/// an atom's definition-derived `rust-qualified-name`. Original names are kept.
-pub fn expand_public_names_with_aliases(
-    public_names: &HashSet<String>,
-    crate_name: &str,
-    aliases: &BTreeMap<String, String>,
-) -> HashSet<String> {
-    let mut expanded = public_names.clone();
-    if aliases.is_empty() {
-        return expanded;
-    }
-    let crate_name = crate_name.replace('-', "_");
-    for name in public_names {
-        if let Some(def) = rewrite_public_name(name, &crate_name, aliases) {
-            expanded.insert(def);
-        }
-    }
-    expanded
-}
-
 /// Rewrite a single public name to its definition form via the alias map.
 ///
 /// `spqr::ChainParams::default` + `{ChainParams -> spqr::chain::ChainParams}`
@@ -672,6 +663,452 @@ fn rewrite_public_name(
         Some(t) => Some(format!("{def}::{t}")),
         None => Some(def.clone()),
     }
+}
+
+// =============================================================================
+// Public-name candidate forms
+// =============================================================================
+
+/// Candidate match forms for each `cargo public-api` entry.
+///
+/// Key = the entry exactly as `cargo public-api` reported it; value = every name
+/// that entry may be matched under (always including the entry itself). The
+/// expansion passes are strictly additive, so an entry can gain candidates but
+/// never lose its original name.
+///
+/// Keeping the per-entry grouping (rather than one flat set) is what makes
+/// *entry-level* reporting possible: an entry is "matched" when at least one of
+/// its forms names a real atom. That is a different metric from the count of
+/// atoms marked `is-public-api: true` (several entries can share one atom, e.g.
+/// macro-generated types, and one atom can be reached by several forms).
+#[derive(Debug)]
+pub(crate) struct PublicNameForms {
+    forms: BTreeMap<String, BTreeSet<String>>,
+    /// Entries resolved straight to an implementing atom (see
+    /// [`PublicNameForms::resolve_unmatched_to_atoms`]) rather than by name.
+    resolved: BTreeSet<String>,
+}
+
+impl PublicNameForms {
+    /// Start with each entry mapping to just itself.
+    pub(crate) fn new(entries: &HashSet<String>) -> Self {
+        Self {
+            forms: entries
+                .iter()
+                .map(|e| (e.clone(), BTreeSet::from([e.clone()])))
+                .collect(),
+            resolved: BTreeSet::new(),
+        }
+    }
+
+    /// Number of `cargo public-api` entries tracked.
+    pub(crate) fn len(&self) -> usize {
+        self.forms.len()
+    }
+
+    /// All candidate forms of all entries, flattened for the matcher.
+    pub(crate) fn flat(&self) -> HashSet<String> {
+        self.forms.values().flatten().cloned().collect()
+    }
+
+    /// Number of entries backed by a real atom: at least one form naming one
+    /// (`atom_names` from [`atom_candidate_names`]), or a direct resolution to
+    /// an implementing atom.
+    pub(crate) fn matched_count(&self, atom_names: &HashSet<String>) -> usize {
+        self.forms
+            .iter()
+            .filter(|(entry, forms)| {
+                forms.iter().any(|f| atom_names.contains(f)) || self.resolved.contains(*entry)
+            })
+            .count()
+    }
+
+    /// Add re-export definition forms (see [`collect_reexport_aliases`]).
+    pub(crate) fn expand_with_aliases(
+        &mut self,
+        crate_name: &str,
+        aliases: &BTreeMap<String, String>,
+    ) {
+        if aliases.is_empty() {
+            return;
+        }
+        let crate_name = normalize_crate_name(crate_name);
+        let additions: Vec<(String, String)> = self
+            .forms
+            .keys()
+            .filter_map(|entry| {
+                rewrite_public_name(entry, &crate_name, aliases).map(|def| (entry.clone(), def))
+            })
+            .collect();
+        for (entry, def) in additions {
+            self.add(&entry, def);
+        }
+    }
+
+    /// Add inherited-default-trait-method forms.
+    ///
+    /// A `cargo public-api` entry `path::Type::method` where `Type` never
+    /// defines `method` itself is an *inherited* default: the body a public
+    /// caller reaches lives in the trait, and that trait's atom is the only
+    /// atom there is. This pass adds that trait atom's RQN as a candidate form
+    /// for the entry, under uniqueness guards (see the module docs).
+    pub(crate) fn expand_with_trait_defaults(
+        &mut self,
+        atoms: &BTreeMap<String, AtomWithLines>,
+        atom_names: &HashSet<String>,
+        crate_name: &str,
+    ) {
+        // Impl-chain truth straight from the atom keys, whose SCIP descriptors
+        // embed `impl#[SelfType][Trait]method()`. Stubs count: an impl-evidence
+        // key with no body still proves `Type: Trait`, and a key for
+        // `Type::method` still proves an override. Only the analyzed crate's
+        // keys are evidence: a dependency's impls neither prove nor veto.
+        let mut impl_traits: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut overridden: HashSet<(String, String)> = HashSet::new();
+        for (_, (self_type, trait_name, method)) in crate_impl_keys(atoms, crate_name) {
+            overridden.insert((self_type.clone(), method));
+            if let Some(trait_name) = trait_name {
+                impl_traits.entry(self_type).or_default().insert(trait_name);
+            }
+        }
+
+        // (owner, method) -> distinct RQNs of atoms whose RQN ends `owner::method`.
+        // Needs no crate scoping: the public-output guard below already rejects
+        // any RQN absent from this crate's `cargo public-api` surface.
+        let mut trait_atoms: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
+        for atom in atoms.values() {
+            let Some(rqn) = &atom.rust_qualified_name else {
+                continue;
+            };
+            if let Some((owner, method)) = split_last_two(rqn) {
+                trait_atoms
+                    .entry((owner.to_string(), method.to_string()))
+                    .or_default()
+                    .insert(rqn.clone());
+            }
+        }
+
+        let public = self.flat();
+        let mut additions = Vec::new();
+        for (entry, forms) in &self.forms {
+            if forms.iter().any(|f| atom_names.contains(f)) {
+                continue; // already matched — leave it alone
+            }
+            let Some((self_type, method)) = split_last_two(entry) else {
+                continue;
+            };
+            if overridden.contains(&(self_type.to_string(), method.to_string())) {
+                continue; // the type defines it itself
+            }
+            let Some(traits) = impl_traits.get(self_type) else {
+                continue; // no impl evidence for this type
+            };
+            let candidates: Vec<&BTreeSet<String>> = traits
+                .iter()
+                .filter_map(|t| trait_atoms.get(&(t.clone(), method.to_string())))
+                .collect();
+            // Ambiguity always skips: several traits could provide `method`, or
+            // several atoms answer to the same `Trait::method`.
+            let [rqns] = candidates[..] else {
+                continue;
+            };
+            if rqns.len() != 1 {
+                continue;
+            }
+            let Some(rqn) = rqns.first() else {
+                continue;
+            };
+            // The default body must itself be public API.
+            if !public.contains(rqn) && !public.contains(&normalize_rqn_for_public_api(rqn)) {
+                continue;
+            }
+            additions.push((entry.clone(), rqn.clone()));
+        }
+        for (entry, form) in additions {
+            self.add(&entry, form);
+        }
+    }
+
+    /// Mark the atom that *implements* each still-unmatched entry.
+    ///
+    /// The name-based passes can only match an entry to an atom carrying that
+    /// name. Some public functions have no such atom: macro-generated impls
+    /// yield bodyless impl-evidence atoms with no RQN, and a blanket impl's
+    /// atom is named after the impl's generic parameter, not the trait. Those
+    /// atoms are nonetheless the crate's only atom for the entry, so a public
+    /// entry that resolves to exactly one of them proves it public.
+    ///
+    /// Resolution is by SCIP impl descriptor from the atom key, restricted to
+    /// `crate_name`'s own atoms, and only for entries no name matched. A
+    /// qualified entry's module segments must also equal the atom key's module
+    /// path (see [`key_module_path`]):
+    ///
+    /// - `path::Type::method` → the crate's single `impl#[Type][…]method()`
+    ///   atom. A bare two-segment entry (`T::method`, printed by
+    ///   `cargo public-api` for a blanket impl) additionally requires the
+    ///   syn-verified blanket check, since a concrete type really named `T`
+    ///   must not be resolved this way.
+    /// - `path::Trait::method` → the crate's single `impl#[…][Trait]method()`
+    ///   atom, always syn-verified as a blanket impl (`impl<T> Trait for T`),
+    ///   whose one body serves every implementing type.
+    ///
+    /// Ambiguity (zero or several candidate atoms) always skips. Returns the
+    /// number of atoms whose `is-public-api` changed to `true`.
+    pub(crate) fn resolve_unmatched_to_atoms(
+        &mut self,
+        atoms: &mut BTreeMap<String, AtomWithLines>,
+        atom_names: &HashSet<String>,
+        crate_name: &str,
+        project_path: &Path,
+    ) -> usize {
+        let mut by_self: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+        let mut by_trait: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+        for (key, (self_type, trait_name, method)) in crate_impl_keys(atoms, crate_name) {
+            by_self
+                .entry((self_type, method.clone()))
+                .or_default()
+                .push(key.clone());
+            if let Some(trait_name) = trait_name {
+                by_trait
+                    .entry((trait_name, method))
+                    .or_default()
+                    .push(key.clone());
+            }
+        }
+
+        // The same source file backs many candidate atoms; parse it once.
+        let mut parsed: BTreeMap<PathBuf, Option<syn::File>> = BTreeMap::new();
+        let mut resolutions: Vec<(String, String)> = Vec::new();
+        for (entry, forms) in &self.forms {
+            if forms.iter().any(|f| atom_names.contains(f)) {
+                continue; // already matched by name
+            }
+            let Some((self_type, method)) = split_last_two(entry) else {
+                continue;
+            };
+            let index_key = (self_type.to_string(), method.to_string());
+            // `T::method`: no module path, so the receiver may be a generic param.
+            let bare = entry.split("::").count() < 3;
+
+            // The entry's module segments (between crate and type/trait) must
+            // equal the atom key's module path: a lone `bar::Table::new` atom
+            // must not answer for a public `foo::Table::new`. Bare entries have
+            // no path; the blanket check guards them instead.
+            let entry_mods: Option<String> = (!bare).then(|| {
+                let segs: Vec<&str> = entry.split("::").collect();
+                segs[1..segs.len() - 2].join("/")
+            });
+            let path_ok = |key: &str| match &entry_mods {
+                None => true,
+                Some(mods) => key_module_path(key) == Some(mods.as_str()),
+            };
+            let mut blanket = |key: &str| {
+                atoms
+                    .get(key)
+                    .is_some_and(|a| is_blanket_impl_atom(a, project_path, &mut parsed))
+            };
+            if let [key] = by_self.get(&index_key).map_or(&[][..], Vec::as_slice) {
+                if path_ok(key) && (!bare || blanket(key)) {
+                    resolutions.push((entry.clone(), key.clone()));
+                    continue;
+                }
+            }
+            if let [key] = by_trait.get(&index_key).map_or(&[][..], Vec::as_slice) {
+                if path_ok(key) && blanket(key) {
+                    resolutions.push((entry.clone(), key.clone()));
+                }
+            }
+        }
+
+        let mut marked = 0;
+        for (entry, key) in resolutions {
+            if let Some(atom) = atoms.get_mut(&key) {
+                if atom.is_public_api != Some(true) {
+                    atom.is_public_api = Some(true);
+                    marked += 1;
+                }
+            }
+            self.resolved.insert(entry);
+        }
+        marked
+    }
+
+    fn add(&mut self, entry: &str, form: String) {
+        if let Some(forms) = self.forms.get_mut(entry) {
+            forms.insert(form);
+        }
+    }
+}
+
+/// Cargo package names use `-`; Rust paths and SCIP atom keys use `_`.
+fn normalize_crate_name(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+/// The analyzed crate's own impl descriptors, parsed from the atom keys:
+/// `(key, (self_type, trait, method))`. Dependency keys are excluded — both
+/// resolution passes may only take impl evidence from `crate_name`'s atoms.
+fn crate_impl_keys<'a>(
+    atoms: &'a BTreeMap<String, AtomWithLines>,
+    crate_name: &str,
+) -> impl Iterator<Item = (&'a String, (String, Option<String>, String))> {
+    let crate_name = normalize_crate_name(crate_name);
+    atoms.keys().filter_map(move |key| {
+        if key_crate(key).map(normalize_crate_name).as_deref() != Some(&crate_name) {
+            return None;
+        }
+        Some((key, parse_impl_key(key)?))
+    })
+}
+
+/// The crate segment of an atom key (`probe:<crate>/<version>/…`).
+fn key_crate(key: &str) -> Option<&str> {
+    key.strip_prefix("probe:")?.split('/').next()
+}
+
+/// The module path of an atom key: the segments between `probe:<crate>/<version>/`
+/// and the final descriptor segment. Empty for crate-root items; multi-segment
+/// (`backend/serial/u64/field`) stays `/`-joined.
+///
+/// The boundary is the *last `/` at top level*: `/` also occurs inside the
+/// descriptor's bracketed generics (`impl<[u8;/{const}]>#…`) and backticked
+/// types (`` [`&'a/Table`] ``), which must not count. A key this scan misparses
+/// can only fail the caller's equality check and skip — never resolve wrongly.
+fn key_module_path(key: &str) -> Option<&str> {
+    let rest = key.strip_prefix("probe:")?;
+    let rest = &rest[rest.find('/')? + 1..]; // past <crate>/
+    let tail = &rest[rest.find('/')? + 1..]; // past <version>/
+    let mut depth = 0usize;
+    let mut in_backtick = false;
+    let mut last_slash = None;
+    for (i, c) in tail.char_indices() {
+        match c {
+            '`' => in_backtick = !in_backtick,
+            '[' | '<' | '{' | '(' if !in_backtick => depth += 1,
+            ']' | '>' | '}' | ')' if !in_backtick => depth = depth.saturating_sub(1),
+            '/' if !in_backtick && depth == 0 => last_slash = Some(i),
+            _ => {}
+        }
+    }
+    Some(last_slash.map_or("", |i| &tail[..i]))
+}
+
+/// Whether the atom's enclosing `impl` implements its trait for one of the
+/// impl's own generic parameters (`impl<T> Trait for T`) — a blanket impl.
+///
+/// Verified with syn against the real source, because the atom key alone cannot
+/// tell a generic parameter named `T` from a concrete type named `T`. An atom
+/// with no usable span (a bodyless stub) is never treated as blanket. Parsed
+/// files are memoized in `parsed` (`None` records an unreadable/unparsable
+/// file, so it is not retried).
+fn is_blanket_impl_atom(
+    atom: &AtomWithLines,
+    project_path: &Path,
+    parsed: &mut BTreeMap<PathBuf, Option<syn::File>>,
+) -> bool {
+    let (start, end) = (atom.code_text.lines_start, atom.code_text.lines_end);
+    if start == 0 || end < start {
+        return false;
+    }
+    let path = project_path.join(&atom.code_path);
+    let file = parsed.entry(path).or_insert_with_key(|p| {
+        let src = std::fs::read_to_string(p).ok()?;
+        syn::parse_file(&src).ok()
+    });
+    let Some(file) = file else {
+        return false;
+    };
+    let mut impls = Vec::new();
+    collect_impls(&file.items, &mut impls);
+    impls.into_iter().any(|imp| {
+        let span = imp.span();
+        span.start().line <= start && end <= span.end().line && impl_self_is_generic_param(imp)
+    })
+}
+
+/// Collect `impl` blocks, descending into inline `mod` bodies.
+fn collect_impls<'a>(items: &'a [syn::Item], out: &mut Vec<&'a syn::ItemImpl>) {
+    for item in items {
+        match item {
+            syn::Item::Impl(imp) => out.push(imp),
+            syn::Item::Mod(m) => {
+                if let Some((_, inner)) = &m.content {
+                    collect_impls(inner, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether an impl's self type is one of the impl's own type parameters.
+fn impl_self_is_generic_param(imp: &syn::ItemImpl) -> bool {
+    if imp.trait_.is_none() {
+        return false;
+    }
+    let syn::Type::Path(path) = &*imp.self_ty else {
+        return false;
+    };
+    let Some(ident) = path.path.get_ident() else {
+        return false;
+    };
+    imp.generics.type_params().any(|p| p.ident == *ident)
+}
+
+/// Every name an atom can be matched under: its RQN and the normalized form.
+pub(crate) fn atom_candidate_names(atoms: &BTreeMap<String, AtomWithLines>) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for atom in atoms.values() {
+        if let Some(rqn) = &atom.rust_qualified_name {
+            names.insert(rqn.clone());
+            names.insert(normalize_rqn_for_public_api(rqn));
+        }
+    }
+    names
+}
+
+/// Split a `::`-path into `(second_to_last, last)` segments.
+fn split_last_two(path: &str) -> Option<(&str, &str)> {
+    let (head, last) = path.rsplit_once("::")?;
+    let owner = head.rsplit("::").next()?;
+    if owner.is_empty() || last.is_empty() {
+        None
+    } else {
+        Some((owner, last))
+    }
+}
+
+/// Parse an atom key's impl descriptor into `(self_type, trait, method)`.
+///
+/// `…/edwards/impl#[EdwardsBasepointTable][BasepointTable]basepoint()` yields
+/// `("EdwardsBasepointTable", Some("BasepointTable"), "basepoint")`; an inherent
+/// impl (`impl#[EdwardsPoint]mul_base_clamped()`) yields `None` for the trait.
+/// Returns `None` for keys with no impl descriptor (free functions, trait-side
+/// declarations).
+fn parse_impl_key(key: &str) -> Option<(String, Option<String>, String)> {
+    let start = key.rfind("#[")?;
+    let rest = &key[start + 1..]; // starts at the '['
+    let self_type = strip_lifetime(&crate::extract_bracket_type(rest)?);
+    let after_self = &rest[rest.find(']')? + 1..];
+    let (trait_name, tail) = if after_self.starts_with('[') {
+        let t = strip_lifetime(&crate::extract_bracket_type(after_self)?);
+        (Some(t), &after_self[after_self.find(']')? + 1..])
+    } else {
+        (None, after_self)
+    };
+    let method = tail.strip_suffix("()")?;
+    if self_type.is_empty() || method.is_empty() {
+        None
+    } else {
+        Some((self_type, trait_name, method.to_string()))
+    }
+}
+
+/// Drop a leading lifetime from a SCIP bracket type (`'a/Type` → `Type`).
+fn strip_lifetime(t: &str) -> String {
+    t.strip_prefix('\'')
+        .and_then(|rest| rest.split_once('/'))
+        .map_or_else(|| t.to_string(), |(_, ty)| ty.to_string())
 }
 
 // =============================================================================
@@ -906,10 +1343,8 @@ pub fn my_crate::real_function()
         let public_names: HashSet<String> =
             ["c::m::public_fn"].iter().map(|s| s.to_string()).collect();
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &public_names);
+        enrich_atoms_with_public_api(&mut atoms, &public_names);
 
-        assert_eq!(set_true, 1);
-        assert_eq!(set_false, 1);
         assert_eq!(atoms["probe:c/1.0/m/public_fn()"].is_public_api, Some(true));
         assert_eq!(
             atoms["probe:c/1.0/m/private_fn()"].is_public_api,
@@ -951,10 +1386,8 @@ pub fn my_crate::real_function()
         .map(|s| s.to_string())
         .collect();
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &public_names);
+        enrich_atoms_with_public_api(&mut atoms, &public_names);
 
-        assert_eq!(set_true, 2);
-        assert_eq!(set_false, 0);
         assert_eq!(
             atoms["probe:c/1.0/edwards/compress()"].is_public_api,
             Some(true)
@@ -966,6 +1399,207 @@ pub fn my_crate::real_function()
     }
 
     // ---- re-export alias resolution ----
+
+    // ---- PublicNameForms::resolve_unmatched_to_atoms ----
+
+    fn stub_atom(rqn: Option<&str>, path: &str, lines: (usize, usize)) -> AtomWithLines {
+        let mut a = make_atom("f", path, rqn);
+        a.code_text.lines_start = lines.0;
+        a.code_text.lines_end = lines.1;
+        a
+    }
+
+    /// A macro-generated impl leaves a bodyless atom with no RQN — the only atom
+    /// the crate has for that public function, so the entry marks it public.
+    #[test]
+    fn test_resolve_marks_impl_atom_without_rqn() {
+        let mut atoms = BTreeMap::from([(
+            "probe:c/1.0/edwards/impl#[Table][BasepointTable]create()".to_string(),
+            stub_atom(None, "", (0, 0)),
+        )]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["c::edwards::Table::create"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", Path::new("."));
+
+        assert_eq!(marked, 1);
+        assert_eq!(forms.matched_count(&names), 1);
+        assert_eq!(
+            atoms.values().next().unwrap().is_public_api,
+            Some(true),
+            "the implementing atom carries the tag"
+        );
+    }
+
+    /// Two atoms answer to the same `Type::method` — cannot tell which, so skip.
+    #[test]
+    fn test_resolve_skips_ambiguous_impl_atoms() {
+        let mut atoms = BTreeMap::from([
+            (
+                "probe:c/1.0/a/impl#[Table][BasepointTable]create()".to_string(),
+                stub_atom(None, "", (0, 0)),
+            ),
+            (
+                "probe:c/1.0/b/impl#[Table][BasepointTable]create()".to_string(),
+                stub_atom(None, "", (0, 0)),
+            ),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["c::edwards::Table::create"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", Path::new("."));
+
+        assert_eq!(marked, 0);
+        assert_eq!(forms.matched_count(&names), 0);
+        assert!(atoms.values().all(|a| a.is_public_api.is_none()));
+    }
+
+    /// Another crate's atom is never marked from this crate's public API.
+    #[test]
+    fn test_resolve_ignores_other_crates_atoms() {
+        let mut atoms = BTreeMap::from([(
+            "probe:other/1.0/edwards/impl#[Table][BasepointTable]create()".to_string(),
+            stub_atom(None, "", (0, 0)),
+        )]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["c::edwards::Table::create"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", Path::new("."));
+
+        assert_eq!(marked, 0);
+        assert!(atoms.values().all(|a| a.is_public_api.is_none()));
+    }
+
+    const BLANKET_SRC: &str = "\
+pub trait IsIdentity {
+    fn is_identity(&self) -> bool;
+}
+impl<T> IsIdentity for T
+where
+    T: Default,
+{
+    fn is_identity(&self) -> bool {
+        true
+    }
+}
+";
+
+    const CONCRETE_T_SRC: &str = "\
+pub trait IsIdentity {
+    fn is_identity(&self) -> bool;
+}
+pub struct T;
+impl IsIdentity for T {
+    fn is_identity(&self) -> bool {
+        true
+    }
+}
+";
+
+    /// `pub fn T::is_identity(...)`: the bare receiver is the blanket impl's
+    /// generic parameter, syn-verified against the source.
+    #[test]
+    fn test_resolve_blanket_impl_generic_self_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        write_crate(dir.path(), "c", "src/traits.rs", BLANKET_SRC);
+        let mut atoms = BTreeMap::from([(
+            "probe:c/1.0/traits/&T#impl<bool>#[T][IsIdentity]is_identity()".to_string(),
+            stub_atom(Some("c::traits::T::is_identity"), "src/traits.rs", (8, 10)),
+        )]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["T::is_identity"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", dir.path());
+
+        assert_eq!(marked, 1);
+        assert_eq!(atoms.values().next().unwrap().is_public_api, Some(true));
+    }
+
+    /// Same atom key, but `T` is a concrete struct — must not be resolved from
+    /// the bare `T::method` form.
+    #[test]
+    fn test_resolve_blanket_impl_concrete_self_type_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        write_crate(dir.path(), "c", "src/traits.rs", CONCRETE_T_SRC);
+        let mut atoms = BTreeMap::from([(
+            "probe:c/1.0/traits/&T#impl<bool>#[T][IsIdentity]is_identity()".to_string(),
+            stub_atom(Some("c::traits::T::is_identity"), "src/traits.rs", (6, 8)),
+        )]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["T::is_identity"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", dir.path());
+
+        assert_eq!(marked, 0, "a concrete type named T is not a blanket impl");
+        assert_eq!(atoms.values().next().unwrap().is_public_api, None);
+    }
+
+    /// A trait-level entry resolves to the blanket impl's atom.
+    #[test]
+    fn test_resolve_trait_level_entry_via_blanket_impl() {
+        let dir = tempfile::tempdir().unwrap();
+        write_crate(dir.path(), "c", "src/traits.rs", BLANKET_SRC);
+        let mut atoms = BTreeMap::from([(
+            "probe:c/1.0/traits/&T#impl<bool>#[T][IsIdentity]is_identity()".to_string(),
+            stub_atom(Some("c::traits::T::is_identity"), "src/traits.rs", (8, 10)),
+        )]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["c::traits::IsIdentity::is_identity"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", dir.path());
+
+        assert_eq!(marked, 1);
+        assert_eq!(forms.matched_count(&names), 1);
+    }
+
+    /// A lone atom in another module must not answer for the entry: the
+    /// entry's module segments and the key's module path have to agree.
+    #[test]
+    fn test_resolve_module_path_mismatch_skipped() {
+        let mut atoms = BTreeMap::from([(
+            "probe:c/1.0/bar/impl#[Table][BasepointTable]create()".to_string(),
+            stub_atom(None, "", (0, 0)),
+        )]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&["c::foo::Table::create"]));
+
+        let marked = forms.resolve_unmatched_to_atoms(&mut atoms, &names, "c", Path::new("."));
+
+        assert_eq!(marked, 0);
+        assert!(atoms.values().all(|a| a.is_public_api.is_none()));
+    }
+
+    #[test]
+    fn test_key_module_path_shapes() {
+        // Plain and multi-segment paths.
+        assert_eq!(
+            key_module_path("probe:c/1.0/edwards/impl#[Table][BasepointTable]create()"),
+            Some("edwards")
+        );
+        assert_eq!(
+            key_module_path("probe:c/1.0/backend/serial/u64/field/&F#impl<X>#[F][Debug]fmt()"),
+            Some("backend/serial/u64/field")
+        );
+        // Crate-root item: empty module path.
+        assert_eq!(
+            key_module_path("probe:c/1.0/impl<&Formatter<'_>>#[DalekBits][Display]fmt()"),
+            Some("")
+        );
+        // Receiver-decorated descriptor with no `/impl#` to search for.
+        assert_eq!(
+            key_module_path("probe:c/1.0/traits/&T#impl<bool>#[T][IsIdentity]is_identity()"),
+            Some("traits")
+        );
+        // `/` inside bracketed generics and backticked types must not count.
+        assert_eq!(
+            key_module_path("probe:c/1.0/edwards/impl<[u8;/{const}]>#[Point]mul_base_clamped()"),
+            Some("edwards")
+        );
+        assert_eq!(
+            key_module_path("probe:c/1.0/edwards/impl#[`&'a/Table`][`Mul<&'b/Scalar>`]mul()"),
+            Some("edwards")
+        );
+    }
 
     /// Write a minimal single-crate project (`Cargo.toml` + `src/<file>`) into
     /// `dir` so `resolve_crate_root_file` takes the manifest fast path.
@@ -1028,6 +1662,30 @@ pub fn top() {}
         assert!(!aliases.contains_key("Hidden"));
         assert!(!aliases.contains_key("Gated"));
         assert_eq!(aliases.len(), 5);
+    }
+
+    /// An alias claimed for two different definitions resolves to neither.
+    #[test]
+    fn test_collect_reexport_aliases_conflicting_alias_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        write_crate(
+            dir.path(),
+            "spqr",
+            "src/lib.rs",
+            "\
+pub use crate::a::Foo;
+pub use crate::b::Foo;
+pub use crate::c::Bar;
+",
+        );
+
+        let aliases = collect_reexport_aliases(dir.path(), "spqr");
+
+        assert!(
+            !aliases.contains_key("Foo"),
+            "conflicting alias must be dropped, not last-write-win"
+        );
+        assert_eq!(aliases.get("Bar").map(String::as_str), Some("spqr::c::Bar"));
     }
 
     #[test]
@@ -1104,6 +1762,18 @@ pub fn top() {}
         assert!(aliases.is_empty());
     }
 
+    /// Test-only convenience: run the `pub use` expansion pass and flatten.
+    /// Production code drives `PublicNameForms` directly (`extract.rs`).
+    fn expanded_with_aliases(
+        public: &HashSet<String>,
+        crate_name: &str,
+        aliases: &BTreeMap<String, String>,
+    ) -> HashSet<String> {
+        let mut forms = PublicNameForms::new(public);
+        forms.expand_with_aliases(crate_name, aliases);
+        forms.flat()
+    }
+
     #[test]
     fn test_expand_module_lift() {
         let mut aliases = BTreeMap::new();
@@ -1116,7 +1786,7 @@ pub fn top() {}
             .map(|s| s.to_string())
             .collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert!(expanded.contains("spqr::chain::ChainParams::default"));
         assert!(expanded.contains("spqr::ChainParams::default"));
@@ -1134,7 +1804,7 @@ pub fn top() {}
             .map(|s| s.to_string())
             .collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert!(expanded.contains("spqr::serialize::Error::from"));
     }
@@ -1147,7 +1817,7 @@ pub fn top() {}
             .map(|s| s.to_string())
             .collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert_eq!(expanded, public);
     }
@@ -1162,7 +1832,7 @@ pub fn top() {}
         // `send` is not an alias, so no rewritten form is added.
         let public: HashSet<String> = ["spqr::send"].iter().map(|s| s.to_string()).collect();
 
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         assert_eq!(expanded.len(), 1);
         assert!(expanded.contains("spqr::send"));
@@ -1272,7 +1942,7 @@ pub fn top() {}
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         let mut atoms = BTreeMap::new();
         atoms.insert(
@@ -1284,10 +1954,8 @@ pub fn top() {}
             ),
         );
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &expanded);
+        enrich_atoms_with_public_api(&mut atoms, &expanded);
 
-        assert_eq!(set_true, 1);
-        assert_eq!(set_false, 0);
         assert_eq!(
             atoms["probe:spqr/1.0/chain/default()"].is_public_api,
             Some(true)
@@ -1307,7 +1975,7 @@ pub fn top() {}
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let expanded = expand_public_names_with_aliases(&public, "spqr", &aliases);
+        let expanded = expanded_with_aliases(&public, "spqr", &aliases);
 
         // Only a hand-written atom in a different module exists; no proto atom.
         let mut atoms = BTreeMap::new();
@@ -1316,14 +1984,236 @@ pub fn top() {}
             make_atom("switch", "src/lib.rs", Some("spqr::Direction::switch")),
         );
 
-        let (set_true, set_false) = enrich_atoms_with_public_api(&mut atoms, &expanded);
+        enrich_atoms_with_public_api(&mut atoms, &expanded);
 
-        assert_eq!(set_true, 0);
-        assert_eq!(set_false, 1);
         assert_eq!(
             atoms["probe:spqr/1.0/lib/switch()"].is_public_api,
             Some(false)
         );
+    }
+
+    #[test]
+    fn test_parse_impl_key_descriptor_forms() {
+        assert_eq!(
+            parse_impl_key("probe:c/1.0/edwards/impl#[Table][BasepointTable]basepoint()"),
+            Some((
+                "Table".to_string(),
+                Some("BasepointTable".to_string()),
+                "basepoint".to_string()
+            ))
+        );
+        // Inherent impl: no trait segment.
+        assert_eq!(
+            parse_impl_key("probe:c/1.0/edwards/impl<[u8;/{const}]>#[Point]mul_base_clamped()"),
+            Some(("Point".to_string(), None, "mul_base_clamped".to_string()))
+        );
+        // Backticks and the `'a/` lifetime form are stripped from the self type.
+        assert_eq!(
+            parse_impl_key("probe:c/1.0/edwards/impl#[`&\'a/Table`][`Mul<&\'b/Scalar>`]mul()")
+                .map(|(t, _, m)| (t, m)),
+            Some(("Table".to_string(), "mul".to_string()))
+        );
+        // A receiver-prefixed key still parses from its impl descriptor.
+        assert_eq!(
+            parse_impl_key("probe:c/1.0/traits/&T#impl<bool>#[T][IsIdentity]is_identity()"),
+            Some((
+                "T".to_string(),
+                Some("IsIdentity".to_string()),
+                "is_identity".to_string()
+            ))
+        );
+        // Trait-side declarations and free functions carry no impl descriptor.
+        assert_eq!(
+            parse_impl_key("probe:c/1.0/traits/BasepointTable#mul_base()"),
+            None
+        );
+        assert_eq!(parse_impl_key("probe:c/1.0/edwards/free_fn()"), None);
+    }
+
+    // ---- PublicNameForms: entry-level bookkeeping ----
+
+    fn atom_map(entries: &[(&str, Option<&str>)]) -> BTreeMap<String, AtomWithLines> {
+        entries
+            .iter()
+            .map(|(key, rqn)| ((*key).to_string(), make_atom("f", "src/lib.rs", *rqn)))
+            .collect()
+    }
+
+    fn public(entries: &[&str]) -> HashSet<String> {
+        entries.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    /// Impl evidence + no override + one public trait body ⇒ entry resolves to
+    /// the trait atom.
+    #[test]
+    fn test_trait_default_inherited_by_concrete_type() {
+        let atoms = atom_map(&[
+            (
+                "probe:c/1.0/edwards/impl#[Table][BasepointTable]create()",
+                Some("c::edwards::Table::create"),
+            ),
+            (
+                "probe:c/1.0/traits/&Self#BasepointTable<[u8;/{const}]>#mul_base_clamped()",
+                Some("c::traits::BasepointTable::mul_base_clamped"),
+            ),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&[
+            "c::traits::BasepointTable::mul_base_clamped",
+            "c::edwards::Table::mul_base_clamped",
+        ]));
+        assert_eq!(forms.matched_count(&names), 1);
+
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
+
+        assert_eq!(forms.matched_count(&names), 2);
+        assert_eq!(forms.len(), 2);
+    }
+
+    /// A type that defines the method itself is not inheriting the default.
+    #[test]
+    fn test_trait_default_skipped_when_override_exists() {
+        let atoms = atom_map(&[
+            (
+                "probe:c/1.0/edwards/impl#[Table][BasepointTable]create()",
+                Some("c::edwards::Table::create"),
+            ),
+            (
+                "probe:c/1.0/other/impl#[Table]mul_base_clamped()",
+                Some("c::other::Table::mul_base_clamped"),
+            ),
+            (
+                "probe:c/1.0/traits/&Self#BasepointTable<[u8;/{const}]>#mul_base_clamped()",
+                Some("c::traits::BasepointTable::mul_base_clamped"),
+            ),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&[
+            "c::traits::BasepointTable::mul_base_clamped",
+            "c::edwards::Table::mul_base_clamped",
+        ]));
+
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
+
+        assert_eq!(
+            forms.matched_count(&names),
+            1,
+            "override evidence must block the trait-default form"
+        );
+    }
+
+    /// Two traits could supply the method — ambiguous, so skip.
+    #[test]
+    fn test_trait_default_ambiguous_traits_skipped() {
+        let atoms = atom_map(&[
+            (
+                "probe:c/1.0/edwards/impl#[Table][BasepointTable]create()",
+                Some("c::edwards::Table::create"),
+            ),
+            (
+                "probe:c/1.0/edwards/impl#[Table][OtherTable]other()",
+                Some("c::edwards::Table::other"),
+            ),
+            (
+                "probe:c/1.0/traits/&Self#BasepointTable<[u8;/{const}]>#mul_base_clamped()",
+                Some("c::traits::BasepointTable::mul_base_clamped"),
+            ),
+            (
+                "probe:c/1.0/traits/&Self#OtherTable<[u8;/{const}]>#mul_base_clamped()",
+                Some("c::traits::OtherTable::mul_base_clamped"),
+            ),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&[
+            "c::traits::BasepointTable::mul_base_clamped",
+            "c::traits::OtherTable::mul_base_clamped",
+            "c::edwards::Table::mul_base_clamped",
+        ]));
+
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
+
+        assert_eq!(
+            forms.matched_count(&names),
+            2,
+            "ambiguous providing trait must skip"
+        );
+    }
+
+    /// A default body that is not itself public API cannot make an entry match.
+    #[test]
+    fn test_trait_default_requires_public_trait_method() {
+        let atoms = atom_map(&[
+            (
+                "probe:c/1.0/edwards/impl#[Table][BasepointTable]create()",
+                Some("c::edwards::Table::create"),
+            ),
+            (
+                "probe:c/1.0/traits/&Self#BasepointTable<[u8;/{const}]>#mul_base_clamped()",
+                Some("c::traits::BasepointTable::mul_base_clamped"),
+            ),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        // The trait method itself is absent from the public API surface.
+        let mut forms = PublicNameForms::new(&public(&["c::edwards::Table::mul_base_clamped"]));
+
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
+
+        assert_eq!(forms.matched_count(&names), 0);
+        assert!(!forms
+            .flat()
+            .contains("c::traits::BasepointTable::mul_base_clamped"));
+    }
+
+    /// A dependency's impl keys are not evidence: they neither prove the
+    /// `Type: Trait` link nor veto with a phantom override.
+    #[test]
+    fn test_trait_default_ignores_dependency_impl_evidence() {
+        let atoms = atom_map(&[
+            // The only impl evidence for `Table: BasepointTable` is a
+            // dependency's — it must not enable the match.
+            (
+                "probe:dep/1.0/edwards/impl#[Table][BasepointTable]create()",
+                Some("dep::edwards::Table::create"),
+            ),
+            (
+                "probe:c/1.0/traits/&Self#BasepointTable<[u8;/{const}]>#mul_base_clamped()",
+                Some("c::traits::BasepointTable::mul_base_clamped"),
+            ),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&[
+            "c::traits::BasepointTable::mul_base_clamped",
+            "c::edwards::Table::mul_base_clamped",
+        ]));
+
+        forms.expand_with_trait_defaults(&atoms, &names, "c");
+
+        assert_eq!(
+            forms.matched_count(&names),
+            1,
+            "dependency impl evidence must not resolve the concrete-type entry"
+        );
+    }
+
+    #[test]
+    fn test_matched_count_reporting() {
+        let atoms = atom_map(&[
+            ("probe:spqr/1.0/chain/new()", Some("spqr::chain::new")),
+            ("probe:spqr/1.0/gone()", None),
+        ]);
+        let names = atom_candidate_names(&atoms);
+        let mut forms = PublicNameForms::new(&public(&[
+            "spqr::Chain::new", // reachable only via the re-export alias
+            "spqr::missing::thing",
+        ]));
+        assert_eq!(forms.len(), 2);
+        assert_eq!(forms.matched_count(&names), 0);
+
+        let aliases = BTreeMap::from([("Chain".to_string(), "spqr::chain".to_string())]);
+        forms.expand_with_aliases("spqr", &aliases);
+
+        assert_eq!(forms.matched_count(&names), 1);
+        assert_eq!(forms.len(), 2, "expansion never adds or drops entries");
     }
 
     fn make_atom(display_name: &str, code_path: &str, rqn: Option<&str>) -> AtomWithLines {
