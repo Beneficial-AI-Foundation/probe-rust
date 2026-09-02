@@ -39,9 +39,11 @@ pub struct CharonFunInfo {
     pub match_key: String,
     /// Source file path from the LLBC span, e.g. `src/scalar.rs`
     pub file_path: Option<String>,
-    /// 0-based start line from the LLBC span
+    /// Start line from the LLBC/manifest span. Charon lines are 1-based, the
+    /// same base as the atom's `lines-start`, so `span_overlap` compares them
+    /// directly. `0`/`None` means "no usable span".
     pub line_start: Option<usize>,
-    /// 0-based end line from the LLBC span
+    /// End line from the LLBC/manifest span (1-based, inclusive).
     pub line_end: Option<usize>,
     /// Whether the function is declared `pub` (from `item_meta.attr_info.public`)
     pub is_public: Option<bool>,
@@ -242,6 +244,17 @@ fn format_type(ty: &serde_json::Value, type_decl_names: &HashMap<u64, String>) -
             };
             return Some(name.to_string());
         }
+        // Integer and float literals are objects, e.g. {"UInt": "U8"},
+        // {"Int": "I32"}, {"Float": "F64"}. Dropping them (the old behavior)
+        // collapsed e.g. `TryFrom<u8> for DeviceId` and `TryFrom<i32> for
+        // DeviceId` into the same qualified name. Unknown keys deliberately
+        // fall through to `None` so a new Charon encoding surfaces as `?`
+        // (see `build_trait_impl_type_info_map`) instead of a silent guess.
+        for key in ["UInt", "Int", "Float"] {
+            if let Some(s) = lit.get(key).and_then(|v| v.as_str()) {
+                return Some(s.to_lowercase());
+            }
+        }
     }
 
     if let Some(tv) = ty.get("TypeVar") {
@@ -299,10 +312,17 @@ fn build_trait_impl_type_info_map(
             None => continue,
         };
 
+        // A generic `format_type` cannot render (slice, array, tuple, raw
+        // pointer, dyn, unknown literal encoding) becomes `?` rather than
+        // vanishing: dropping it made
+        // `TryFrom<[u8; 32]>` and `TryFrom<&[u8]>` for one self type collapse
+        // into the same qualified name (the same defect as the literal case).
+        // ponytail: two `?` generics on one self type still tie and fall to
+        // span disambiguation; extend `format_type` when a real collision shows.
         let trait_generics: Vec<String> = types
             .iter()
             .skip(1)
-            .filter_map(|ty| format_type(ty, type_decl_names))
+            .map(|ty| format_type(ty, type_decl_names).unwrap_or_else(|| "?".to_string()))
             .collect();
 
         map.insert(
@@ -637,147 +657,276 @@ fn normalize_source_path(p: &str) -> &str {
     }
 }
 
-/// Pick the Charon candidate whose span best overlaps the atom's line range.
+/// Number of lines shared by a candidate's span and the atom's line range
+/// (both inclusive): `min(atom_end, c_end) - max(atom_start, c_start) + 1`.
+/// Positive means they overlap; `<= 0` means disjoint. A single-line Charon
+/// span (common when Charon reports only the signature line, especially for
+/// dependency crates pulled in via `--include`) inside the atom scores `1`.
 ///
-/// For **multi-line** Charon spans (`line_start < line_end`) the overlap is
-/// `min(atom_end, c_end) - max(atom_start, c_start)`; the candidate with the
-/// largest positive value wins.
-///
-/// For **single-line** spans (`line_start == line_end`) -- common when Charon
-/// reports only the function signature line, especially for dependency crates
-/// pulled in via `--include` -- the standard formula always yields zero.
-/// Instead we use a containment check: if the single line falls within
-/// `[atom_start, atom_end]` the overlap is 1; otherwise 0.
-///
-/// Returns `None` if no candidate has a positive overlap.
-fn disambiguate_by_span<'a>(
-    candidates: &'a [CharonFunInfo],
-    atom_file: &str,
-    atom_start: usize,
-    atom_end: usize,
-) -> Option<&'a CharonFunInfo> {
+/// `None` when either side lacks usable lines (atom `lines_start == 0`, or
+/// candidate lines absent, start `0`, or end before start).
+fn span_overlap(c: &CharonFunInfo, atom_start: usize, atom_end: usize) -> Option<i64> {
     if atom_start == 0 {
         return None;
     }
+    let (c_start, c_end) = match (c.line_start, c.line_end) {
+        (Some(s), Some(e)) if s > 0 && e >= s => (s, e),
+        _ => return None,
+    };
+    Some(std::cmp::min(atom_end, c_end) as i64 - std::cmp::max(atom_start, c_start) as i64 + 1)
+}
 
-    let mut best: Option<&CharonFunInfo> = None;
-    let mut best_overlap: i64 = 0;
+/// `true` when the candidate carries a non-empty file path that normalizes to
+/// the atom's (already normalized) path — the only file-level proof that a
+/// candidate can be this atom.
+fn in_atom_file(c: &CharonFunInfo, norm_atom_path: &str) -> bool {
+    matches!(c.file_path.as_deref(), Some(f) if !f.is_empty()
+        && normalize_source_path(f) == norm_atom_path)
+}
 
-    for c in candidates {
-        let c_file = match c.file_path.as_deref() {
-            Some(f) => normalize_source_path(f),
-            None => continue,
-        };
-        if c_file != atom_file {
-            continue;
-        }
-        let (c_start, c_end) = match (c.line_start, c.line_end) {
-            (Some(s), Some(e)) if s > 0 => (s, e),
-            _ => continue,
-        };
-        let overlap = if c_start == c_end {
-            if c_start >= atom_start && c_start <= atom_end {
-                1
-            } else {
-                0
+/// Extract the bare self-type name from a Charon qualified name's **last**
+/// impl segment:
+/// - trait impl: `..::{Trait<..> for path::SelfType}::m` -> `SelfType`
+/// - inherent impl: `..::{path::SelfType}::m` -> `SelfType`
+/// - legacy trait impl without type info: `..::{impl Trait}::m` -> `None`
+/// - no impl segment (free function): `None`
+fn self_type_from_qualified_name(qualified_name: &str) -> Option<String> {
+    // Find the content of the last top-level `{...}` block.
+    let mut last_block: Option<(usize, usize)> = None;
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, c) in qualified_name.char_indices() {
+        match c {
+            '{' => {
+                if depth == 0 {
+                    start = i + 1;
+                }
+                depth += 1;
             }
-        } else {
-            std::cmp::min(atom_end, c_end) as i64 - std::cmp::max(atom_start, c_start) as i64
-        };
-        if overlap > best_overlap {
-            best_overlap = overlap;
-            best = Some(c);
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    last_block = Some((start, i));
+                }
+            }
+            _ => {}
         }
     }
+    let (s, e) = last_block?;
+    let content = &qualified_name[s..e];
+    if content.starts_with("impl ") {
+        return None;
+    }
+    let self_part = match content.rfind(" for ") {
+        Some(idx) => &content[idx + 5..],
+        None => content,
+    };
+    Some(bare_type_name(self_part)?.to_string())
+}
 
-    best
+/// Extract the bare self-type name from an atom display name:
+/// `SpecificServiceId<KIND>::eq` -> `SpecificServiceId`; bare `eq` -> `None`.
+fn self_type_from_display_name(display_name: &str) -> Option<String> {
+    let pos = display_name.rfind("::")?;
+    Some(bare_type_name(&display_name[..pos])?.to_string())
+}
+
+/// Reduce a type expression to its bare name: strip references/lifetimes/
+/// parens, truncate generics, and take the last path segment.
+/// `&'0 (libsignal_core::address::SpecificServiceId<KIND>)` -> `SpecificServiceId`.
+fn bare_type_name(ty: &str) -> Option<&str> {
+    let ty = ty.trim().trim_start_matches('&').trim_start();
+    let ty = match ty.strip_prefix('\'') {
+        Some(rest) => rest
+            .trim_start_matches(|c: char| !c.is_whitespace())
+            .trim_start(),
+        None => ty,
+    };
+    let ty = ty.trim_start_matches('(');
+    let ty = ty.split('<').next().unwrap_or(ty);
+    let ty = ty.trim_end_matches(')').trim();
+    let bare = ty.rsplit("::").next().unwrap_or(ty).trim();
+    if bare.is_empty() {
+        None
+    } else {
+        Some(bare)
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Enrichment: cross-reference atoms with Charon names
 // ---------------------------------------------------------------------------
 
-/// Try to resolve a single Charon candidate from `candidates`, using span
-/// disambiguation and heuristic RQN matching as tiebreakers.
+/// Outcome of matching one atom against its same-key Charon candidates.
+enum ResolveOutcome<'a> {
+    /// Exactly one candidate survived validation.
+    Match(&'a CharonFunInfo),
+    /// Multiple distinct candidates remained and no signal (file, self type,
+    /// span) could pick a unique one. The caller stamps no `charon-def-id`
+    /// and, on the LLBC path (which owns the RQN), clears the atom's
+    /// `rust-qualified-name` rather than risk stamping the wrong impl's.
+    Ambiguous,
+    /// No candidate plausibly corresponds to this atom.
+    NoMatch,
+}
+
+/// Validate a lone candidate against the atom's file path and span.
 ///
-/// Returns the best `CharonFunInfo` or `None` if resolution fails.
-///
-/// For single candidates: validates file-path match and span overlap before
-/// accepting. This prevents two mis-assignment patterns:
+/// This prevents two mis-assignment patterns:
 /// 1. Cross-file collisions (e.g. `subtle::{impl}::from` assigned to every
 ///    `lib.rs` atom whose match key is bare `from`).
 /// 2. Same-file derive collisions (e.g. a `#[derive]` at L16 producing an
 ///    `eq` candidate that gets assigned to unrelated manual impls).
 ///
-/// The single-candidate acceptance policy depends on `source`:
+/// The acceptance policy depends on `source`:
 /// - [`EnrichmentSource::Llbc`] keeps the lenient legacy behavior: a candidate
-///   with no usable file/span (empty file path, lines `0`) is still accepted on
-///   match-key alone, so span-less compiler-generated items (e.g. derived
-///   `fmt`) still enrich `rust-qualified-name`/`is-public`.
+///   with no file path at all (`None`/`""`) is still accepted on match-key
+///   alone, so span-less compiler-generated items (e.g. derived `fmt`) still
+///   enrich `rust-qualified-name`/`is-public`. (A candidate *with* a matching
+///   file path but no usable lines is accepted on the file match, on both
+///   sources.)
 /// - [`EnrichmentSource::Manifest`] fails **closed**: a manifest `def_id` feeds
 ///   an integer Rust↔Lean join, so a single candidate is accepted only with a
 ///   non-empty file path that matches the atom (and span overlap when both
 ///   carry usable lines). A match-key-only "match" is not enough evidence to
 ///   stamp a `charon-def-id`; such candidates are rejected here.
+fn validate_single_candidate<'a>(
+    c: &'a CharonFunInfo,
+    atom: &crate::AtomWithLines,
+    source: EnrichmentSource,
+) -> ResolveOutcome<'a> {
+    // Manifest ids are consumed as a precise integer join, so never accept a
+    // single candidate on match-key alone — require file-path proof. A
+    // `source: null`/empty-file manifest record (file_path `None` or `""`)
+    // is rejected rather than blindly stamped onto a same-key atom.
+    let has_usable_file = matches!(c.file_path.as_deref(), Some(f) if !f.is_empty());
+    if !has_usable_file {
+        // LLBC keeps the lenient legacy acceptance of a span-less,
+        // file-less candidate; Manifest fails closed.
+        return match source {
+            EnrichmentSource::Llbc => ResolveOutcome::Match(c),
+            EnrichmentSource::Manifest => ResolveOutcome::NoMatch,
+        };
+    }
+    if !in_atom_file(c, normalize_source_path(&atom.code_path)) {
+        return ResolveOutcome::NoMatch;
+    }
+    // Compare spans only when both the atom and the candidate carry usable
+    // line numbers (`span_overlap` returns `None` otherwise), so a span-less
+    // compiler-generated item is still accepted on the file-path match alone
+    // rather than rejected.
+    if let Some(overlap) = span_overlap(c, atom.code_text.lines_start, atom.code_text.lines_end) {
+        if overlap <= 0 {
+            return ResolveOutcome::NoMatch;
+        }
+    }
+    ResolveOutcome::Match(c)
+}
+
+/// Resolve one atom against its same-key Charon candidates.
+///
+/// Multi-candidate keys (several impl blocks sharing a method name in the
+/// same module, e.g. three `TryFrom<_> for DeviceId` impls all keyed
+/// `address::try_from`) are narrowed by successive filters:
+/// 1. **file**: only candidates in the atom's (normalized) file;
+/// 2. **self type**: when the atom's display name carries a `Type::` prefix
+///    and at least one candidate's impl segment names the same self type,
+///    restrict to those candidates;
+/// 3. **dedup**: survivors agreeing on `(def_id, qualified_name)` collapse to
+///    one (Manifest loop helpers share their parent's `def_id`);
+/// 4. **span**: among the rest, the strict-maximum positive overlap wins.
+///
+/// A single survivor still goes through [`validate_single_candidate`]. When
+/// distinct candidates remain and the span signal cannot break the tie, the
+/// result is [`ResolveOutcome::Ambiguous`] — never an arbitrary pick: the old
+/// first-match-wins fallback stamped one impl's qualified name onto every
+/// colliding atom in the file.
 fn resolve_charon_candidate<'a>(
     candidates: &'a [CharonFunInfo],
     atom: &crate::AtomWithLines,
     source: EnrichmentSource,
-) -> Option<&'a CharonFunInfo> {
-    if candidates.len() == 1 {
-        let c = &candidates[0];
-        // Manifest ids are consumed as a precise integer join, so never accept a
-        // single candidate on match-key alone — require file-path proof. A
-        // `source: null`/empty-file manifest record (file_path `None` or `""`)
-        // is rejected rather than blindly stamped onto a same-key atom.
-        let has_usable_file = matches!(c.file_path.as_deref(), Some(f) if !f.is_empty());
-        if source == EnrichmentSource::Manifest && !has_usable_file {
-            return None;
-        }
-        if let (Some(f), Some(cs), Some(ce)) = (c.file_path.as_deref(), c.line_start, c.line_end) {
-            if f.is_empty() {
-                // Only reachable for the LLBC path now (Manifest returned above).
-                return Some(&candidates[0]);
-            }
-            let norm_c = normalize_source_path(f);
-            let norm_a = normalize_source_path(&atom.code_path);
-            if norm_c != norm_a {
-                return None;
-            }
-            // Compare spans only when both the atom and the candidate carry
-            // usable line numbers. A candidate line of 0 means "no usable span"
-            // (matching `disambiguate_by_span`'s `s > 0` convention), so fall
-            // back to accepting on the file-path match alone rather than
-            // rejecting a span-less compiler-generated item.
-            if atom.code_text.lines_start > 0 && cs > 0 && ce > 0 {
-                let overlaps = if cs == ce {
-                    cs >= atom.code_text.lines_start && cs <= atom.code_text.lines_end
+) -> ResolveOutcome<'a> {
+    if let [single] = candidates {
+        return validate_single_candidate(single, atom, source);
+    }
+
+    let norm_atom_path = normalize_source_path(&atom.code_path);
+    let same_file: Vec<&CharonFunInfo> = candidates
+        .iter()
+        .filter(|c| in_atom_file(c, norm_atom_path))
+        .collect();
+    if same_file.is_empty() {
+        // No candidate provably lives in the atom's file: the key match is
+        // spurious (other files) or unverifiable (no file path at all, as for
+        // compiler-generated items such as derived `fmt`). Neither is evidence that any candidate
+        // *is* this atom, so this is a plain no-match — the atom keeps its
+        // heuristic RQN. Under multi-candidate keys, unverifiable candidates
+        // are never picked (the lenient span-less acceptance applies only to
+        // lone candidates in `validate_single_candidate`).
+        return ResolveOutcome::NoMatch;
+    }
+
+    let self_type_filtered: Vec<&CharonFunInfo> =
+        match self_type_from_display_name(&atom.display_name) {
+            Some(atom_ty) => {
+                let matching: Vec<&CharonFunInfo> = same_file
+                    .iter()
+                    .copied()
+                    .filter(|c| {
+                        self_type_from_qualified_name(&c.qualified_name)
+                            .is_some_and(|t| t == atom_ty)
+                    })
+                    .collect();
+                if matching.is_empty() {
+                    same_file
                 } else {
-                    std::cmp::min(atom.code_text.lines_end, ce) as i64
-                        - std::cmp::max(atom.code_text.lines_start, cs) as i64
-                        > 0
-                };
-                if !overlaps {
-                    return None;
+                    matching
                 }
             }
+            None => same_file,
+        };
+
+    let mut distinct: Vec<&CharonFunInfo> = Vec::new();
+    for c in self_type_filtered {
+        if !distinct
+            .iter()
+            .any(|d| d.def_id == c.def_id && d.qualified_name == c.qualified_name)
+        {
+            distinct.push(c);
         }
-        return Some(&candidates[0]);
     }
-    let norm_atom_path = normalize_source_path(&atom.code_path);
-    if let Some(best) = disambiguate_by_span(
-        candidates,
-        norm_atom_path,
-        atom.code_text.lines_start,
-        atom.code_text.lines_end,
-    ) {
-        return Some(best);
+
+    if let [single] = distinct.as_slice() {
+        return validate_single_candidate(single, atom, source);
     }
-    let heuristic = atom.rust_qualified_name.as_deref().unwrap_or("");
-    candidates.iter().find(|c| {
-        let simplified = strip_impl_blocks(&c.qualified_name);
-        simplified == heuristic
-    })
+
+    // Span stage: the strict-maximum positive overlap wins. A tie means the
+    // span signal cannot tell the survivors apart (Ambiguous). When every
+    // survivor has a usable span and none overlaps, the atom provably is
+    // none of them (NoMatch — e.g. a trait's provided method vs. its blanket
+    // impls further down the file); only missing span data leaves the
+    // collision undecidable (Ambiguous).
+    let overlaps: Vec<Option<i64>> = distinct
+        .iter()
+        .map(|c| span_overlap(c, atom.code_text.lines_start, atom.code_text.lines_end))
+        .collect();
+    let best = overlaps.iter().filter_map(|o| *o).filter(|o| *o > 0).max();
+    match best {
+        Some(best_overlap) => {
+            let winners: Vec<&CharonFunInfo> = distinct
+                .iter()
+                .zip(&overlaps)
+                .filter(|(_, o)| **o == Some(best_overlap))
+                .map(|(c, _)| *c)
+                .collect();
+            match winners.as_slice() {
+                [single] => ResolveOutcome::Match(single),
+                _ => ResolveOutcome::Ambiguous,
+            }
+        }
+        None if overlaps.iter().all(|o| o.is_some()) => ResolveOutcome::NoMatch,
+        None => ResolveOutcome::Ambiguous,
+    }
 }
 
 /// Which source produced an [`Enrichment`] — for logging and test assertions.
@@ -928,6 +1077,7 @@ pub fn enrich_atoms(
     }
 
     let mut enriched = 0;
+    let mut ambiguous = 0;
 
     for atom in atoms.values_mut() {
         // Provenance is (re)derived from THIS source alone. Clear both fields up
@@ -958,33 +1108,60 @@ pub fn enrich_atoms(
         });
 
         if let Some(candidates) = candidates {
-            if let Some(best) = resolve_charon_candidate(candidates, atom, enrichment.source) {
-                // Manifest path (minimal): do not override `rust-qualified-name`
-                // — the join keys on `charon-def-id`, and the atom keeps its
-                // SCIP-derived RQN, avoiding a format change for consumers that
-                // match on it (e.g. `--with-public-api`). The LLBC path keeps
-                // overriding, as before.
-                if enrichment.source == EnrichmentSource::Llbc {
-                    atom.rust_qualified_name = Some(best.qualified_name.clone());
+            match resolve_charon_candidate(candidates, atom, enrichment.source) {
+                ResolveOutcome::Match(best) => {
+                    // Manifest path (minimal): do not override `rust-qualified-name`
+                    // — the join keys on `charon-def-id`, and the atom keeps its
+                    // SCIP-derived RQN, avoiding a format change for consumers that
+                    // match on it (e.g. `--with-public-api`). The LLBC path keeps
+                    // overriding, as before.
+                    if enrichment.source == EnrichmentSource::Llbc {
+                        atom.rust_qualified_name = Some(best.qualified_name.clone());
+                    }
+                    // Only override visibility when the source actually carries it:
+                    // the LLBC's `attr_info.public` may be absent, and the manifest
+                    // has no visibility at all. Overwriting with `None` would wipe
+                    // the SCIP-derived value.
+                    if let Some(is_public) = best.is_public {
+                        atom.is_public = Some(is_public);
+                    }
+                    // Emit the def-id only together with its provenance version — a
+                    // def-id is meaningful only relative to the Charon run that
+                    // produced it. Both were pre-cleared above, so set them only
+                    // when a version is available; otherwise they stay absent.
+                    if let Some(version) = charon_version {
+                        atom.charon_def_id = Some(best.def_id);
+                        atom.charon_version = Some(version.clone());
+                    }
+                    enriched += 1;
                 }
-                // Only override visibility when the source actually carries it:
-                // the LLBC's `attr_info.public` may be absent, and the manifest
-                // has no visibility at all. Overwriting with `None` would wipe
-                // the SCIP-derived value.
-                if let Some(is_public) = best.is_public {
-                    atom.is_public = Some(is_public);
+                ResolveOutcome::Ambiguous => {
+                    // Several distinct impls share this atom's match key and no
+                    // signal picked a unique one. On the LLBC path Charon owns
+                    // the RQN, and a wrong one is worse than none (probe-aeneas
+                    // would link the wrong translation), so clear even the
+                    // SCIP-derived heuristic and let downstream fallbacks take
+                    // over. The Manifest path never writes the RQN, so there is
+                    // nothing wrong to clear: the atom keeps its SCIP name and
+                    // simply gets no def-id, exactly like NoMatch.
+                    if enrichment.source == EnrichmentSource::Llbc {
+                        atom.rust_qualified_name = None;
+                    }
+                    ambiguous += 1;
+                    if verbose {
+                        eprintln!(
+                            "  ambiguous charon candidates for {} ({}); no charon-def-id stamped",
+                            atom.display_name, atom.code_path
+                        );
+                    }
                 }
-                // Emit the def-id only together with its provenance version — a
-                // def-id is meaningful only relative to the Charon run that
-                // produced it. Both were pre-cleared above, so set them only
-                // when a version is available; otherwise they stay absent.
-                if let Some(version) = charon_version {
-                    atom.charon_def_id = Some(best.def_id);
-                    atom.charon_version = Some(version.clone());
-                }
-                enriched += 1;
+                ResolveOutcome::NoMatch => {}
             }
         }
+    }
+
+    if verbose && ambiguous > 0 {
+        eprintln!("  {ambiguous} atom(s) had ambiguous charon candidates");
     }
 
     enriched
@@ -1303,6 +1480,100 @@ mod tests {
         );
     }
 
+    /// Integer/float literal types are objects (`{"UInt": "U8"}`), not strings.
+    /// Dropping them collapsed `TryFrom<u8> for DeviceId` / `TryFrom<i32> for
+    /// DeviceId` / `TryFrom<u32> for DeviceId` into one identical qualified
+    /// name (the impl-block RQN collision from the libsignal-verify report).
+    #[test]
+    fn test_format_type_literal_object_forms() {
+        let names = HashMap::new();
+        for (json, expected) in [
+            (r#"{"Literal": {"UInt": "U8"}}"#, "u8"),
+            (r#"{"Literal": {"Int": "I32"}}"#, "i32"),
+            (r#"{"Literal": {"UInt": "U32"}}"#, "u32"),
+            (r#"{"Literal": {"Float": "F64"}}"#, "f64"),
+            // Untagged wrapper, as emitted with --no-dedup-serialized-ast.
+            (r#"{"Untagged": {"Literal": {"UInt": "U8"}}}"#, "u8"),
+            // String forms keep working.
+            (r#"{"Literal": "Bool"}"#, "bool"),
+            (r#"{"Literal": "Char"}"#, "char"),
+        ] {
+            let ty: serde_json::Value = serde_json::from_str(json).unwrap();
+            assert_eq!(
+                format_type(&ty, &names).as_deref(),
+                Some(expected),
+                "for {json}"
+            );
+        }
+        // An unknown literal encoding is not guessed at: `None`, so the
+        // caller renders `?` rather than a silently wrong name.
+        for json in [
+            r#"{"Literal": {"Str": "X"}}"#,
+            r#"{"Literal": {"UInt": {"U8": null}}}"#,
+        ] {
+            let ty: serde_json::Value = serde_json::from_str(json).unwrap();
+            assert_eq!(format_type(&ty, &names), None, "for {json}");
+        }
+    }
+
+    #[test]
+    fn test_self_type_from_qualified_name() {
+        // Trait impl with self type.
+        assert_eq!(
+            self_type_from_qualified_name(
+                "libsignal_core::address::{core::cmp::PartialEq<libsignal_core::address::SpecificServiceId> for libsignal_core::address::ServiceId}::eq"
+            )
+            .as_deref(),
+            Some("ServiceId")
+        );
+        // Trait generics stripped, last path segment taken.
+        assert_eq!(
+            self_type_from_qualified_name(
+                "c::m::{core::convert::TryFrom<u8, c::m::Err> for c::m::DeviceId}::try_from"
+            )
+            .as_deref(),
+            Some("DeviceId")
+        );
+        // Inherent impl.
+        assert_eq!(
+            self_type_from_qualified_name("c::scalar::{c::scalar::Scalar}::from_bytes").as_deref(),
+            Some("Scalar")
+        );
+        // Generic self type.
+        assert_eq!(
+            self_type_from_qualified_name(
+                "c::m::{core::cmp::PartialEq for c::m::SpecificServiceId<KIND>}::eq"
+            )
+            .as_deref(),
+            Some("SpecificServiceId")
+        );
+        // Reference self type as formatted by format_type.
+        assert_eq!(
+            self_type_from_qualified_name("c::m::{c::T for &'0 (c::m::Point)}::conv").as_deref(),
+            Some("Point")
+        );
+        // Legacy `{impl Trait}` block carries no self type.
+        assert_eq!(
+            self_type_from_qualified_name("c::m::{impl core::clone::Clone}::clone"),
+            None
+        );
+        // Free function: no impl segment.
+        assert_eq!(self_type_from_qualified_name("c::m::free_fn"), None);
+    }
+
+    #[test]
+    fn test_self_type_from_display_name() {
+        assert_eq!(
+            self_type_from_display_name("ServiceId::eq").as_deref(),
+            Some("ServiceId")
+        );
+        assert_eq!(
+            self_type_from_display_name("SpecificServiceId<KIND>::eq").as_deref(),
+            Some("SpecificServiceId")
+        );
+        assert_eq!(self_type_from_display_name("free_fn"), None);
+    }
+
     #[test]
     fn test_format_type_ref() {
         let ty: serde_json::Value = serde_json::from_str(
@@ -1344,9 +1615,12 @@ mod tests {
         let pub_fn = map.get(&0).unwrap();
         assert_eq!(pub_fn.is_public, Some(true));
         assert_eq!(pub_fn.file_path, "src/lib.rs");
+        // Lines are carried through verbatim (1-based, same base as atoms).
+        assert_eq!((pub_fn.line_start, pub_fn.line_end), (10, 20));
 
         let priv_fn = map.get(&1).unwrap();
         assert_eq!(priv_fn.is_public, Some(false));
+        assert_eq!((priv_fn.line_start, priv_fn.line_end), (30, 40));
     }
 
     #[test]
@@ -2523,7 +2797,7 @@ mod tests {
 
         // Charon reports a real, matching file path but no usable span (lines 0),
         // as happens for some compiler-generated / macro items. The `0` lines
-        // must be treated as "no span" (like disambiguate_by_span's `s > 0`),
+        // must be treated as "no span" (span_overlap returns `None` for `s == 0`),
         // so the candidate is accepted on the file-path match alone.
         let llbc_json = r#"{
             "translated": {
@@ -2627,6 +2901,589 @@ mod tests {
             charon_def_id: None,
             charon_version: None,
         }
+    }
+
+    fn candidate(
+        def_id: u64,
+        qualified_name: &str,
+        file: &str,
+        lines: (usize, usize),
+    ) -> CharonFunInfo {
+        CharonFunInfo {
+            qualified_name: qualified_name.to_string(),
+            def_id,
+            match_key: String::new(),
+            file_path: Some(file.to_string()),
+            line_start: Some(lines.0),
+            line_end: Some(lines.1),
+            is_public: None,
+        }
+    }
+
+    fn address_atom(display_name: &str, lines: (usize, usize)) -> crate::AtomWithLines {
+        let mut atom = test_atom();
+        atom.display_name = display_name.to_string();
+        atom.code_path = "src/address.rs".to_string();
+        atom.code_text = crate::CodeTextInfo {
+            lines_start: lines.0,
+            lines_end: lines.1,
+        };
+        atom
+    }
+
+    /// The libsignal-verify `eq` collision: two manual impls, a derive
+    /// candidate for another type (single-line span on the `#[derive]` line),
+    /// and a span-less derived `PartialEq for ServiceId` (same self type as
+    /// the manual `ServiceId::eq`) all share the match key `address::eq`.
+    /// Each atom must resolve to its own manual impl.
+    #[test]
+    fn test_resolve_multi_candidate_eq_collision() {
+        let mut derived_service_id = candidate(
+            40,
+            "libsignal_core::address::{core::cmp::PartialEq for libsignal_core::address::ServiceId}::eq",
+            "rust/core/src/address.rs",
+            (0, 0),
+        );
+        derived_service_id.line_start = None;
+        derived_service_id.line_end = None;
+        let candidates = vec![
+            derived_service_id,
+            candidate(
+                16,
+                "libsignal_core::address::{core::cmp::PartialEq<u8> for libsignal_core::address::ServiceIdKind}::eq",
+                "rust/core/src/address.rs",
+                (16, 16),
+            ),
+            candidate(
+                79,
+                "libsignal_core::address::{core::cmp::PartialEq<libsignal_core::address::ServiceId> for libsignal_core::address::SpecificServiceId}::eq",
+                "rust/core/src/address.rs",
+                (329, 331),
+            ),
+            candidate(
+                80,
+                "libsignal_core::address::{core::cmp::PartialEq<libsignal_core::address::SpecificServiceId> for libsignal_core::address::ServiceId}::eq",
+                "rust/core/src/address.rs",
+                (338, 340),
+            ),
+        ];
+
+        for (display, lines, want) in [
+            ("SpecificServiceId<KIND>::eq", (329, 331), 79),
+            ("ServiceId::eq", (338, 340), 80),
+        ] {
+            let atom = address_atom(display, lines);
+            match resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc) {
+                ResolveOutcome::Match(c) => assert_eq!(c.def_id, want, "atom {display}"),
+                _ => panic!("expected a unique match for {display}"),
+            }
+        }
+    }
+
+    /// The four-way libsignal `try_from` collision. Same self type, same
+    /// method name, different trait generics (the three `TryFrom<u8|i32|u32>
+    /// for DeviceId` impls): only spans can split them. The fourth impl
+    /// (`TryFrom<ServiceId> for SpecificServiceId`) is split off by self type
+    /// alone.
+    #[test]
+    fn test_resolve_multi_candidate_try_from_split_by_span() {
+        let mk = |src: &str| {
+            format!(
+                "libsignal_core::address::{{core::convert::TryFrom<{src}, libsignal_core::address::InvalidDeviceId> for libsignal_core::address::DeviceId}}::try_from"
+            )
+        };
+        let candidates = vec![
+            candidate(104, &mk("u8"), "rust/core/src/address.rs", (741, 743)),
+            candidate(105, &mk("i32"), "rust/core/src/address.rs", (748, 750)),
+            candidate(106, &mk("u32"), "rust/core/src/address.rs", (755, 757)),
+            candidate(
+                90,
+                "libsignal_core::address::{core::convert::TryFrom<libsignal_core::address::ServiceId, libsignal_core::address::WrongKindOfServiceIdError> for libsignal_core::address::SpecificServiceId}::try_from",
+                "rust/core/src/address.rs",
+                (360, 366),
+            ),
+        ];
+
+        for (display, lines, want) in [
+            ("DeviceId::try_from", (741, 743), 104),
+            ("DeviceId::try_from", (748, 750), 105),
+            ("DeviceId::try_from", (755, 757), 106),
+            ("SpecificServiceId<KIND>::try_from", (360, 366), 90),
+        ] {
+            let atom = address_atom(display, lines);
+            match resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc) {
+                ResolveOutcome::Match(c) => {
+                    assert_eq!(c.def_id, want, "atom {display} at {lines:?}")
+                }
+                _ => panic!("expected a unique match for {display} at {lines:?}"),
+            }
+        }
+    }
+
+    /// Self type alone resolves a collision even when spans are unusable —
+    /// and when neither self type nor span can split distinct candidates,
+    /// the outcome is Ambiguous, never an arbitrary pick.
+    #[test]
+    fn test_resolve_multi_candidate_self_type_and_ambiguity() {
+        // Spans unusable (0), distinct self types: self-type filter decides.
+        let candidates = vec![
+            candidate(
+                1,
+                "c::m::{c::T for c::m::Alpha}::conv",
+                "src/address.rs",
+                (0, 0),
+            ),
+            candidate(
+                2,
+                "c::m::{c::T for c::m::Beta}::conv",
+                "src/address.rs",
+                (0, 0),
+            ),
+        ];
+        let atom = address_atom("Beta::conv", (10, 20));
+        match resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc) {
+            ResolveOutcome::Match(c) => assert_eq!(c.def_id, 2),
+            _ => panic!("expected self-type filter to pick Beta"),
+        }
+
+        // Same self type, spans unusable: ambiguous.
+        let candidates = vec![
+            candidate(
+                1,
+                "c::m::{c::T<u8> for c::m::Alpha}::conv",
+                "src/address.rs",
+                (0, 0),
+            ),
+            candidate(
+                2,
+                "c::m::{c::T<u32> for c::m::Alpha}::conv",
+                "src/address.rs",
+                (0, 0),
+            ),
+        ];
+        let atom = address_atom("Alpha::conv", (10, 20));
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Ambiguous
+        ));
+    }
+
+    /// When every survivor has a usable span and none overlaps the atom, the
+    /// atom provably is none of them: NoMatch (heuristic RQN kept), not
+    /// Ambiguous. Real case: `LogSafeDisplay::log_safe_display`, a trait's
+    /// provided method at L71-76 whose match key collides with two blanket
+    /// impls at L81/L83.
+    #[test]
+    fn test_resolve_multi_candidate_all_spans_elsewhere_is_no_match() {
+        let candidates = vec![
+            candidate(
+                949,
+                "c::{impl c::LogSafeDisplay}::log_safe_display",
+                "src/address.rs",
+                (81, 81),
+            ),
+            candidate(
+                950,
+                "c::{impl c::LogSafeDisplay}::log_safe_display",
+                "src/address.rs",
+                (83, 83),
+            ),
+        ];
+        let atom = address_atom("LogSafeDisplay::log_safe_display", (71, 76));
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// Duplicate entries naming the same function (Manifest loop helpers share
+    /// the parent's def_id) collapse to one survivor instead of tripping the
+    /// ambiguity rule.
+    #[test]
+    fn test_resolve_multi_candidate_dedup_same_function() {
+        let candidates = vec![
+            candidate(
+                7,
+                "c::m::{c::T for c::m::Alpha}::conv",
+                "src/address.rs",
+                (10, 20),
+            ),
+            candidate(
+                7,
+                "c::m::{c::T for c::m::Alpha}::conv",
+                "src/address.rs",
+                (12, 18),
+            ),
+        ];
+        let atom = address_atom("Alpha::conv", (10, 20));
+        match resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Manifest) {
+            ResolveOutcome::Match(c) => assert_eq!(c.def_id, 7),
+            _ => panic!("expected duplicates to collapse to a single match"),
+        }
+    }
+
+    /// A tie on the best positive span overlap means the span signal cannot
+    /// tell the survivors apart: Ambiguous, never the first of the winners.
+    /// Guards the strict-max rule (a `>=` regression would arbitrarily pick).
+    #[test]
+    fn test_resolve_multi_candidate_span_tie_is_ambiguous() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::m::{c::T<u8> for c::m::Alpha}::conv",
+                "src/address.rs",
+                (10, 20),
+            ),
+            candidate(
+                2,
+                "c::m::{c::T<u32> for c::m::Alpha}::conv",
+                "src/address.rs",
+                (10, 20),
+            ),
+        ];
+        let atom = address_atom("Alpha::conv", (10, 20));
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Ambiguous
+        ));
+    }
+
+    /// Manifest fails closed on a lone candidate without file proof: a
+    /// `file_path` of `None` or `""` is rejected rather than stamped onto a
+    /// same-key atom (the LLBC counterpart accepts such candidates leniently).
+    #[test]
+    fn test_resolve_single_candidate_manifest_fails_closed_without_file() {
+        for file_path in [None, Some(String::new())] {
+            let mut c = candidate(9, "c::m::conv", "ignored", (0, 0));
+            c.file_path = file_path.clone();
+            c.line_start = None;
+            c.line_end = None;
+            let atom = address_atom("Alpha::conv", (10, 20));
+            let candidates = vec![c];
+            assert!(
+                matches!(
+                    resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Manifest),
+                    ResolveOutcome::NoMatch
+                ),
+                "file_path {file_path:?} must fail closed for Manifest"
+            );
+            assert!(
+                matches!(
+                    resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+                    ResolveOutcome::Match(_)
+                ),
+                "file_path {file_path:?} keeps lenient LLBC acceptance"
+            );
+        }
+    }
+
+    /// The self-type filter's multi→1 reduction re-validates the survivor:
+    /// a lone self-type match whose span excludes the atom is NoMatch, not
+    /// a blind Match.
+    #[test]
+    fn test_resolve_multi_candidate_self_type_survivor_span_excludes() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::m::{c::T for c::m::Alpha}::conv",
+                "src/address.rs",
+                (100, 110),
+            ),
+            candidate(
+                2,
+                "c::m::{c::T for c::m::Beta}::conv",
+                "src/address.rs",
+                (200, 210),
+            ),
+        ];
+        let atom = address_atom("Alpha::conv", (10, 20));
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// When no candidate's self type matches the atom's, the filter falls
+    /// back to all same-file candidates (self type gave no signal) and the
+    /// span stage still picks the overlapping one — a Match, not an early
+    /// NoMatch.
+    #[test]
+    fn test_resolve_multi_candidate_self_type_fallback_then_span() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::m::{c::T for c::m::Alpha}::conv",
+                "src/address.rs",
+                (100, 110),
+            ),
+            candidate(
+                2,
+                "c::m::{c::T for c::m::Beta}::conv",
+                "src/address.rs",
+                (10, 20),
+            ),
+        ];
+        let atom = address_atom("Gamma::conv", (10, 20));
+        match resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc) {
+            ResolveOutcome::Match(c) => assert_eq!(c.def_id, 2),
+            _ => panic!("expected the span stage to pick the overlapping candidate"),
+        }
+    }
+
+    /// Mixed span availability among distinct survivors: a usable overlapping
+    /// span wins over a span-less sibling (the missing span contributes no
+    /// counter-evidence). Pins current behavior: Match, not Ambiguous.
+    #[test]
+    fn test_resolve_multi_candidate_mixed_span_availability() {
+        let mut spanless = candidate(
+            1,
+            "c::m::{c::T<u8> for c::m::Alpha}::conv",
+            "src/address.rs",
+            (0, 0),
+        );
+        spanless.line_start = None;
+        spanless.line_end = None;
+        let candidates = vec![
+            spanless,
+            candidate(
+                2,
+                "c::m::{c::T<u32> for c::m::Alpha}::conv",
+                "src/address.rs",
+                (10, 20),
+            ),
+        ];
+        let atom = address_atom("Alpha::conv", (10, 20));
+        match resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc) {
+            ResolveOutcome::Match(c) => assert_eq!(c.def_id, 2),
+            _ => panic!("expected the usable overlapping span to win"),
+        }
+
+        // The usable span excludes the atom and the sibling is span-less:
+        // undecidable, so Ambiguous — not NoMatch (which requires every
+        // survivor to carry a usable span).
+        let atom = address_atom("Alpha::conv", (100, 110));
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Ambiguous
+        ));
+    }
+
+    /// End-to-end: a multi-candidate NoMatch (all usable spans exclude the
+    /// atom) leaves the heuristic RQN untouched — only Ambiguous clears it.
+    #[test]
+    fn test_enrich_no_match_preserves_heuristic_rqn() {
+        use std::collections::BTreeMap;
+
+        let mut by_match_key: HashMap<String, Vec<CharonFunInfo>> = HashMap::new();
+        by_match_key.insert(
+            "address::conv".to_string(),
+            vec![
+                candidate(
+                    1,
+                    "c::address::{c::T<u8> for c::Alpha}::conv",
+                    "src/address.rs",
+                    (100, 110),
+                ),
+                candidate(
+                    2,
+                    "c::address::{c::T<u32> for c::Alpha}::conv",
+                    "src/address.rs",
+                    (200, 210),
+                ),
+            ],
+        );
+        let enrichment = Enrichment {
+            by_match_key,
+            charon_version: Some("0.1.214".to_string()),
+            source: EnrichmentSource::Llbc,
+        };
+
+        let mut atom = address_atom("Alpha::conv", (10, 20));
+        atom.rust_qualified_name = Some("c::address::Alpha::conv".to_string());
+        let mut atoms = BTreeMap::new();
+        atoms.insert("k".to_string(), atom);
+
+        let enriched = enrich_atoms(&mut atoms, &enrichment, false);
+        assert_eq!(enriched, 0);
+        let atom = atoms.get("k").unwrap();
+        assert_eq!(
+            atom.rust_qualified_name.as_deref(),
+            Some("c::address::Alpha::conv")
+        );
+        assert_eq!(atom.charon_def_id, None);
+    }
+
+    /// Multi-candidate keys where no candidate is confirmable to the atom's
+    /// file — whether they live elsewhere or carry no file info at all (span-
+    /// less derive items) — are a plain NoMatch: the atom keeps its heuristic
+    /// RQN. Real case: `EdwardsPoint::fmt` vs. two span-less derived `fmt`
+    /// entries sharing the key `edwards::fmt`.
+    #[test]
+    fn test_resolve_multi_candidate_file_filter() {
+        let elsewhere = vec![
+            candidate(1, "c::other::{c::T for c::A}::conv", "src/other.rs", (5, 9)),
+            candidate(
+                2,
+                "c::other::{c::T for c::B}::conv",
+                "src/other.rs",
+                (12, 15),
+            ),
+        ];
+        let atom = address_atom("A::conv", (10, 20));
+        assert!(matches!(
+            resolve_charon_candidate(&elsewhere, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::NoMatch
+        ));
+
+        let mut unknown = elsewhere;
+        unknown[0].file_path = None;
+        unknown[1].file_path = None;
+        assert!(matches!(
+            resolve_charon_candidate(&unknown, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// End-to-end: an ambiguous collision stamps no provenance on either
+    /// enrichment source; only the LLBC source also clears the atom's
+    /// SCIP-derived heuristic RQN (Manifest never owned it).
+    #[test]
+    fn test_enrich_ambiguous_clears_rqn_and_stamps_nothing() {
+        use std::collections::BTreeMap;
+
+        for source in [EnrichmentSource::Llbc, EnrichmentSource::Manifest] {
+            let mut by_match_key: HashMap<String, Vec<CharonFunInfo>> = HashMap::new();
+            by_match_key.insert(
+                "address::conv".to_string(),
+                vec![
+                    candidate(
+                        1,
+                        "c::address::{c::T<u8> for c::Alpha}::conv",
+                        "src/address.rs",
+                        (0, 0),
+                    ),
+                    candidate(
+                        2,
+                        "c::address::{c::T<u32> for c::Alpha}::conv",
+                        "src/address.rs",
+                        (0, 0),
+                    ),
+                ],
+            );
+            let enrichment = Enrichment {
+                by_match_key,
+                charon_version: Some("0.1.214".to_string()),
+                source,
+            };
+
+            let mut atom = address_atom("Alpha::conv", (10, 20));
+            atom.rust_qualified_name = Some("c::address::Alpha::conv".to_string());
+            let mut atoms = BTreeMap::new();
+            atoms.insert("k".to_string(), atom);
+
+            let enriched = enrich_atoms(&mut atoms, &enrichment, false);
+            assert_eq!(enriched, 0, "source {source:?}");
+            let atom = atoms.get("k").unwrap();
+            // LLBC owns the RQN and clears it; Manifest never writes the RQN
+            // and so leaves the SCIP heuristic untouched.
+            let want_rqn = match source {
+                EnrichmentSource::Llbc => None,
+                EnrichmentSource::Manifest => Some("c::address::Alpha::conv"),
+            };
+            assert_eq!(
+                atom.rust_qualified_name.as_deref(),
+                want_rqn,
+                "source {source:?}"
+            );
+            assert_eq!(atom.charon_def_id, None, "source {source:?}");
+            assert_eq!(atom.charon_version, None, "source {source:?}");
+        }
+    }
+
+    /// Inclusive overlap: a one-line atom inside a multi-line Charon span
+    /// shares one line with it and must Match (the old exclusive formula
+    /// scored 0 and rejected it); an adjacent-but-disjoint span is NoMatch;
+    /// an atom without usable lines (`lines_start == 0`) yields no score,
+    /// so a multi-candidate collision it cannot arbitrate is Ambiguous.
+    #[test]
+    fn test_span_overlap_inclusive_one_line_atom() {
+        let inside = candidate(1, "c::m::{c::T for c::m::A}::f", "src/address.rs", (49, 51));
+        assert_eq!(span_overlap(&inside, 0, 0), None);
+        let elsewhere = candidate(3, "c::m::{c::U for c::m::A}::f", "src/address.rs", (80, 90));
+        let spanless_atom = address_atom("A::f", (0, 0));
+        assert!(matches!(
+            resolve_charon_candidate(
+                &[inside.clone(), elsewhere],
+                &spanless_atom,
+                EnrichmentSource::Llbc
+            ),
+            ResolveOutcome::Ambiguous
+        ));
+        let atom = address_atom("A::f", (50, 50));
+        assert_eq!(span_overlap(&inside, 50, 50), Some(1));
+        assert!(matches!(
+            resolve_charon_candidate(std::slice::from_ref(&inside), &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Match(_)
+        ));
+
+        let touching = candidate(2, "c::m::{c::T for c::m::A}::f", "src/address.rs", (51, 60));
+        assert_eq!(span_overlap(&touching, 40, 50), Some(0));
+        let atom = address_atom("A::f", (40, 50));
+        assert!(matches!(
+            resolve_charon_candidate(
+                std::slice::from_ref(&touching),
+                &atom,
+                EnrichmentSource::Llbc
+            ),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// A trait generic `format_type` cannot render becomes `?` instead of
+    /// vanishing, so `TryFrom<[u8; 32]> for X` and `TryFrom<u8> for X` keep
+    /// distinct qualified names.
+    #[test]
+    fn test_trait_impl_unformattable_generic_is_placeholder() {
+        let translated: serde_json::Value = serde_json::json!({
+            "trait_impls": [
+                {"def_id": 1, "impl_trait": {"generics": {"types": [
+                    {"Adt": {"id": {"Adt": 7}}},
+                    {"Array": [{"Literal": {"UInt": "U8"}}, {"Value": 32}]}
+                ]}}},
+                {"def_id": 2, "impl_trait": {"generics": {"types": [
+                    {"Adt": {"id": {"Adt": 7}}},
+                    {"Literal": {"UInt": "U8"}}
+                ]}}},
+                {"def_id": 3, "impl_trait": {"generics": {"types": [
+                    {"Array": [{"Literal": {"UInt": "U8"}}, {"Value": 32}]},
+                    {"Adt": {"id": {"Adt": 7}}}
+                ]}}}
+            ]
+        });
+        let mut names = HashMap::new();
+        names.insert(7u64, "c::X".to_string());
+        let map = build_trait_impl_type_info_map(&translated, &names);
+        assert_eq!(map[&1].trait_generics, vec!["?".to_string()]);
+        assert_eq!(map[&2].trait_generics, vec!["u8".to_string()]);
+        assert_eq!(map[&1].self_type, "c::X");
+        // An unrenderable *self* type gets no entry (never a `?` self type),
+        // so `format_name` degrades that impl to the `{impl Trait}` form.
+        assert!(!map.contains_key(&3));
+
+        // The placeholder reaches the rendered qualified name.
+        let path: Vec<serde_json::Value> = vec![
+            serde_json::json!({"Ident": ["c", 0]}),
+            serde_json::json!({"Impl": {"Trait": 1}}),
+            serde_json::json!({"Ident": ["try_from", 0]}),
+        ];
+        let mut trait_decls = HashMap::new();
+        trait_decls.insert(5u64, "core::convert::TryFrom".to_string());
+        let mut impl_to_decl = HashMap::new();
+        impl_to_decl.insert(1u64, 5u64);
+        assert_eq!(
+            format_name(&path, &trait_decls, &impl_to_decl, &names, &map),
+            "c::{core::convert::TryFrom<?> for c::X}::try_from"
+        );
     }
 
     /// Serde contract: the fields serialize under their kebab-case keys, are

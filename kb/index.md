@@ -1,6 +1,6 @@
 # probe-rust Knowledge Base
 
-- **last-updated**: 2026-04-07
+- **last-updated**: 2026-09-01
 - **status**: draft
 - **owner**: lacra
 

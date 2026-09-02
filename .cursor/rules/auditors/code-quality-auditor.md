@@ -4,7 +4,7 @@ Check the implementation against KB-defined properties and architectural constra
 
 ## Process
 
-1. Read `kb/engineering/properties.md` to load all invariants (P1-P19, C1-C3)
+1. Read `kb/engineering/properties.md` to load all invariants (P1-P20, C1-C3)
 2. Read `kb/engineering/architecture.md` to understand component boundaries
 3. Read `kb/engineering/glossary.md` for precise terminology
 4. For each property, verify the implementation satisfies it:
@@ -30,6 +30,7 @@ Check the implementation against KB-defined properties and architectural constra
 - **P17 (Public-API override non-fatal)**: Verify `--with-public-api` failure warns and preserves SCIP-walk values
 - **P18 (cfg predicate)**: Verify `cfg` folds own + same-file + mount-chain gates, under-gating only; `file-cfg` matches the chain component
 - **P19 (Conservative facts)**: Verify unmounted inference valves (parse failure, unresolvable mod, include!, mod-mentioning macro, cycle, chain cap) and lib/bin scoping; `is-foreign`/`trait-required` AST judgments
+- **P20 (Charon candidate resolution)**: Verify the multi-candidate filter pipeline (same-file → self-type → dedup → strict-max span), the three outcomes (Match / Ambiguous stamps nothing and clears RQN on the LLBC source only / NoMatch keeps heuristic RQN), the self-type filter's no-signal fallback, inclusive span overlap, Manifest fail-closed single-candidate validation, and object-form literal types plus the `?` placeholder for unrenderable trait generics in `format_type`
 
 ### Architecture checks
 
