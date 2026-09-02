@@ -1,132 +1,121 @@
 ---
 auditor: code-quality-auditor
-date: 2026-09-01
-status: resolved 2026-09-01 — 0 open (was 0 critical, 2 warnings, 2 info; Info 2 acknowledged as won't-fix)
+date: 2026-09-02
+status: clean — 0 critical, 0 warning, 1 info (round 3; round-2 Info resolved)
 ---
 
-Scope: uncommitted working-tree changeset — multi-candidate Charon resolution
-reworked into a filter pipeline in `src/charon_names.rs` (`resolve_charon_candidate`,
-`validate_single_candidate`, `ResolveOutcome`, `span_overlap`, self-type helpers,
-object-form literal handling in `format_type`), new property P20, and KB updates
-(properties/architecture/glossary/index/CLAUDE.md). Deep verification on P20, P10,
-P15, and change-introduced doc staleness; grep-level sanity pass on P1-P9, P11-P14,
-P16-P19 (only `charon_names.rs` changed in `src/`, so those properties' code paths
-are untouched). `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings`
-clean, 239 lib + 3 integration tests pass.
+Scope: round 3 over the uncommitted working tree on `fix/rqn-ambiguity` (on top of
+`db243e7`). Since round 2 only docs and doc comments/tests changed:
+`kb/engineering/{glossary,properties,architecture}.md` (new glossary entries
+**File proof**, **LLBC (enrichment source)**, **Loop helper (Manifest)**; P15 and
+P20 wording), `docs/SCHEMA.md`, `CHANGELOG.md`, and in `src/charon_names.rs` the
+`validate_single_candidate` doc, `CharonFunInfo` line docs, `span_overlap` /
+`in_atom_file` / `ResolveOutcome::Ambiguous` docs, and the extended
+`test_resolve_multi_candidate_eq_collision` /
+`test_resolve_multi_candidate_try_from_split_by_span` tests. P20 re-verified
+clause by clause against the code; every new doc sentence checked for drift.
+`cargo clippy --all-targets -- -D warnings` clean, `cargo fmt --all -- --check`
+clean, `cargo test` 246 lib + 3 integration passed (1 ignored).
+
+## Round-2 findings — status
+
+| # | Round-2 finding | Status | Evidence |
+|---|-----------------|--------|----------|
+| I1 | CHANGELOG `[Unreleased]` unrenderable-kind list omitted `dyn` | **Resolved** | `CHANGELOG.md:12` now reads "(slices, arrays, tuples, raw pointers, `dyn`, unknown literal encodings)", matching P20 (`properties.md:208`) and the code comment (`charon_names.rs:315-316`). |
 
 ## Critical
 
-None. P20 as written in `kb/engineering/properties.md` is satisfied by the
-implementation; every edge case checked holds:
+None. P20 re-verified against `src/charon_names.rs`:
 
-- **Filter order** — `resolve_charon_candidate` (`charon_names.rs:834-923`) applies
-  exactly the documented sequence: same-file → self-type → dedup on
-  `(def_id, qualified_name)` → strict-maximum positive span overlap.
-- **Empty candidate lists** — cannot occur in `by_match_key` (`entry().or_default().push`
-  always pushes ≥1), and an empty slice would still fall through to the same-file
-  filter and return `NoMatch`, never panic or pick.
-- **Atoms with `lines_start == 0`** — `span_overlap` returns `None` (line 662-663);
-  a lone candidate is then accepted on file-path proof alone, and a multi-candidate
-  collision becomes `Ambiguous` (missing span data = undecidable), matching the
-  glossary's "tie or missing span data leaves the collision ambiguous".
-- **`file_path` `Some("")` vs `None`** — both rejected under Manifest
-  (`has_usable_file`, lines 788-791: fail-closed, no `charon-def-id` without file
-  proof); both lenient-accepted only for a *lone* LLBC candidate; both excluded
-  from the multi-candidate same-file filter (lines 846-850), so an unverifiable
-  candidate is never picked under a collision.
-- **Manifest fail-closed survives the multi→1 reduction** — the dedup-to-single
-  path re-routes through `validate_single_candidate` (line 892); the span-stage
-  winner (line 916) bypasses it but by construction already carries a non-empty
-  file path matching the atom (same-file filter) plus a positive overlap, i.e.
-  strictly more evidence than `validate_single_candidate` demands.
-- **Tie handling** — equal best overlaps among deduped survivors → `Ambiguous`
-  (line 917); all spans usable and none positive → `NoMatch` (line 920); any
-  missing span with no positive winner → `Ambiguous` (line 921). Matches P20's
-  three-outcome table exactly.
-- **Ambiguous clears everything, both sources** — `enrich_atoms` pre-clears
-  `charon_def_id`/`charon_version` for every atom (lines 1081-1082) and the
-  `Ambiguous` arm sets `rust_qualified_name = None` with no source check
-  (line 1137). Pinned by `test_enrich_ambiguous_clears_rqn_and_stamps_nothing`,
-  which iterates over both `EnrichmentSource::Llbc` and `::Manifest` and asserts
-  all three fields are `None`.
-- **No first-match-wins path remains** — no arbitrary index into the candidate
-  list anywhere in the resolution pipeline; `disambiguate_by_span` is gone.
-- **`format_type` object-form literals** — `{"UInt":"U8"}`/`{"Int":"I32"}`/
-  `{"Float":"F64"}` → lowercased primitive name (lines 249-253), pinned by
-  `test_format_type_literal_object_forms`; string-form (`"Bool"`, `"Char"`)
-  unchanged.
-- **Test coverage** — 12 new/updated resolution tests cover cross-file rejection,
-  same-file span mismatch, span-less lone candidates (accepted for LLBC), the
-  eq/try_from collisions, self-type splitting, all-spans-elsewhere NoMatch,
-  dedup, and the file filter.
+- **Filter order** — `resolve_charon_candidate` (`:844-930`): lone candidate →
+  `validate_single_candidate` (`:849`); same-file via `in_atom_file` (`:853-856`)
+  → self-type (`:868-887`) → dedup on `(def_id, qualified_name)` (`:889-897`) →
+  strict-max positive overlap (`:905-929`). No index-0 pick.
+- **Self-type narrowing-only** — `matching.is_empty() → same_file` (`:880-884`),
+  `None => same_file` (`:886`); `self_type_from_qualified_name` reads only the
+  last impl segment's self type, never trait type arguments.
+- **Lone survivor / LLBC file-less exception / Manifest fail-closed** —
+  `validate_single_candidate` (`:793-824`): `file_path` `None`/`""` → `Match`
+  for `Llbc`, `NoMatch` for `Manifest`; `!in_atom_file` → `NoMatch`; usable
+  overlap `<= 0` → `NoMatch`; else `Match`. Dedup-to-single re-enters it
+  (`:897`). Multi-candidate keys with no same-file candidate → `NoMatch`
+  (`:857-866`). Matches P20's exception sentence, glossary **File proof**
+  ("Manifest rejects any lone candidate without file proof; LLBC accepts a lone
+  candidate that has none at all"), and SCHEMA `charon-def-id` (`:172`).
+- **Inclusive overlap** — `span_overlap` (`:668-677`) is
+  `min(atom_end, c_end) - max(atom_start, c_start) + 1`; `None` for
+  `atom_start == 0` or candidate lines absent / `line_start == 0`. Matches P20
+  (`:200`), glossary **Span disambiguation**, and the new `CharonFunInfo`
+  line docs (`:42-47`: 1-based, `0`/`None` = no usable span).
+- **Three outcomes** — unique max → `Match`; tied max → `Ambiguous` (`:924`);
+  all usable, none positive → `NoMatch` (`:927`); any missing span with no
+  positive winner → `Ambiguous` (`:928`). A positive span beats a span-less
+  sibling (`Match`), pinned by `test_resolve_multi_candidate_mixed_span_availability`
+  and exercised by the extended `eq` collision test (span-less derived
+  `PartialEq for ServiceId` loses to the manual impl at 338-340).
+- **Ambiguous arm** — `enrich_atoms` pre-clears def-id/version (`:1087-1088`);
+  `Ambiguous` clears `rust_qualified_name` only under `EnrichmentSource::Llbc`
+  (`:1148-1150`), never touches `is_public`. `Match`: RQN override LLBC-only
+  (`:1117-1119`), `is_public` only when carried (`:1124-1126`), def-id +
+  version together or not at all (`:1131-1134`). Matches P20's Match/Ambiguous
+  bullets, glossary **LLBC (enrichment source)** ("the only source that writes
+  and, on Ambiguous, clears the RQN"), and SCHEMA's coupling invariant (`:175`).
+- **`format_type` / `?` placeholder** — string literals `Bool`/`Char`
+  (`:240-247`); object literals via `UInt`/`Int`/`Float` (`:254-258`); else
+  `None`. `build_trait_impl_type_info_map` maps `None` on `types[1..]` to `?`
+  (`:320-324`), `None` on `types[0]` skips the entry (`:313`) → type-less
+  `{impl Trait}` segment, as P20's last paragraph states.
 
 ## Warnings
 
-1. **CHANGELOG has no entry for an output-affecting behavior change.** The last
-   entry is `[0.10.0] - 2026-08-11` and there is no `[Unreleased]` section, yet
-   this changeset changes emitted atoms: an ambiguous collision now *clears*
-   `rust-qualified-name` (previously a first-match candidate's RQN or the SCIP
-   heuristic was kept), and object-form literal types change trait-impl RQN
-   strings (`TryFrom<u8>` vs one collapsed name). Consumers diffing probe output
-   across versions need this recorded. If the entry is planned for the release
-   commit, add it before merging.
-
-2. **Auditor checklists not updated to P20.**
-   `.cursor/rules/auditors/code-quality-auditor.md:7` still reads "P1-P19, C1-C3"
-   and has no P20 check item; `.cursor/rules/auditors/test-quality-auditor.md`
-   (lines 7 and 26) likewise stops at P19. The changeset updated `CLAUDE.md` and
-   `kb/engineering/index.md` to P1-P20 but missed the auditor briefs — the same
-   drift the 2026-08-11 round fixed for P17-P19.
+None.
 
 ## Info
 
-1. **Stale comment referencing removed `disambiguate_by_span`** —
-   `src/charon_names.rs:2776` (inside
-   `test_resolve_single_candidate_real_file_zero_lines_accepted`): "must be
-   treated as 'no span' (like disambiguate_by_span's `s > 0`)". The function no
-   longer exists; the live equivalent is `span_overlap`'s `s > 0` guard. The
-   `CHANGELOG.md:72` mention is a historical 0.6.3 entry and is correct as a
-   record; the plan doc `docs/charon-enrichment-from-manifest-plan.md` describes
-   `resolve_charon_candidate` at design time and reads fine against the new code.
-   No other stale references to the removed function or the first-match-wins
-   fallback found in code comments, `docs/`, or `kb/` (the P20/glossary mentions
-   are deliberate descriptions of the *removed* behavior).
-
-2. **Untracked debris at repo root** — `has-body.json` and `no-body.json` are
-   untracked at the project root and look like manual-testing leftovers; delete
-   or gitignore before committing.
+1. **`span_overlap` doc slightly over-generalizes the `0`-line guard** —
+   `charon_names.rs:666-667` says `None` when "candidate lines absent/`0`", but
+   the match arm (`:673`) guards only `line_start > 0`. A candidate with
+   `line_start > 0` and `line_end == 0` (only reachable from a malformed LLBC
+   span with `beg` but no `end`, since `build_fun_span_map` defaults each to
+   `0` independently, `:537-546`) yields a negative overlap → `NoMatch` rather
+   than `None`. Conservative, so not a P20 violation; a one-word doc tweak
+   ("`line_start` absent/`0`") or `&& e >= s` guard if wanted.
 
 ## Verified clean
 
-- **P10 (is-public from SCIP, Charon override only when carried)** —
-  `is_signature_public` (`lib.rs:162`) unchanged; `enrich_atoms` overrides
-  `is_public` only inside `if let Some(is_public) = best.is_public`
-  (`charon_names.rs:1118-1120`), never clobbering the SCIP value with `None`
-  (Manifest candidates always carry `is_public: None`). Pinned by
-  `test_enrich_does_not_clobber_is_public_with_none` and
-  `test_enrich_propagates_visibility`. The `Ambiguous` arm touches only RQN,
-  never `is_public`.
-- **P15 (Charon non-fatal)** — `enrich_with_charon` (`commands/extract.rs:287-322`)
-  warns and returns on both LLBC generation failure and parse failure;
-  `enrich_from_translation_manifest` warns and skips on manifest read/parse
-  errors without falling back to a charon run. Pinned by
-  `test_charon_failure_is_non_fatal`.
-- **Sanity pass (grep-level)** — P1 (schema `"3.0"` in `metadata.rs:13` matches
-  `docs/SCHEMA.md`), P4 (`add_external_stubs` present, untouched), P5
-  (`dependencies: BTreeSet<String>`), P6 (`normalize_code_name` call sites
-  present), P7 (`is_function_like_kind` in `constants.rs`), P13
-  (`sanitize_for_filename` in `metadata.rs`), P14 (`regenerate` flag honored in
-  `scip_cache.rs:126-131`). P2-P3, P8-P9, P11-P12, P16-P19 live entirely outside
-  the changed file and their tests are in the passing suite; no re-verification
-  needed beyond the 2026-08-11 audit.
-- **KB consistency** — the updated glossary ("Match key", "Span disambiguation"),
-  `architecture.md` Charon section, `index.md`, and `CLAUDE.md` all agree with
-  the P20 text and with the code; the glossary's `#span-disambiguation` anchor
-  still resolves.
-
-## Resolution (2026-09-01)
-
-- **[W1] RESOLVED** — CHANGELOG.md now has an `[Unreleased]` section with a Fixed entry covering both output-affecting changes: RQN clearing on ambiguous collisions (filter pipeline, no first-match-wins) and object-form literal types in `format_type` (`TryFrom<u8>` vs collapsed RQNs).
-- **[W2] RESOLVED** — `.cursor/rules/auditors/code-quality-auditor.md` and `test-quality-auditor.md` both read "P1-P20, C1-C3"; code-quality-auditor.md line 33 adds a dedicated P20 check item (filter pipeline, three outcomes, Manifest fail-closed, object-form literals).
-- **[I1] RESOLVED** — `grep disambiguate_by_span src/charon_names.rs` returns no matches; the stale test comment is gone.
-- **[I2] ACKNOWLEDGED (won't-fix)** — `has-body.json` and `no-body.json` are pre-existing user files at the repo root, deliberately kept; not part of this changeset.
+- **New glossary entries** — **File proof** (`glossary.md:67`) matches
+  `in_atom_file` (`:682-685`: non-empty path, `normalize_source_path` equality).
+  **Loop helper (Manifest)** (`:79`) matches the dedup stage and
+  `Enrichment::from_translation_json` (`:973`). **LLBC (enrichment source)**
+  (`:77`) matches the `Match`/`Ambiguous` arms and cites `resolve_enrichment`
+  (`:1041`) as the single dispatch point — correct, `extract.rs:318` calls it.
+- **P15 wording** — `properties.md:151` now covers the Manifest source:
+  `enrich_from_manifest` (`extract.rs:311-345`) warns on read/parse error
+  (`:341-342`) and on a missing `charon_version` (`:332-336`), never aborts;
+  LLBC parse failure warns at `extract.rs:301-302`. `Where` lists
+  `commands/extract.rs`, `charon_cache.rs` — both exist.
+- **`validate_single_candidate` doc** (`:783-792`) — the parenthetical "a
+  candidate *with* a matching file path but no usable lines is accepted on the
+  file match, on both sources" matches `:817-823` (`span_overlap` `None` →
+  fall through to `Match` regardless of `source`); pinned by
+  `test_resolve_single_candidate_real_file_zero_lines_accepted`.
+- **Extended tests** — `test_resolve_multi_candidate_eq_collision` (`:2931`)
+  and `test_resolve_multi_candidate_try_from_split_by_span` (`:2980`) doc
+  claims verified against their candidate sets: `SpecificServiceId` atoms are
+  split off by self type alone (single survivor → validated), `DeviceId`
+  `TryFrom<u8|i32|u32>` split by span alone.
+- **P1** — `metadata.rs:13` `SCHEMA_VERSION = "3.0"` matches `docs/SCHEMA.md:3`.
+- **SCHEMA rows** — `rust-qualified-name` (`:161`), `charon-def-id` (`:172`),
+  `charon-version` (`:173`), coupling invariant (`:175`), comparison table
+  (`:408-411`) all consistent with `enrich_atoms`.
+- **CLI flags** — `architecture.md` mentions `--auto-install`, `--with-charon`,
+  `--with-public-api`, `--translation` (all present in `main.rs`; `--include` is
+  Charon's own flag, correctly attributed). `last-updated: 2026-09-02`.
+- **Architecture** — `architecture.md:96-100, 185` describe both enrichment
+  sources, the filter pipeline, LLBC-only RQN clearing, Manifest fail-closed,
+  and inclusive overlap consistently with P20 and the code.
+- **Auditor brief** — `code-quality-auditor.md:33` P20 item matches current P20.
+- **P12 / C1-C3** — unchanged; no binary-crate `is-public-api` special-casing;
+  C1-C3 tests still present and passing.
+- **Working tree** — `git status` shows only the ten expected modified files, no
+  untracked debris; fmt/clippy/test all clean.

@@ -1,76 +1,82 @@
 ---
 auditor: ambiguity-auditor
-date: 2026-09-01
-status: resolved 2026-09-01 — 0 open (was 1 critical, 4 warnings, 3 info)
+date: 2026-09-02
+status: 0 critical, 2 warnings, 4 info
 ---
 
-Scope: full KB pass with focus on the new P20 (Charon candidate resolution) and
-the updated glossary entries ("Match key", "Span disambiguation") and
-architecture.md Charon paragraph. P20's technical claims were verified against
-`src/charon_names.rs` and are accurate: the filter order (file → self-type →
-dedup → span), strict-maximum overlap with tie → Ambiguous, all-usable-spans-
-exclude → NoMatch, missing-span → Ambiguous, single-line containment, RQN
-clearing on Ambiguous, and object-form literal handling in `format_type` all
-match the code. The findings below are KB-internal: undefined terms, missing
-cross-references, and staleness.
+Round 3 on the `fix/rqn-ambiguity` working tree. Every finding of the
+2026-09-02 round-2 report was re-checked against the current text of
+kb/engineering/{properties,glossary,architecture}.md, docs/SCHEMA.md,
+CHANGELOG.md and `src/charon_names.rs` (`resolve_charon_candidate`,
+`validate_single_candidate`, `span_overlap`, `in_atom_file`,
+`self_type_from_*`, `bare_type_name`, `ResolveOutcome`, `enrich_atoms`,
+`resolve_enrichment`) and `src/commands/extract.rs` (`enrich_from_manifest`).
+Then a focused pass for contradictions among P20, the glossary entries it
+links (Candidate resolution, File proof, LLBC/Manifest sources, Loop helper,
+Span disambiguation, Self type, RQN), SCHEMA.md's `rust-qualified-name` /
+`charon-def-id` / `is-public-api` rows, and the code.
+
+## Round-2 findings — status
+
+| # | Title | Status | Evidence |
+|---|-------|--------|----------|
+| C1 | Glossary "Library crate" asserted retired P12 behaviour | **Resolved** | Entry now: "`is_library_crate` only labels the extract summary; `is-public-api` is computed identically for library and binary-only crates (only under `--with-public-api`, P11; P12 is retired)". Agrees with "Binary-only crate", "is-public-api", P11, P12. |
+| C2 | SCHEMA compatibility row: `is-public-api` "Always for internal atoms (SCIP module walk)" | **Resolved** | Row now: "Optional: only under `--with-public-api` (`true`/`false` for atoms it reaches; absent otherwise and for stubs)". Agrees with the field-table row, the 2026-08-31 changelog bullet and P11. |
+| W1 | CHANGELOG "span-less items keep the heuristic RQN" | **Resolved as recommended** (residual imprecision → W1 below) | Now: "A multi-candidate key whose candidates are all provably elsewhere or unverifiable (span-less) keeps the heuristic RQN; a lone span-less LLBC candidate is still accepted on match key alone, as before." The lone-candidate qualifier is in place. |
+| W2 | Glossary "RQN" two-state | **Resolved** | "…when `--with-charon` is used and candidate resolution finds a Match; an atom no Charon entry matched (NoMatch) keeps the heuristic form even under `--with-charon`." Links [candidate resolution]. |
+| W3 | "File proof" undefined | **Resolved** (see I1 for wording, I3 for ordering) | Glossary "File proof" entry added (non-empty path normalizing to the atom's `code-path`, `in_atom_file`; span is a separate signal). P20 links it; the Manifest glossary entry and architecture use the same term. |
+| W4 | "Span disambiguation" omitted the NoMatch exit | **Resolved** (see W2 below for a different gap in the same sentence) | "When every survivor carries a usable span and none overlaps the atom, the stage ends NoMatch instead (e.g. an inherited default trait method's body vs. its impls further down the file) and the heuristic RQN is kept." Matches `overlaps.iter().all(|o| o.is_some())`. |
+| I1 | Architecture omitted `charon-version` | **Resolved** | Step 5: "charon-def-id/charon-version from a Charon LLBC (legacy)"; data flow: "charon-def-id+charon-version (both)". |
+| I2 | SCHEMA changelog garbled phrase | **Resolved** | "`?` for trait type arguments probe-rust cannot render (slice, array, tuple, raw pointer, `dyn`)". |
+| I3 | P15 silent on manifest without `charon_version` | **Resolved** | "or one without a `charon_version` (matched atoms then get no def-id/version pair)". Matches `enrich_from_manifest`'s `has_version == false` branch and the pre-clear in `enrich_atoms`. |
+| I4 | "Legacy" unexplained in LLBC entry | **Resolved** | "called *legacy* because it is slated for retirement once every Aeneas project ships a `translation.json` (`resolve_enrichment` is the single dispatch point between the two)". |
+| I5 | P20 Where line omitted `bare_type_name` | **Resolved** | Present in the Where line. |
+| I6 | `validate_single_candidate` doc over-widened the lenient case | **Resolved** | Doc now: "a candidate with no file path at all (`None`/`""`) is still accepted on match-key alone … (A candidate *with* a matching file path but no usable lines is accepted on the file match, on both sources.)" Matches the code. |
+
+All twelve round-2 findings are closed. Nothing from rounds 1 or 2 remains open.
 
 ## Critical
 
-### [C1] "Manifest" enrichment source is load-bearing in P20 but undefined everywhere in the KB
-- **Location**: kb/engineering/properties.md P20 ("Manifest loop helpers share the parent's `def_id`", "Manifest fails closed on candidates without file proof"); kb/engineering/glossary.md (no entry); kb/engineering/architecture.md (pipeline step 5 and the Charon component describe only `--with-charon` LLBC enrichment)
-- **Issue**: P20 references "Manifest" twice as if the reader knows what it is. It is `EnrichmentSource::Manifest` — the `--translation <manifest>` path that enriches atoms from an Aeneas `translation.json` (`src/main.rs`, `src/charon_names.rs`, documented in docs/SCHEMA.md §`charon-def-id`). The KB never mentions `--translation` or the manifest source at all: no glossary entry, no architecture pipeline step, no component note. Worse, P20's "Match — exactly one validated candidate: enrich as usual" hides that the two sources behave differently on Match: the LLBC path overrides `rust-qualified-name`, the Manifest path deliberately does NOT (it only stamps `charon-def-id`; `enrich_atoms` in charon_names.rs). A reader of the KB alone cannot parse P20's Manifest clauses or know that "as usual" is source-dependent. Per the severity guide, an undefined term used in a property is critical.
-- **Recommendation**: Add a glossary entry "Manifest (enrichment source)" defining the `--translation` path (Aeneas `translation.json`, `def_id` join, fails closed without file proof, never overrides RQN), add the `--translation` alternative to architecture.md step 5 and the Charon component, and split P20's Match outcome by source (LLBC overrides RQN; Manifest stamps only `charon-def-id`).
+None.
 
 ## Warnings
 
-### [W1] "Candidate resolution" has no glossary entry; the Match key entry links it to a narrower term
-- **Location**: kb/engineering/glossary.md "Match key" ("[candidate resolution](#span-disambiguation) narrows them by file, self type, and span"); "Span disambiguation" ("The span stage of Charon candidate resolution (P20)")
-- **Issue**: The whole-process term "candidate resolution" (P20's subject and title) is defined nowhere; the glossary hyperlinks the phrase to "Span disambiguation", which explicitly defines itself as only the *span stage* of that process. The link target is a part standing in for the whole, so a reader following it gets the fourth filter and nothing about the file, self-type, or dedup stages, or the three outcomes.
-- **Recommendation**: Add a "Candidate resolution" glossary entry (the four-stage narrowing plus Match/Ambiguous/NoMatch outcomes, pointing to P20) and have "Match key" link to it; keep "Span disambiguation" as the span-stage sub-entry.
+### [W1] CHANGELOG "unverifiable (span-less)" names the wrong attribute; contradicts P20 for same-file span-less collisions
+- **Location**: CHANGELOG.md Unreleased, second bullet ("A multi-candidate key whose candidates are all provably elsewhere or unverifiable (span-less) keeps the heuristic RQN"); kb/engineering/properties.md P20 ("same-self-type impls … are split by span alone; if their spans are unusable they end Ambiguous"); `src/charon_names.rs` `resolve_charon_candidate` comment in the `same_file.is_empty()` branch ("unverifiable (span-less compiler-generated items, e.g. derived `fmt`)")
+- **Issue**: The multi-candidate NoMatch shortcut fires on the *file* filter (`in_atom_file` on every candidate false), so "unverifiable" means *file-less*, not span-less. A multi-candidate key whose candidates are all in the atom's file but span-less does **not** keep the heuristic RQN: after dedup two or more distinct survivors reach the span stage with `overlaps` all `None` → Ambiguous → under `--with-charon` the RQN is *cleared*. Read literally, the CHANGELOG sentence says the opposite of P20 for that case. The code comment carries the same parenthetical but sits in a branch that already established "no candidate is in the file", so it is merely loose; the CHANGELOG has no such context.
+- **Recommendation**: CHANGELOG: "A multi-candidate key none of whose candidates can be placed in the atom's file (other files, or no file path at all) keeps the heuristic RQN; a lone file-less LLBC candidate is still accepted on match key alone, as before." Optionally tighten the code comment to "unverifiable (no file path at all — span-less compiler-generated items such as derived `fmt`)".
 
-### [W2] Domain terms in P20/P18 missing glossary entries: `charon-def-id`, probe-aeneas, self type
-- **Location**: kb/engineering/properties.md P20 ("per the `charon-def-id` join contract", "probe-aeneas would link the wrong Lean translation", "self-type match"), P18 ("consumers (probe-aeneas) evaluate them"); kb/engineering/glossary.md (no entries)
-- **Issue**: (1) `charon-def-id` is a schema field with a documented coupling invariant and join contract in docs/SCHEMA.md, but P20 cites "the `charon-def-id` join contract" with no link and the glossary has no entry — the contract is unfindable from the KB. (2) probe-aeneas is now named in two properties as the consumer whose behavior motivates design decisions (RQN clearing, cfg evaluation) but is defined nowhere in this KB, not even as a pointer to the ecosystem KB that kb/index.md references. (3) "self type" is used with a tool-specific meaning (extracted from the atom's `display_name` `Type::` prefix on one side and the candidate's last impl segment on the other) in P16, P20, "Match key", and "Span disambiguation", without a definition.
-- **Recommendation**: Add glossary entries for `charon-def-id` (linking to docs/SCHEMA.md for the coupling invariant / join contract), probe-aeneas (one line plus a link to the probe ecosystem KB), and self type (both extraction sides); link P20's "join contract" phrase to SCHEMA.md.
-
-### [W3] RQN glossary entry not updated for P20's cleared state and the Manifest no-override rule
-- **Location**: kb/engineering/glossary.md "RQN (Rust Qualified Name)"
-- **Issue**: The entry says RQN is "derived heuristically from file path + display name, or precisely from Charon LLBC when `--with-charon` is used." After P20 there is a third state the entry omits: the field can be *absent* — cleared even of the heuristic value — when a Charon collision is ambiguous. It also omits that only the LLBC source ever replaces the heuristic (the Manifest source keeps the SCIP-derived RQN, see C1). Consumers reading the glossary would assume every internal atom carries an RQN.
-- **Recommendation**: Extend the RQN entry: "May be absent when Charon candidate resolution ends Ambiguous (P20 — a wrong RQN is worse than none); the `--translation` manifest source never overrides the heuristic form."
-
-### [W4] Stale stamps: kb/index.md (2026-04-07, still "draft") and CLAUDE.md property range (P1-P19)
-- **Location**: kb/index.md front matter (`last-updated: 2026-04-07`, `status: draft`); CLAUDE.md Knowledge Base section ("numbered invariants P1-P19, known issues C1-C3")
-- **Issue**: kb/index.md's stamp is nearly five months old (>30-day threshold) and the KB is clearly past "draft" (it is declared the source of truth). CLAUDE.md's summary of properties.md is one generation behind after P20 landed — the same drift the previous audit's W6 flagged for P16→P19. kb/engineering/index.md correctly says P1-P20.
-- **Recommendation**: Re-stamp kb/index.md (and reconsider `status: draft`); bump CLAUDE.md to "P1-P20".
+### [W2] Glossary "Span disambiguation": "missing span data leaves the collision ambiguous" is false when another survivor overlaps positively
+- **Location**: kb/engineering/glossary.md, "Span disambiguation" ("A tie or missing span data leaves the collision ambiguous — nothing is stamped and (LLBC source) the atom's RQN is cleared rather than guessed."); `src/charon_names.rs` `resolve_charon_candidate` span stage
+- **Issue**: The code computes `best` over the survivors that *have* a positive overlap; when exactly one survivor holds that maximum, the result is **Match** even if other survivors have no span at all (`best = Some(n)` → `winners == [single]`). Only when no survivor overlaps positively does missing span data force Ambiguous (P20's "mix of an excluding usable span and a span-less survivor"). So a same-file `#[derive]`-generated span-less candidate beside a manual impl whose span contains the atom resolves to the manual impl — the glossary says it ends Ambiguous and, on the LLBC path, that the RQN is cleared. The entry's own preceding sentence ("only a strict-maximum positive overlap wins") is correct; the tie/missing sentence over-generalises it. P20 does not state this Match sub-case either, though nothing in P20 contradicts it.
+- **Recommendation**: "A tie for the maximum leaves the collision ambiguous; so does missing span data when *no* survivor overlaps positively (a span-less survivor beside a single positively overlapping one does not block that one from winning). Ambiguous: nothing is stamped and (LLBC source) the atom's RQN is cleared rather than guessed." Add one clause to P20's Match bullet: "span-less co-survivors do not block a unique positive-overlap winner".
 
 ## Info
 
-### [I1] Summaries of candidate resolution list three of its four stages
-- **Location**: kb/engineering/glossary.md "Match key" ("narrows them by file, self type, and span"); kb/engineering/architecture.md Charon component ("resolved by successive file, self-type, and span filters")
-- **Issue**: Both summaries omit the dedup stage (`(def_id, qualified_name)` collapse) that P20 and `resolve_charon_candidate` include. Not a contradiction — the dedup stage never changes which impl wins — but two of the three descriptions of the same pipeline disagree with the third on its shape.
-- **Recommendation**: Either add "dedup" to both summaries or mark them explicitly as abridged ("file, self-type, and span filters; see P20 for the full sequence").
+### [I1] Glossary "File proof": "a lone candidate that has none at all" is ambiguous between "no file proof" and "no file path"
+- **Location**: kb/engineering/glossary.md, "File proof" (last sentence: "the LLBC source accepts a lone candidate that has none at all")
+- **Issue**: "None at all" reads as "no file proof at all", but a lone LLBC candidate whose file path is present and names a *different* file has no file proof and is rejected by both sources (`validate_single_candidate`: `has_usable_file && !in_atom_file → NoMatch`). The accepted case is specifically an absent/empty path. P20 and the code doc say "no file path at all"; the glossary entry that defines the term should too.
+- **Recommendation**: "…the LLBC source accepts a lone candidate that carries no file path at all (`None`/`""`); a candidate whose path names another file is rejected by both."
 
-### [I2] P20 wording: "plausibly in the atom's file" understates a hard guarantee; Where omits the atom-side extractor
-- **Location**: kb/engineering/properties.md P20, Ambiguous bullet and Where line
-- **Issue**: Ambiguous survivors have all passed the normalized-file-path equality filter — they are provably in the atom's file, not "plausibly"; the hedge makes the outcome sound weaker than the code guarantees. Separately, the Where line names the candidate-side `self_type_from_qualified_name` but not the atom-side `self_type_from_display_name` used by the same filter.
-- **Recommendation**: Replace "plausibly" with "confirmed (by normalized file path)" and add `self_type_from_display_name` to the Where line.
+### [I2] Glossary "LLBC (enrichment source)" says a Match overrides `is-public` unconditionally
+- **Location**: kb/engineering/glossary.md, "LLBC (enrichment source)" ("on a Match overrides the atom's RQN and `is-public`"); contrast P20 Match bullet ("`is-public` (when carried)"), docs/SCHEMA.md `is-public` row ("a candidate without visibility … never clobbers the SCIP value")
+- **Issue**: `enrich_atoms` writes `is_public` only when `best.is_public` is `Some`; an LLBC entry lacking `attr_info.public` leaves the SCIP value. The glossary sentence drops the qualifier the other two documents carry.
+- **Recommendation**: "overrides the atom's RQN and, when the entry carries visibility, `is-public`".
 
-### [I3] "Blanket impl" glossary definition narrower than P20's use of the term
-- **Location**: kb/engineering/glossary.md "Blanket impl" (defined as "a standard library trait implementation ... filtered during `--with-public-api`"); kb/engineering/properties.md P20 NoMatch bullet ("a trait's provided method vs. its blanket impls")
-- **Issue**: P20 uses "blanket impls" in the general Rust sense (any crate's blanket implementations of its own trait, spans further down the file), while the glossary entry defines the term only in its cargo-public-api std-trait filtering role. A reader resolving P20's term via the glossary lands on a definition that does not fit the sentence.
-- **Recommendation**: Generalize the glossary entry (general Rust meaning first, then the cargo-public-api filtering role as a note), or reword P20 to "its impls further down the file".
+### [I3] Glossary alphabetical order broken by the new "File proof" entry (and two pre-existing entries)
+- **Location**: kb/engineering/glossary.md ("Terms are listed alphabetically."); "File proof" sits between "Impl-descriptor resolution" and "Inherited default trait method"; pre-existing: "Binary-only crate" after "Blanket impl", "Candidate form" before "Call attribution"
+- **Issue**: The file promises alphabetical order and the newly added entry is the furthest out of place, making the term hard to find by scanning.
+- **Recommendation**: Move "File proof" between "File gate" and "Foreign declaration"; swap the two pre-existing pairs while there.
 
-## Resolution (2026-09-01)
+### [I4] Glossary "Span disambiguation" frames overlap as "LLBC span overlap" though the stage runs on Manifest spans too
+- **Location**: kb/engineering/glossary.md, "Span disambiguation" ("compared by LLBC span overlap with the atom's source line range"); contrast P20 ("Charon and manifest spans are 1-based…"), `CharonFunInfo::line_start` doc ("from the LLBC/manifest span")
+- **Issue**: The span stage is source-blind (`span_overlap` takes a `CharonFunInfo` from either source); "LLBC span" suggests the Manifest path skips it.
+- **Recommendation**: "compared by span overlap (LLBC or manifest span) with the atom's source line range".
 
-All 8 findings verified against the current working tree.
+## Focused-pass notes (no finding)
 
-- **[C1] RESOLVED** — glossary has a "Manifest (enrichment source)" entry (`--translation`, stamps only `charon-def-id`, fails closed, never overrides RQN); architecture.md pipeline step 5 and the Charon component paragraph both describe the `--translation` manifest path; P20's Match outcome is split by source (LLBC overrides RQN/is-public, Manifest stamps only `charon-def-id`/`charon-version`).
-- **[W1] RESOLVED** — glossary has a "Candidate resolution" entry (four filters, three outcomes, links to P20); the "Match key" entry now links the phrase to `#candidate-resolution`, with "Span disambiguation" kept as the span-stage sub-entry.
-- **[W2] RESOLVED** — glossary entries added for `charon-def-id` (linking docs/SCHEMA.md for the coupling invariant/join contract), probe-aeneas, and "Self type" (both extraction sides); P20's join-contract sentence links to `docs/SCHEMA.md`.
-- **[W3] RESOLVED** — the RQN entry now states the field may be absent (cleared on an Ambiguous collision, P20) and that the Manifest source never replaces the heuristic form.
-- **[W4] RESOLVED** — kb/index.md restamped `last-updated: 2026-09-01`; CLAUDE.md now says "P1-P20". (`status: draft` retained — the recommendation asked only to reconsider it.)
-- **[I1] RESOLVED** — both summaries now list all four stages: "Match key" says "file, self type, dedup, and span"; architecture.md says "file, self-type, dedup, and span filters".
-- **[I2] RESOLVED** — P20's Ambiguous bullet reads "confirmed (by normalized file path)"; the Where line includes `self_type_from_display_name`.
-- **[I3] RESOLVED** — P20's NoMatch bullet now reads "its impls further down the file"; the term "blanket impls" is gone from P20, so the glossary entry's cargo-public-api scope no longer conflicts.
-
-Anchor sanity check: all new cross-reference anchors match their entry names under GitHub rules (lowercase, spaces→hyphens, parens dropped): `#candidate-resolution`, `#manifest-enrichment-source`, `#charon-def-id`, `#self-type`, and `#p20--charon-candidate-resolution-never-picks-arbitrarily` all resolve. Note: glossary entries are bold-text terms, not headings — the pre-existing convention for the whole file.
+- P20 ↔ `resolve_charon_candidate` / `validate_single_candidate`: filter order, lone-candidate validation, the LLBC file-less exception, the Manifest fail-closed rule, the NoMatch/Ambiguous split at the span stage, and the 1-based inclusive overlap formula all agree with the code (modulo the W2 sub-case, which P20 does not contradict).
+- P20 ↔ `enrich_atoms`: Match stamps RQN only on `Llbc`, `is_public` only when carried, def-id/version only when a version exists; Ambiguous clears RQN only on `Llbc`; NoMatch is a no-op after the up-front pre-clear. Consistent with SCHEMA's coupling invariant and P15's no-`charon_version` case.
+- SCHEMA `rust-qualified-name` (three states), `charon-def-id` (lone-candidate rule with the `--with-charon` file-less exception, collision narrowing, manifest refuses match-key-only), `is-public-api` (field row and compatibility row) are mutually consistent and consistent with P11/P20 and the glossary.
+- Glossary "Candidate resolution", "Loop helper (Manifest)", "Self type", "RQN", "Manifest (enrichment source)": consistent with P20 and the code. "Self type" correctly states the filter is a narrowing signal only (`matching.is_empty() → same_file`).
+- Staleness: all three engineering files `last-updated` 2026-09-02; `kb/engineering/index.md` 2026-08-11 (22 days, within the 30-day window).

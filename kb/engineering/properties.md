@@ -1,6 +1,6 @@
 # Properties and Invariants
 
-- **last-updated**: 2026-09-01
+- **last-updated**: 2026-09-02
 
 Every property here must hold in the implementation. If a property is violated, it is a bug in the code, not in the KB — unless a deliberate decision changes the KB first.
 
@@ -148,7 +148,7 @@ When `--with-public-api` is used, the `cargo public-api` output is also cached i
 
 ### P15 — Charon non-fatal
 
-`--with-charon` failure (compilation panic, missing tool) produces a warning and falls back to the heuristic `rust-qualified-name` derived from file path + display name. It never aborts the extract pipeline.
+`--with-charon` failure (compilation panic, missing tool) produces a warning and falls back to the heuristic `rust-qualified-name` derived from file path + display name. It never aborts the extract pipeline. The same holds for the Manifest source: an unreadable or malformed `--translation` file, or one without a `charon_version` (matched atoms then get no def-id/version pair), warns, leaves `charon-def-id` absent and the RQN SCIP-derived, and the pipeline continues.
 
 **Where**: `commands/extract.rs`, `charon_cache.rs`.
 
@@ -195,19 +195,21 @@ A file mounted through several chains (e.g. mutually exclusive `#[path]` remount
 
 ### P20 — Charon candidate resolution never picks arbitrarily
 
-When several Charon entries share one atom's match key (several impl blocks with the same method name in the same module, e.g. `TryFrom<u8|i32|u32> for DeviceId` all keyed `address::try_from`), resolution narrows by successive filters — same normalized file, self-type match (atom `display_name` `Type::` prefix vs. the candidate's impl-segment self type), dedup on `(def_id, qualified_name)` (Manifest loop helpers share the parent's `def_id`), then strict-maximum positive span overlap. A lone survivor is still validated against the atom's file and span (Manifest fails closed on candidates without file proof, per the `charon-def-id` join contract).
+When several Charon entries share one atom's match key (several impl blocks with the same method name in the same module, e.g. `TryFrom<u8|i32|u32> for DeviceId` all keyed `address::try_from`), resolution narrows by successive filters — same normalized file, self-type match (atom `display_name` `Type::` prefix vs. the candidate's impl-segment self type), dedup on `(def_id, qualified_name)` (Manifest [loop helpers](glossary.md#loop-helper-manifest) share the parent's `def_id`), then strict-maximum positive span overlap. The self-type filter is a narrowing signal only: when no candidate's self type matches the atom's (blanket impls, a trait's own name as display prefix), all same-file candidates proceed to the span stage. Trait type arguments are **not** a matching signal — same-self-type impls (`TryFrom<u8>`, `TryFrom<i32>`, `TryFrom<u32> for DeviceId`) are split by span alone; if their spans are unusable they end Ambiguous. A lone survivor is still validated against the atom's file and span. One deliberate exception: a lone **LLBC** candidate with no file path at all (span-less compiler-generated items such as derived `fmt`) is accepted on match key alone, so those still enrich; the Manifest path fails closed on any candidate without [file proof](glossary.md#file-proof), per the `charon-def-id` join contract.
+
+Charon and manifest spans are 1-based like the atom's `lines-start`/`lines-end`, so they compare directly. Span overlap is the inclusive line count `min(atom_end, c_end) - max(atom_start, c_start) + 1`; positive means overlapping, so a single-line Charon span (signature-only, common for `--include`d dependency crates) inside the atom scores `1` and a one-line atom inside a multi-line span also scores `1`. Missing lines on either side (`0`/absent) yield no score rather than `0`; a survivor with no score neither wins nor blocks — beside one positively overlapping survivor the overlapping one still wins, and only when no survivor scores positive does the missing data matter (Ambiguous, unless every survivor scored and all excluded the atom: NoMatch).
 
 Three outcomes, three behaviors:
 
 - **Match** — exactly one validated candidate: enrich. What is stamped depends on the source: the LLBC path (`--with-charon`) overrides `rust-qualified-name` and `is-public` (when carried) and stamps `charon-def-id`/`charon-version`; the Manifest path (`--translation`, an Aeneas `translation.json`) stamps only `charon-def-id`/`charon-version` and never touches the RQN.
-- **Ambiguous** — distinct candidates confirmed (by normalized file path) to be in the atom's file that no signal (self type, span) can split: the atom's `rust-qualified-name` is **cleared** (even the SCIP heuristic) and no `charon-def-id` is stamped, on both sources. A wrong RQN is worse than none — probe-aeneas would link the wrong Lean translation; clearing lets its fallback strategies take over.
-- **NoMatch** — no candidate is confirmable to the atom's file, or every usable span provably excludes the atom (e.g. a trait's provided method vs. its impls further down the file): the atom keeps its heuristic RQN.
+- **Ambiguous** — distinct candidates confirmed (by normalized file path) to be in the atom's file that no signal (self type, span) can split: no `charon-def-id` is stamped on either source. On the **LLBC path only**, the atom's `rust-qualified-name` is additionally **cleared** (even the SCIP heuristic): Charon owns the RQN there, and a wrong RQN is worse than none — probe-aeneas would link the wrong Lean translation; clearing lets its fallback strategies take over. The Manifest path never writes the RQN, so it keeps the SCIP heuristic exactly as NoMatch does.
+- **NoMatch** — no candidate is confirmable to the atom's file, or **every** survivor has a usable span and none overlaps the atom (e.g. the body of an [inherited default trait method](glossary.md#inherited-default-trait-method) vs. its impls further down the file): the atom keeps its heuristic RQN. A mix of an excluding usable span and a span-less survivor is undecidable and therefore Ambiguous.
 
-There is no first-match-wins fallback: an arbitrary pick once stamped one impl's qualified name onto every colliding atom in a file (the libsignal `eq`/`try_from` collision). Trait-impl qualified names must carry the trait's type arguments — LLBC literal types appear both as strings (`"Bool"`) and objects (`{"UInt": "U8"}`); dropping the object form collapsed distinct impls (`TryFrom<u8>` vs `TryFrom<i32>`) into one identical RQN.
+There is no first-match-wins fallback: an arbitrary pick once stamped one impl's qualified name onto every colliding atom in a file (the libsignal `eq`/`try_from` collision). Trait-impl qualified names must carry the trait's type arguments — LLBC literal types appear both as strings (`"Bool"`) and objects (`{"UInt": "U8"}`, `{"Int": "I32"}`, `{"Float": "F64"}`); dropping the object form collapsed distinct impls (`TryFrom<u8>` vs `TryFrom<i32>`) into one identical RQN. Any trait type argument `format_type` cannot render (slice, array, tuple, raw pointer, `dyn`, unknown literal encoding) is emitted as the placeholder `?` rather than dropped, so it still keeps the name distinct from a rendered argument. Known ceiling: two unrenderable arguments on one self type (`TryFrom<[u8; 32]>` vs `TryFrom<&[u8]>`) still produce identical qualified names; resolution then relies on span alone, and probe-aeneas's RQN match cannot tell them apart. Likewise an unrenderable **self** type degrades the impl segment to the type-less `{impl Trait}` form, which carries no self-type signal.
 
 The `charon-def-id` join contract (coupling with `charon-version`, integer join against Aeneas) is specified in [`docs/SCHEMA.md`](../../docs/SCHEMA.md).
 
-**Where**: `charon_names.rs` (`resolve_charon_candidate`, `validate_single_candidate`, `span_overlap`, `self_type_from_qualified_name`, `self_type_from_display_name`, `format_type`).
+**Where**: `charon_names.rs` (`resolve_charon_candidate`, `validate_single_candidate`, `in_atom_file`, `span_overlap`, `self_type_from_qualified_name`, `self_type_from_display_name`, `bare_type_name`, `format_type`, `build_trait_impl_type_info_map`, `enrich_atoms`).
 
 ---
 
