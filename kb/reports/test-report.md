@@ -1,29 +1,54 @@
 ---
 auditor: test-quality-auditor
-date: 2026-08-11
-status: resolved (was: 3 must-fix, 5 nice-to-have)
+date: 2026-09-02
+status: 0 critical, 0 warnings, 3 info
 ---
 
-Scope: the uncommitted changeset on `fix/scip-staleness-source-facts` — SCIP cache staleness (P14), complete `cfg` predicates and `mod_chain` walk (P18), and the conservative unmounted/foreign/trait facts (P19). All 206 lib tests pass.
+Scope (round 3): the working tree on `fix/rqn-ambiguity` (uncommitted changes on top of `db243e7`), all test-relevant changes in `src/charon_names.rs`, plus the **P20** text in `kb/engineering/properties.md` (unchanged since round 2). Since round 2, two existing tests were extended in place to close the two round-2 warnings; no test was added, deleted, or weakened.
+
+`cargo test` (full suite, this working tree): lib 246 passed / 0 failed; `src/main.rs` 0; `tests/extract_check.rs` 3 passed / 1 ignored; doc-tests 0. `cargo test --lib charon_names`: 63 passed / 0 failed (count unchanged from rounds 1–2 — both fixes extended existing tests).
+
+## Round-2 follow-up
+
+| Round-2 item | Status | Evidence |
+|---|---|---|
+| **W1** — mix of an excluding usable span and a span-less survivor → Ambiguous unpinned | **Resolved** | `test_resolve_multi_candidate_mixed_span_availability` (`src/charon_names.rs:3234`) gained a second case: same two candidates (span-less `T<u8> for Alpha`, `T<u32> for Alpha` at `(10, 20)`), atom `Alpha::conv (100, 110)`, asserts `Ambiguous`. Traced against the code at `src/charon_names.rs:909-929`: overlaps = `[None, Some(-79)]`, `best = None`, `all(is_some)` is false → `Ambiguous`. Loosening the guard to `any(|o| o.is_some())` would return `NoMatch` and fail this assertion. The inline comment states the intent (Ambiguous, not NoMatch, because NoMatch requires every survivor to carry a usable span). |
+| **W2** — unrenderable **self** type skipped in `build_trait_impl_type_info_map` untested | **Resolved** | `test_trait_impl_unformattable_generic_is_placeholder` (`src/charon_names.rs:3443`) gained a `def_id: 3` entry whose `types[0]` is `{"Array": [...]}` (self type) and `types[1]` a renderable `Adt`; asserts `!map.contains_key(&3)`. This pins the `None => continue` at `src/charon_names.rs:312` against the "symmetry" edit that would insert a `?` self type. The downstream `{impl Trait}` rendering for an absent map entry is already pinned by `test_format_name_with_trait_impl_no_self_type` (same `format_name` branch, line 182), so the two tests together cover the clause end to end. |
+| **I1** — LLBC `line_start` raw value not asserted at parse time | **Still open (Info)** | No change. Correction to round 2: the test whose fixture uses `beg.line 10 / end.line 20` is `test_build_fun_span_map_extracts_visibility` (`src/charon_names.rs:1591`), not `test_parse_llbc_names_carries_visibility` (whose fixture uses `1/5` and `10/15`). Either would do; the former already holds `map.get(&0)`. Carried as Info 1. |
+| **I2** — `?` ceiling (two unrenderable args on one self type) unpinned | **Still open (Info, acknowledged)** | Documented ceiling; `ponytail:` comment at `src/charon_names.rs:320`. Carried as Info 2. |
+| **I3** — `in_atom_file` covered only via callers | **Still open (Info)** | No change; helper at `src/charon_names.rs:682`. Carried as Info 3. |
 
 ## Coverage summary
 
-| Property / concern | Tests | Coverage | Notes |
-|-------------------|-------|----------|-------|
-| P14 — staleness detection | `scip_cache`: `test_missing_cache_is_stale`, `test_cache_newer_than_sources_is_fresh`, `test_source_newer_than_cache_is_stale`, `test_manifest_newer_than_cache_is_stale` | Full (unit) | Both trigger classes (`*.rs`, `Cargo.toml`) plus the missing-cache case; deterministic via explicit `set_file_mtime` offsets (no sleeps, race-safe) |
-| P14 — prune rules | `test_target_git_and_cache_dirs_ignored`, `test_nested_data_dir_is_not_ignored` | Full (unit) | Nested-`data/` test correctly pins that only the top-level cache dir is exempt. Decoy-mtime weakness: see Warning 3 |
-| P14 — "span misses warned, never silent" | (none) | **None** | The `span_misses` counter + `eprintln!` in `convert_to_atoms_with_lines_internal` has no test and is not observable (see Warning 2) |
-| P14 — extract wiring | (none; `get_scip_json` gates on `is_cache_stale`) | Indirect | Needs external `scip` tool; unit coverage of `is_cache_stale` is the load-bearing part. New `generation_reason` branch untested (Info 6) |
-| P18 — same-file gates (own/impl/mod/trait/extern) | `rust_parser`: pre-existing cfg tests + `test_cfg_gated_extern_block_gates_members`, cfg assert inside `test_foreign_and_trait_required_facts` | Full (unit) | Extern-block gate and member-own gate both covered |
-| P18 — mod-chain file gate | `mod_chain`: `gated_and_unmounted_files`, `nested_dirs_and_inline_mods`, `path_override_and_mod_rs`, `path_mounted_file_owns_its_directory`, `mutually_exclusive_path_mounts_produce_no_gate`, `gate_free_chain_wins_over_gated_remount`, `lib_path_override_in_manifest` | Full (unit) | Directory-ownership rules (crate root, `mod.rs`, `#[path]` owner), inline-mod gates, `any(...)` over chains, gate-free-chain suppression all pinned |
-| P18 — fold into atom `cfg` + `file-cfg` | `lib.rs`: `test_convert_with_chain_facts` | Full (integration) | `all(file, own)` fold, file-only, own-only-absent, and `file-cfg` provenance all asserted on real temp-dir crate through `convert_to_atoms_with_parsed_spans` |
-| P19 — unmounted (positive) | `gated_and_unmounted_files`, `bin_only_package_walks_from_main`, `workspace_members_analyzed_independently`, e2e `dead` atom | Full (unit + integration) | lib-rooted, bin-rooted, and per-workspace-member cases |
-| P19 — unmounted valves (conservative direction) | `unresolvable_mod_disables_unmounted_inference`, `include_macro_disables_unmounted_inference`, `unknown_macro_mentioning_mod_disables_unmounted_inference`, `unparsable_file_disables_unmounted_inference` | Partial | 4 of 6 documented valves tested. Mount-cycle and `MAX_CHAINS_PER_FILE` valves untested (Info 1). Cross-package mounts untested and likely a real hole (Warning 1) |
-| P19 — cfg_if under-gating ("undecidable stays ungated") | `cfg_if_mounts_are_seen_ungated` | Full (unit) | Branch predicate dropped, mount recorded — both halves asserted |
-| P19 — is-foreign / trait-required | `rust_parser::test_foreign_and_trait_required_facts`, e2e | Full (unit + integration) | Extern member vs bodyless trait sig vs defaulted vs impl vs free fn — all five distinctions asserted; multi-line extern decl span asserted |
-| Schema — new wire fields (`file-cfg`, `is-unmounted`, `is-foreign`, `trait-required`) | (none at JSON level) | **None** | e2e asserts Rust struct fields only; kebab-case rename + omitted-when-false/None contract from SCHEMA.md untested (Warning 3) |
+P20 is broken out by clause because that is where the change lands; P1–P19 and C1–C3 are untouched by this changeset and their tests are unchanged (spot-checked in round 2; the lib count of 246 passing is unchanged). P15's Manifest sentence remains pinned at the parser level by `from_translation_json_errors_on_bad_path_and_bad_json`; the extract-level "warn and continue" in `commands/extract.rs` is not unit-tested (same status as prior reports).
 
-P1–P13, P15–P17, C1–C3: not directly touched by this changeset (only mechanical `AtomWithLines` initializer additions in their test fixtures); existing coverage unchanged and still passing.
+| Property | Tests | Coverage | Notes |
+|----------|-------|----------|-------|
+| P20 — file filter (normalized path; elsewhere / file-less → NoMatch under multi-candidate keys) | `test_resolve_multi_candidate_file_filter` | Full | |
+| P20 — self-type filter narrows | `test_resolve_multi_candidate_self_type_and_ambiguity` (first half), `_eq_collision`, `_try_from_split_by_span` | Full | |
+| P20 — self type is a narrowing signal only (no match → all same-file proceed) | `test_resolve_multi_candidate_self_type_fallback_then_span` | Full | |
+| P20 — dedup on `(def_id, qualified_name)` | `test_resolve_multi_candidate_dedup_same_function` | Full | Manifest source, same `def_id` |
+| P20 — strict-max positive span overlap; tie → Ambiguous | `test_resolve_multi_candidate_try_from_split_by_span`, `_span_tie_is_ambiguous` | Full | |
+| P20 — trait type args are not a signal; same-self-type impls with unusable spans → Ambiguous | `test_resolve_multi_candidate_self_type_and_ambiguity` (second half), `_try_from_split_by_span` | Full | |
+| P20 — lone survivor re-validated (file + span) | `test_resolve_multi_candidate_self_type_survivor_span_excludes`, `test_resolve_single_candidate_cross_file_rejected`, `_same_file_span_mismatch_rejected`, `_same_file_span_match` | Full | |
+| P20 — lone file-less LLBC candidate accepted on match key alone; Manifest fails closed | `test_resolve_single_candidate_no_span_preserved`, `test_resolve_single_candidate_manifest_fails_closed_without_file`, `manifest_single_candidate_without_source_is_rejected` | Full | |
+| P20 — every survivor has a usable span and none overlaps → NoMatch | `test_resolve_multi_candidate_all_spans_elsewhere_is_no_match`, `_self_type_survivor_span_excludes`, `test_enrich_no_match_preserves_heuristic_rqn` | Full | |
+| P20 — mix of an excluding usable span and a span-less survivor → Ambiguous | `test_resolve_multi_candidate_mixed_span_availability` (second case) | Full | Was Partial (round-2 W1) |
+| P20 — 1-based line base, compared directly | `from_translation_json_builds_functions_only_records` (`line_start == Some(5)`), `test_enrich_span_disambiguation_single_line_charon_span`, `test_resolve_single_candidate_same_file_span_match` | Partial | Manifest side asserts the parsed value; LLBC side pinned only through resolution — Info 1 |
+| P20 — inclusive overlap formula: one-line atom in multi-line span = 1; single-line Charon span in atom = 1; adjacent = 0 → NoMatch | `test_span_overlap_inclusive_one_line_atom`, `test_enrich_span_disambiguation_single_line_charon_span`, `_all_spans_elsewhere_is_no_match` | Full | |
+| P20 — missing lines on **either** side yield `None`, not `0` | `test_span_overlap_inclusive_one_line_atom` (atom side), `test_resolve_single_candidate_no_span_preserved`, `_real_file_zero_lines_accepted`, `test_resolve_multi_candidate_mixed_span_availability`, `_eq_collision` | Full | |
+| P20 — Match: LLBC overrides RQN and `is-public` (when carried) and stamps def-id/version; Manifest stamps only def-id/version | `manifest_enrich_stamps_def_id_and_keeps_scip_rqn`, `test_enrich_does_not_clobber_is_public_with_none`, `test_enrich_clears_stale_provenance_when_version_missing`, `resolve_enrichment_prefers_manifest_over_llbc` | Full | |
+| P20 — Ambiguous: no def-id on either source; LLBC clears RQN, Manifest keeps it | `test_enrich_ambiguous_clears_rqn_and_stamps_nothing` | Full | |
+| P20 — NoMatch keeps heuristic RQN | `test_enrich_no_match_preserves_heuristic_rqn`, `test_enrich_clears_stale_provenance_on_no_match`, `manifest_re_enrich_clears_stale_provenance_on_no_match` | Full | |
+| P20 — no first-match-wins fallback | (the Ambiguous tests above) | Full | |
+| P20 — literal object forms `{"UInt"}`/`{"Int"}`/`{"Float"}` render; unknown encodings → `None` | `test_format_type_literal_object_forms` | Full | |
+| P20 — unrenderable trait generic → `?`, keeps names distinct, reaches the rendered qualified name | `test_trait_impl_unformattable_generic_is_placeholder` | Full | `Array` is the only shape; all shapes share the one `unwrap_or_else("?")` branch (line 328) |
+| P20 — `?` ceiling (two unrenderable args on one self type → identical RQN, span decides) | (none) | Untested, acknowledged | Info 2 |
+| P20 — unrenderable **self** type → type-less `{impl Trait}` segment, no self-type signal | `test_trait_impl_unformattable_generic_is_placeholder` (`def_id: 3` → no map entry), `test_format_name_with_trait_impl_no_self_type` (absent entry → `{impl Trait}`), `test_self_type_from_qualified_name` (`{impl Trait}` carries no self type) | Full | Was Partial (round-2 W2); map-build, format, and self-type-extraction stages each pinned |
+| P20 — `self_type_from_qualified_name` / `self_type_from_display_name` | `test_self_type_from_qualified_name`, `test_self_type_from_display_name` | Full | |
+| P1–P19, C1–C3 | unchanged since 2026-08-11 report | — | Not touched by this changeset |
+
+Every P20 clause now has Full coverage except the 1-based LLBC parse value (Partial, Info 1) and the acknowledged `?` ceiling (Info 2). No pre-existing test was deleted or weakened in this round; the two touched tests only gained assertions.
 
 ## Critical
 
@@ -31,86 +56,16 @@ None.
 
 ## Warnings
 
-1. **Cross-package mounts untested — and by code reading, a real P19/P18 hole.** `mod_chain::analyze_package` computes `unmounted` from each package's own walker only; `facts.unmounted` and `facts.file_gate` are merged across packages keyed by project-relative path. A file under `b/src/` mounted *only* via another workspace member's `#[path = "../b/src/shared.rs"]` is (a) inserted into `unmounted` by package b's provably-complete walk even though crate a compiles it — violating P19's fixed error direction ("compiled code must never be labeled unmounted") — and (b) conversely, a cross-package *gated* mount can insert a `file_gate` for a file compiled unconditionally in its own package (over-gating). `workspace_members_analyzed_independently` covers only the no-cross-mount case. Needs a test with a cross-package `#[path]` mount; expected fix direction: a file reachable in *any* package's chains must not be inferred unmounted (e.g. share the reached-set across packages, or disable inference when a chain escapes the package dir).
-
-2. **P14's warning clause is untested and untestable as written.** The property text says span-map misses are "reported with a warning, never silently", but the `span_misses` counter lives only in a local + `eprintln!` inside `convert_to_atoms_with_lines_internal` — no test asserts the count or the degraded fallback (`lines-end == lines-start`, facts dropped) for a deliberately mismatched node. Suggest surfacing the miss count (return value or injected sink) so the counting itself can be pinned; note also the count covers only the phase-1 `lines_end` lookup while phase-3 re-looks-up span info independently (same matcher, so currently consistent — a divergence would be invisible).
-
-3. **New wire fields have no serde-shape test.** The repo's own precedent (`charon_provenance_fields_serde_shape` in `charon_names.rs`) pins kebab-case names and omission for provenance fields; `file-cfg`, `is-unmounted`, `is-foreign`, `trait-required` get no such test. A typo in a `rename` or a dropped `skip_serializing_if` (SCHEMA.md promises "omitted when false") would ship silently — the e2e test reads Rust struct fields, never the JSON.
+None.
 
 ## Info
 
-1. **Two P19 valves untested**: the mount-cycle guard (`#[path]` loop → `clean = false`) and the `MAX_CHAINS_PER_FILE` cap. Both are explicitly listed in P19/module docs as inference-disabling valves; neither has a test. Cheap to add and they guard the property's core direction.
+1. **LLBC 1-based line base is pinned only through resolution.** `from_translation_json_builds_functions_only_records` asserts the Manifest parser copies `"line": 5` to `line_start == Some(5)`. The LLBC side (`beg`/`end` extraction at `src/charon_names.rs:538-568`) has no equivalent value assertion; `test_enrich_span_disambiguation_single_line_charon_span` (Charon `50` inside atom `[50, 60]`) would still pass if the parser added `1`. One line closes it: `assert_eq!(pub_fn.line_start, 10)` (and `line_end == 20`) in `test_build_fun_span_map_extracts_visibility`, whose fixture already uses `beg.line 10 / end.line 20` and already binds `pub_fn = map.get(&0)`.
 
-2. **`test_target_git_and_cache_dirs_ignored` detection power depends on sub-second mtime granularity.** The decoy files (`target/`, `.git/`, `data/`) are written *after* the cache with natural mtimes; on a filesystem with 1-second mtime resolution their mtimes can equal the cache's, and the strict `newest > cache_mtime` comparison would let a broken prune pass unnoticed. Not flaky (never spuriously fails), but consider `set_mtime`-ing the decoys into the future (or the cache into the past) so a prune regression is guaranteed to trip the assert. The other five staleness tests use explicit ±100 s offsets and are fully deterministic.
+2. **`?` ceiling unpinned — acceptable.** Two unrenderable trait args on one self type produce identical RQNs and fall to span alone; documented in P20 and with the `ponytail:` comment at `src/charon_names.rs:320`. No test needed until a real collision shows.
 
-3. **Equal-mtime boundary undocumented/untested**: `newest > cache_mtime` treats a source modified in the same clock tick as the cache write as *fresh*. For a staleness check the conservative direction would be `>=`; at minimum the chosen semantics deserve a comment/test. Related untested micro-case: a project with a cache but zero source files (`newest_source_mtime` → `None` → fresh).
-
-4. **`mutually_exclusive_path_mounts_produce_no_gate` name contradicts its body** — it asserts the gate *is* produced (`any(not (test), test)`). The behavior asserted is correct per P18; rename (e.g. `..._produce_any_over_chains`).
-
-5. **Predicate-string assertions pin two spelling regimes.** Token-derived gates keep proc-macro2 spacing (`all (test , not (feature = "benchmarking"))`) while synthesized combinators are tight (`any(...)` from `chains_predicate`, `all(...)` from the lib.rs fold) — the tests codify this mixed wire format. Pinning exact strings is right (downstream parses them), but a proc-macro2 upgrade changing `TokenStream::to_string` spacing will break tests *and* wire format together; worth a normalizing helper eventually. Not brittle in the bad sense — the string is the contract.
-
-6. **Untested minor branches**: `generation_reason`'s new "(cached SCIP data older than sources)" arm; the verbose regeneration message in `get_or_generate`; `gate_free_chain_wins_over_gated_remount` only covers the ungated-mount-first ordering (gated-first is handled by the subset check but unasserted); `src/bin/*.rs` entry as its own dir-owner (bin coverage uses `src/main.rs` only).
-
-7. **Missing fact-combination cases (low risk, orthogonal code paths by reading)**: extern block *inside* a cfg-gated inline mod (mod gate + extern gate + member gate `all(...)`-joined with `is_foreign`); trait fn with a default body *and* its own `#[cfg]` (expect `cfg` present, `trait-required` absent); inline `mod foo {}` shadowing an existing `src/foo.rs` (correctly unmounted by rustc's rules — would pin the ownership logic); `#[path]` pointing outside `src/` (gate keyed project-relative, file skipped by the src-only unmounted scan; outside the project root the gate is silently dropped by `relative_key`).
+3. **`in_atom_file` tested only through callers** (carried from rounds 1–2). The helper at `src/charon_names.rs:682` is the single file-proof point for both `resolve_charon_candidate` and `validate_single_candidate`; `""`/`None`/cross-file/`/src/`-normalized inputs are all exercised via `test_resolve_multi_candidate_file_filter` and the `_single_candidate_*` tests. No P20 gap; noted for completeness.
 
 ---
 
-## Resolution round (2026-08-11, same day)
-
-Every finding above was addressed in the same working-tree changeset and the
-closure verified by a re-audit against the final code:
-
-- File-level `#![cfg(...)]`: folded in both collectors (`rust_parser.rs`
-  `parse_file_for_spans` seeds `cfg_stack` from `File::attrs`; `mod_chain.rs`
-  `scan_file` returns `inner_gates` joined into the mount chain before
-  recording). Tests in both modules, including descendant propagation.
-- Cross-package mounts: `mod_chain::analyze` now unions chains across ALL
-  packages and infers unmounted only when EVERY package's walk is clean.
-  Tests: `cross_package_path_mount_is_not_unmounted`,
-  `cross_package_gated_mount_unions_with_own_ungated_mount`.
-- `find_span_info` containment fallback made deterministic
-  (innermost-candidate rule via `max_by_key`, never map iteration order).
-- Staleness check: `>=` comparison, directory mtimes included (deletions/
-  renames), docs aligned (P14, SCHEMA, CHANGELOG, doc comments).
-- Span-map misses surfaced: internal conversion returns the miss count,
-  warning emitted by the public wrapper, count pinned by test.
-- Serde shape of the four new fields pinned
-  (`source_fact_fields_serde_shape`).
-- Dirty-file gate stripping valve added (mounts kept, gates dropped) with
-  test; cycle guard, chain-cap, and inline-mod-shadowing tests added.
-- Docs: P18 reworded to "as complete as visible, under-gating only" with the
-  cfg_if/unreached-file caveats; P19 scoped to lib/bin target entries with the
-  test/bench/example exclusion and the known cross-file macro limitation;
-  predicate-format note in SCHEMA; glossary entries added (mount chain, file
-  gate, target entry, provably complete walk, directory owner, unmounted,
-  foreign declaration, trait-required); architecture/index/CLAUDE.md/auditor
-  checklists updated to P1-P19.
-
-Final state: `cargo fmt --check` clean, `cargo clippy --all-targets
--- -D warnings` clean, 219 lib + 3 integration tests pass.
-
-## Codex adversarial round (2026-08-11, cross-model review)
-
-An independent Codex review over the full diff surfaced further soundness
-gaps, all fixed and re-validated (229 tests, clippy clean; SymCRust and dalek
-keep full facts, zero regressions):
-
-- Dirty walks could still emit `file-cfg` (cross-file over-gating): now ANY
-  completeness taint suppresses BOTH facts project-wide; per-file gate
-  stripping removed as redundant. Taint causes are collected and printed
-  (structural: the `mod` IDENT token, so doc comments/strings do not taint).
-- Macro valve hardened: `macro_rules!` definition bodies, block-local
-  `#[path] mod` (any item's tokens), and `cfg_attr` on `mod` declarations now
-  taint the walk.
-- `#[path]` resolution fixed inside inline modules (inline segments + dir
-  ownership) and for `#[path]` on the inline module itself (directory
-  segment override). Decoy-file tests added.
-- Chain pruning is now keyed on (gates, dir-ownership); a cap overflow no
-  longer records the unwalked chain.
-- Package guards: unreadable manifests and entry-less packages with src
-  files taint the walk. `collect_rs_files` no longer follows symlinked dirs.
-- Staleness: `Cargo.lock` tracked; project root's own mtime excluded (self-
-  invalidation loop on coarse-mtime filesystems); cache JSON published
-  atomically (temp + rename).
-- Ambiguous span containment matches are refused (counted as warned misses)
-  instead of guessing scope-changing facts.
+Summary: 0 critical, 0 warnings, 3 info. Round-2 W1 and W2 are both resolved by in-place test extensions (verified against the code paths they guard); I1–I3 remain open as Info. All P20 clauses are Full except the LLBC raw `line_start` value (Partial, one-line fix in Info 1) and the deliberately untested `?` ceiling. Full suite: 246 lib + 3 integration passed, 0 failed, 1 ignored.

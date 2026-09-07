@@ -88,7 +88,7 @@ src/
 This repo has a KB in `kb/` that documents invariants, architecture, and terminology. The KB is the source of truth — if code disagrees with the KB, the code is wrong.
 
 Key files:
-- `kb/engineering/properties.md` — numbered invariants P1-P19, known issues C1-C3
+- `kb/engineering/properties.md` — numbered invariants P1-P20, known issues C1-C3
 - `kb/engineering/architecture.md` — pipeline, components, data flow
 - `kb/engineering/glossary.md` — domain terms
 

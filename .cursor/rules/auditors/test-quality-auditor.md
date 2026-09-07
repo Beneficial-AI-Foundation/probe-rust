@@ -4,7 +4,7 @@ Verify test coverage against KB properties and identify testing gaps.
 
 ## Process
 
-1. Read `kb/engineering/properties.md` to load all invariants (P1-P19, C1-C3)
+1. Read `kb/engineering/properties.md` to load all invariants (P1-P20, C1-C3)
 2. For each property, check if there are tests that exercise it:
 
 ### Coverage matrix
@@ -23,7 +23,7 @@ Find tests in:
 
 ### What to check
 
-- **Every property (P1-P19) has a corresponding test** — or is explicitly flagged as untested
+- **Every property (P1-P20) has a corresponding test** — or is explicitly flagged as untested
 - **Known issues (C1-C3) have regression tests** — tests should document the current behavior and expected fix
 - **Edge cases from SCHEMA.md are tested** — stubs, empty projects, binary-only crates, workspace projects
 - **Visibility logic tested** — `is_signature_public` edge cases, `is_library_crate`, the `--with-public-api` pass guards (`public_api.rs` tests)
