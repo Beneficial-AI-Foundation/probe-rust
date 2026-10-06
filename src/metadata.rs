@@ -102,7 +102,7 @@ pub fn gather_metadata(project_path: &Path) -> ProjectMetadata {
         .filter(|output| output.status.success())
         .map(|output| {
             String::from_utf8_lossy(&output.stdout)
-                .trim_end_matches(|c| c == '\r' || c == '\n')
+                .trim_end_matches(['\r', '\n'])
                 .trim_end_matches('/')
                 .to_string()
         })
