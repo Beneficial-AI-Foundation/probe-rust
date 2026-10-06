@@ -32,6 +32,13 @@ pub struct SourceInfo {
     pub language: String,
     pub package: String,
     pub package_version: String,
+    /// Directory of the package inside the repository, without a trailing
+    /// slash (`git rev-parse --show-prefix` in the project directory). Empty
+    /// for a package at the repository root. Atom `code-path`s are relative
+    /// to this directory, so `<repo>/<package-path>/<code-path>` is a file
+    /// in the repository.
+    #[serde(default)]
+    pub package_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +60,8 @@ pub struct Envelope<T> {
 pub struct ProjectMetadata {
     pub commit: String,
     pub repo: String,
+    /// See [`SourceInfo::package_path`].
+    pub package_path: String,
     pub timestamp: String,
     pub pkg_name: String,
     pub pkg_version: String,
@@ -84,12 +93,22 @@ pub fn gather_metadata(project_path: &Path) -> ProjectMetadata {
         Some(project_path),
         "",
     );
+    // Prints e.g. `curve25519-dalek/` for a workspace member, nothing at the root
+    let package_path = run_cmd_or_default(
+        "git",
+        &["rev-parse", "--show-prefix"],
+        Some(project_path),
+        "",
+    )
+    .trim_end_matches('/')
+    .to_string();
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let (pkg_name, pkg_version) = read_cargo_package_info(project_path, &commit);
 
     ProjectMetadata {
         commit,
         repo,
+        package_path,
         timestamp,
         pkg_name,
         pkg_version,
@@ -121,6 +140,7 @@ pub fn wrap_in_envelope<T: Serialize>(
             language: "rust".to_string(),
             package: metadata.pkg_name.clone(),
             package_version: metadata.pkg_version.clone(),
+            package_path: metadata.package_path.clone(),
         },
         timestamp: metadata.timestamp.clone(),
         data,
@@ -352,6 +372,7 @@ mod tests {
         let meta = ProjectMetadata {
             commit: "abc".to_string(),
             repo: "".to_string(),
+            package_path: "".to_string(),
             timestamp: "".to_string(),
             pkg_name: "my-crate".to_string(),
             pkg_version: "1.0.0".to_string(),
@@ -368,6 +389,7 @@ mod tests {
         let meta = ProjectMetadata {
             commit: "abc".to_string(),
             repo: "".to_string(),
+            package_path: "".to_string(),
             timestamp: "".to_string(),
             pkg_name: "my-crate".to_string(),
             pkg_version: "1.0.0".to_string(),
@@ -386,6 +408,7 @@ mod tests {
         let meta = ProjectMetadata {
             commit: "abc".to_string(),
             repo: "".to_string(),
+            package_path: "".to_string(),
             timestamp: "".to_string(),
             pkg_name: "../../../etc".to_string(),
             pkg_version: "passwd".to_string(),
@@ -430,6 +453,7 @@ mod tests {
         let meta = ProjectMetadata {
             commit: "abc123".to_string(),
             repo: "https://github.com/org/proj".to_string(),
+            package_path: "crates/my-crate".to_string(),
             timestamp: "2026-03-06T12:00:00Z".to_string(),
             pkg_name: "my-crate".to_string(),
             pkg_version: "1.0.0".to_string(),
@@ -440,10 +464,57 @@ mod tests {
         assert_eq!(envelope.tool.name, "probe-rust");
         assert_eq!(envelope.tool.command, "extract");
         assert_eq!(envelope.source.package, "my-crate");
+        assert_eq!(envelope.source.package_path, "crates/my-crate");
 
         let serialized = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(serialized["source"]["package-path"], "crates/my-crate");
         let unwrapped = unwrap_envelope(serialized);
         assert_eq!(unwrapped, data);
+    }
+
+    #[test]
+    fn test_source_info_without_package_path_deserializes() {
+        let source: SourceInfo = serde_json::from_value(serde_json::json!({
+            "repo": "https://github.com/org/proj",
+            "commit": "abc123",
+            "language": "rust",
+            "package": "my-crate",
+            "package-version": "1.0.0"
+        }))
+        .unwrap();
+        assert_eq!(source.package_path, "");
+    }
+
+    /// `package-path` is the project's directory inside its git repository:
+    /// empty at the root, the member directory for a workspace member.
+    #[test]
+    fn test_gather_metadata_package_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/member\"]\n",
+        )
+        .unwrap();
+        let member = root.join("crates").join("member");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"member\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(gather_metadata(root).package_path, "");
+        assert_eq!(gather_metadata(&member).package_path, "crates/member");
     }
 
     #[test]

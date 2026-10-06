@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Multi-candidate match-key resolution had a first-match-wins fallback that could stamp one impl's qualified name onto every colliding atom in a file. It is replaced by a filter pipeline — same normalized file, self-type match, dedup on `(def_id, qualified_name)`, strict-maximum span overlap — that never picks arbitrarily (KB P20). Trait type arguments are not a matching signal: same-self-type impls are split by span alone. An unresolvable collision stamps no `charon-def-id` and, under `--with-charon`, **clears** the atom's `rust-qualified-name` (a wrong RQN is worse than none: probe-aeneas would link the wrong Lean translation); `--translation` never touches the RQN. A multi-candidate key none of whose candidates can be placed in the atom's file (other files, or no file path at all) keeps the heuristic RQN; a lone file-less LLBC candidate is still accepted on match key alone, as before. The old heuristic-RQN tiebreaker (Charon name with impl segments stripped compared to the SCIP-derived RQN) is removed; it could never match an impl method.
   - Span overlap is now the inclusive shared line count (`+ 1`), replacing the exclusive formula plus a single-line containment special case; a one-line function inside a multi-line Charon span previously scored `0` and was rejected as non-overlapping.
 
+## [Unreleased]
+
+### Added
+- **`source.package-path` envelope field**: the package's directory inside its git repository (`git rev-parse --show-prefix`, no trailing slash; empty at the root). Atom `code-path`s are relative to the analyzed package directory, so consumers building repository URLs had to guess where the package lives; probegraph assumed a workspace member named after the package, which is right for `curve25519-dalek/` and 404s for a crate at the repository root (SPQR) or elsewhere (libsignal's `rust/protocol/`). Additive: files without the field still deserialize.
+
 ## [0.11.0] - 2026-08-31
 
 ### Fixed

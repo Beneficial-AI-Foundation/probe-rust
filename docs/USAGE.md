@@ -263,7 +263,8 @@ The `extract` command produces a JSON file wrapped in a Schema 3.0 metadata enve
     "commit": "abc123def456...",
     "language": "rust",
     "package": "my-crate",
-    "package-version": "1.0.0"
+    "package-version": "1.0.0",
+    "package-path": ""
   },
   "timestamp": "2026-03-13T12:00:00Z",
   "data": {

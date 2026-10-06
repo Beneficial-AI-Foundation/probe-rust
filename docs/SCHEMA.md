@@ -80,7 +80,8 @@ standardized metadata envelope:
     "commit": "abc123def456...",
     "language": "rust",
     "package": "my-crate",
-    "package-version": "1.0.0"
+    "package-version": "1.0.0",
+    "package-path": ""
   },
   "timestamp": "2026-03-13T12:00:00Z",
   "data": { ... }
@@ -101,6 +102,7 @@ standardized metadata envelope:
 | `source.language` | string | Always `"rust"` |
 | `source.package` | string | Package/crate name from `Cargo.toml` |
 | `source.package-version` | string | Package version (or 7-char git hash if version is absent) |
+| `source.package-path` | string | Directory of the package inside the repository (`git rev-parse --show-prefix`, no trailing slash); empty for a package at the repository root. Atom `code-path`s are relative to it, so `<repo>/<package-path>/<code-path>` locates the file. Absent from files written by 0.11.0 and earlier |
 | `timestamp` | string | ISO 8601 timestamp of when the analysis ran |
 | `data` | object | The payload (structure depends on `schema`) |
 
