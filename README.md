@@ -107,7 +107,8 @@ Running `probe-rust extract` produces a JSON envelope. Each entry in `data` desc
     "commit": "abc123...",
     "language": "rust",
     "package": "my-crate",
-    "package-version": "1.0.0"
+    "package-version": "1.0.0",
+    "package-path": ""
   },
   "timestamp": "2026-03-17T12:00:00Z",
   "data": {

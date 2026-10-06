@@ -111,7 +111,7 @@ Matching runs as additive passes over a per-entry candidate-form set (`PublicNam
 
 ### Metadata / envelope (internal)
 
-Gathers project metadata (git commit, repo URL, package info) and wraps atoms in the Schema 3.0 envelope.
+Gathers project metadata (git commit, repo URL, package directory in the repo, package info) and wraps atoms in the Schema 3.0 envelope.
 
 **Files**: `metadata.rs`
 

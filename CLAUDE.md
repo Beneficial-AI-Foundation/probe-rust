@@ -75,7 +75,7 @@ src/
 - `FunctionNode`: Call graph node with callees and type context
 - `AtomWithLines`: Output format with line ranges
 - `Envelope<T>`: Schema 3.0 metadata wrapper for JSON output
-- `ProjectMetadata`: Git commit, repo URL, timestamp, package name/version
+- `ProjectMetadata`: Git commit, repo URL, package directory in the repo (`package-path`), timestamp, package name/version
 
 ## External Tool Dependencies
 
