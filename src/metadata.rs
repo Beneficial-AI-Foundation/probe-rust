@@ -94,14 +94,19 @@ pub fn gather_metadata(project_path: &Path) -> ProjectMetadata {
         "",
     );
     // Prints e.g. `curve25519-dalek/` for a workspace member, nothing at the root
-    let package_path = run_cmd_or_default(
-        "git",
-        &["rev-parse", "--show-prefix"],
-        Some(project_path),
-        "",
-    )
-    .trim_end_matches('/')
-    .to_string();
+    let package_path = Command::new("git")
+        .args(["rev-parse", "--show-prefix"])
+        .current_dir(project_path)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim_end_matches(|c| c == '\r' || c == '\n')
+                .trim_end_matches('/')
+                .to_string()
+        })
+        .unwrap_or_default();
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let (pkg_name, pkg_version) = read_cargo_package_info(project_path, &commit);
 
