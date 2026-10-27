@@ -35,10 +35,14 @@ pub struct FunctionSpan {
     /// For a method of an `impl` block: the source ranges of that impl's
     /// trait path (trait impls only) and self type. Consumers resolve the
     /// names in these ranges to identify the method without relying on line
-    /// numbers. Empty for every other function, and for a method whose name
+    /// numbers. Empty for every other function, for a method whose name
     /// occurs more than once under the same impl header in the file
     /// (`cfg`-split variants, in one impl block or in several, share the
-    /// header, so it cannot tell them apart).
+    /// header, so it cannot tell them apart), and for a method of an impl
+    /// whose header holds a non-literal const expression, that is one other
+    /// than a literal or a single name such as `N` (Charon evaluates
+    /// `[u8; size_of::<Foo>()]` to `[u8; 4usize]`, so the types named in the
+    /// expression do not appear in its rendering).
     pub impl_header: Vec<SourceRange>,
     /// The number of type paths in that impl header (the trait path, its type
     /// arguments, the self type and their nested type arguments) when the
@@ -362,6 +366,12 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        if impl_header_has_const_expression(node) {
+            self.with_impl_header(ImplHeaderFrame::default(), |v| {
+                v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_impl(v, node))
+            });
+            return;
+        }
         let mut ranges: Vec<SourceRange> = node
             .trait_
             .iter()
@@ -419,6 +429,35 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         }
         syn::visit::visit_item_macro(self, node);
     }
+}
+
+/// `true` when the trait path or self type of `node` holds a non-literal
+/// const expression: any expression other than a literal (`4`) or a single
+/// name (`N`, a const parameter or constant), such as the array length in
+/// `From<[u8; core::mem::size_of::<Foo>()]>`, `Foo::LEN`, or a `{ N + 1 }`
+/// const argument. Only such an expression can name a type that disappears
+/// when Charon evaluates it; a single name refers to no type.
+fn impl_header_has_const_expression(node: &syn::ItemImpl) -> bool {
+    #[derive(Default)]
+    struct Finder(bool);
+    impl<'ast> Visit<'ast> for Finder {
+        fn visit_expr(&mut self, expr: &'ast syn::Expr) {
+            let simple = match expr {
+                syn::Expr::Lit(_) => true,
+                syn::Expr::Path(p) => p.qself.is_none() && p.path.get_ident().is_some(),
+                _ => false,
+            };
+            if !simple {
+                self.0 = true;
+            }
+        }
+    }
+    let mut finder = Finder::default();
+    if let Some((_, path, _)) = &node.trait_ {
+        finder.visit_path(path);
+    }
+    finder.visit_type(&node.self_ty);
+    finder.0
 }
 
 /// The number of type paths in `ty` and its type arguments when `ty` is made
@@ -891,6 +930,38 @@ mod tests {
             .iter()
             .filter(|s| s.name == "split" || s.name == "across")
             .all(|s| s.impl_header.is_empty() && s.impl_header_path_count.is_none()));
+    }
+
+    /// The const expression in `[u8; core::mem::size_of::<Foo>()]` names
+    /// `Foo`, but Charon renders the evaluated length (`[u8; 4usize]`), so a
+    /// method of that impl records no header, nor does one under
+    /// `Foo::LEN` or `{ N + 1 }`. A literal or a single name keeps it.
+    #[test]
+    fn test_impl_header_dropped_for_const_expression() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            "impl From<(Foo, u8)> for X {{\n    fn a() {{}}\n}}\nimpl From<[u8; core::mem::size_of::<Foo>()]> for X {{\n    fn b() {{}}\n}}\nimpl From<[u8; 4]> for X {{\n    fn c() {{}}\n}}\nimpl From<[u8; N]> for X {{\n    fn e() {{}}\n}}\n#[cfg(feature = \"x\")]\nimpl From<[u8; Foo::LEN]> for X {{\n    fn f() {{}}\n}}\nimpl Tr for [u8; core::mem::size_of::<Foo>()] {{\n    fn g() {{}}\n}}\nimpl A for B {{\n    fn outer() {{\n        impl From<[u8; Foo::LEN]> for Y {{\n            fn nested() {{}}\n        }}\n    }}\n}}\nimpl From<Bits<{{ N + 1 }}>> for X {{\n    fn d() {{}}\n}}\n"
+        )
+        .unwrap();
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let span = |name: &str| spans.iter().find(|s| s.name == name).unwrap();
+        assert!(!span("a").impl_header.is_empty());
+        assert!(span("b").impl_header.is_empty());
+        assert_eq!(span("b").impl_header_path_count, None);
+        assert!(!span("c").impl_header.is_empty());
+        assert!(span("d").impl_header.is_empty());
+        // A single name (a const parameter or constant) names no type.
+        assert!(!span("e").impl_header.is_empty());
+        assert!(span("f").impl_header.is_empty());
+        // The impl's own `cfg` still gates its methods.
+        assert_eq!(span("f").cfg.as_deref(), Some("feature = \"x\""));
+        // A const expression in the self type counts too.
+        assert!(span("g").impl_header.is_empty());
+        // A const-expression impl nested in another impl's method does not
+        // inherit the outer header.
+        assert!(!span("outer").impl_header.is_empty());
+        assert!(span("nested").impl_header.is_empty());
     }
 
     #[test]

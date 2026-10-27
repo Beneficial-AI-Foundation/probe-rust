@@ -3591,6 +3591,42 @@ mod tests {
         ));
     }
 
+    /// `impl From<[u8; core::mem::size_of::<Foo>()]> for X`: SCIP sees
+    /// `Foo` in the const expression, but the manifest renders the evaluated
+    /// length, so the header would contradict the correct candidate and a
+    /// shifted `From<(Foo, u8)>` sibling would win. `rust_parser` drops such a
+    /// header, and with no header paths the span picks the correct impl.
+    #[test]
+    fn test_resolve_const_expression_header_left_to_span() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::{impl core::convert::From<[u8; 4usize]> for c::X}::from",
+                "src/lib.rs",
+                (14, 24),
+            ),
+            candidate(
+                2,
+                "c::{impl core::convert::From<(c::Foo, u8)> for c::X}::from",
+                "src/lib.rs",
+                (9, 11),
+            ),
+            candidate(
+                3,
+                "c::{impl core::convert::From<(c::Foo, u16)> for c::X}::from",
+                "src/lib.rs",
+                (27, 29),
+            ),
+        ];
+        let mut atom = header_atom((9, 19), &[]);
+        atom.impl_header_complete = false;
+        atom.display_name = "X::from".to_string();
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 1
+        ));
+    }
+
     #[test]
     fn test_impl_segment() {
         fn parse(q: &str) -> Option<(Vec<&str>, bool)> {

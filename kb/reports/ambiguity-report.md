@@ -3,46 +3,44 @@ auditor: ambiguity-auditor
 date: 2026-10-27
 repo: probe-rust
 kb: kb/ (probe-rust own KB. The hub ../probe/kb/ consulted for cross-repo contracts only)
-scope: branch fix/impl-header-candidate-filter, uncommitted working tree on top of 343a140 (impl-header rules reworded: contradicted means a Manifest segment lacks a header path, only Manifest segments are evidence, and LLBC candidates are always compatible. Touches P20, glossary, docs/SCHEMA.md, CHANGELOG.md, code-quality auditor rule)
-status: 0 critical, 0 open (1 warning and 1 info fixed in this round; I2 resolved by the sibling auditors rerunning)
+scope: branch fix/impl-header-candidate-filter, uncommitted working tree on top of 3b6b773 (a method of an impl whose header holds a non-literal const expression carries no header paths. Touches P20, glossary "Impl-header evidence", docs/SCHEMA.md, CHANGELOG.md and the `FunctionSpan::impl_header` rustdoc)
+status: 0 critical, 0 open (1 warning and 1 info fixed in this round)
 ---
 
 KB revision: audited on the feature branch working tree. The P20, glossary,
-SCHEMA, CHANGELOG and auditor-rule edits ship in the same pull request as the
-code, so there is no cross-PR merge-order constraint.
+SCHEMA and CHANGELOG edits ship in the same pull request as the code, so there
+is no cross-PR merge-order constraint.
 
-The rewording is consistent in the five changed files. One unchanged glossary
-entry and one unchanged architecture sentence still describe the header stage
-as if it applied to both sources.
+The five passages agree on the rule and on its reason (Charon renders the
+evaluated value). The examples are the only definition of "non-literal
+const expression". They do not show that a bare const parameter in an array
+length also counts. One SCHEMA phrase has the wrong subject.
 
 ## Warnings
 
-### [W1] Span disambiguation and architecture.md do not say that the header stage is Manifest-only
-- **Location**: kb/engineering/glossary.md:103 ("Span disambiguation") and kb/engineering/architecture.md:100 (Charon component)
-- **Issue**: The glossary entry says "Trait type arguments that are paths are compared by the impl-header stage before this one, which drops contradicted candidates; same-self-type impls that differ only in primitive arguments or type parameters ... are split by span alone." This implies that impls that differ in a path argument never reach the span stage as a tie. That is now true only on the Manifest source. On the LLBC source every candidate is compatible (P20, properties.md:198; `header_evidence`, src/charon_names.rs:811), so `PartialEq<Wrapper<Foo>>` and `PartialEq<Foo> for Wrapper<Foo>` are split by span alone (`test_resolve_llbc_subset_candidate_kept_beside_superset_sibling`). architecture.md:100 says "the impl-header filter compares the paths SCIP resolves in the impl header with the candidate's impl segment, so it holds when Charon ran on patched source" with no source qualifier. Neither sentence states the old "each side names a path the other lacks" rule. But both read as if LLBC segments were evidence.
-- **Resolution**: fixed with the recommended wording.
-- **Recommendation**: In the glossary, write: "On the Manifest source, the impl-header stage compares the trait type arguments that are paths and drops contradicted candidates. On the LLBC source, and for impls that differ only in primitive arguments or type parameters, the span decides alone." In architecture.md, add "(Manifest source only, because LLBC segments are no evidence)" after "impl segment".
+### [W1] "Non-literal const expression" is defined only by examples, and the examples hide the common case
+- **Location**: kb/engineering/properties.md:198 (P20), kb/engineering/glossary.md:69 ("Impl-header evidence"), docs/SCHEMA.md:174 (`charon-def-id`), CHANGELOG.md:11, src/rust_parser.rs:41-45 (`FunctionSpan::impl_header`) and src/rust_parser.rs (`impl_header_has_const_expression`)
+- **Issue**: If any `syn::Expr` in the trait path or self type is not `Expr::Lit`, the code drops the header. All five documents explain the term with computed expressions only (`size_of::<Foo>()`, `{ N + 1 }`). By the code, three more forms count as non-literal. The first is a const parameter as an array length (`[u8; N]`, an `Expr::Path`). The second is a braced literal (`{ 4 }`, an `Expr::Block`). The third is a negative number (`-1`, an `Expr::Unary`). A reader of P20 expects `impl From<[u8; N]> for X` to keep its header, because `N` names no type and Charon does not evaluate it away. In a generic argument without braces (`Bits<N>`), `syn` parses the const parameter as a type. So `Bits<N>` keeps the header, but `[u8; N]` drops it. The rule is conservative (a dropped header only sends the method to the span stage), so this does not cause wrong matches. But the behavior is not in the documents, and it loses header evidence for every impl over `[T; N]`.
+- **Recommendation**: Define the term once in P20. Proposed text: "any expression in the trait path or self type other than one literal token. This includes a const parameter as an array length (`[u8; N]`), a braced literal (`{ 4 }`) and a negative number (`-1`)." Point the glossary, SCHEMA and the rustdoc at P20, or use the same words there. To keep the header of `[u8; N]`, change the code to accept an `Expr::Path` with one segment, and document that instead.
 
 ## Info
 
-### [I1] Glossary "compatible" lists fewer cases than the rustdoc
-- **Location**: kb/engineering/glossary.md:69 ("Impl-header evidence") and src/charon_names.rs:780-784 (`HeaderEvidence::Compatible`)
-- **Issue**: The glossary defines compatible as "the segment names every header path and possibly the default and associated type arguments that Charon adds, or there is nothing to compare". The rustdoc also names primitives in the segment (`u8` of `TryFrom<u8>`) and the code also returns Compatible for a segment with the header paths in another order (`Tr<B, A>` for `Tr<A, B>`). Both cases fall under "otherwise" and P20 covers them, so there is no contradiction, but the parenthesis reads as a complete list.
-- **Resolution**: fixed with the recommended wording.
-- **Recommendation**: "the segment names every header path, possibly in another order or with more types (primitives, or the default and associated type arguments that Charon adds), or there is nothing to compare".
-
-### [I2] Sibling reports name a removed test and the old subset rule
-- **Location**: kb/reports/test-report.md:17, 25, 34, 39 and kb/reports/quality-report.md:28
-- **Issue**: Outside this auditor's scope. test-report.md lists `test_resolve_header_subset_is_compatible`, which no longer exists (the Manifest case is now `test_resolve_manifest_missing_header_path_contradicts`, src/charon_names.rs:3397), and states "Compatible (superset, subset, ...)". On the Manifest source a subset is now Contradicted. quality-report.md:28 calls the LLBC case "subset-beside-superset", which is still accurate for LLBC.
-- **Recommendation**: Regenerate both reports with /test-quality-auditor and /code-quality-auditor on this working tree.
+### [I1] SCHEMA says impl headers carry no header
+- **Location**: docs/SCHEMA.md:174 (`charon-def-id` row)
+- **Issue**: The new parenthesis reads "`cfg`-split methods and impl headers with a non-literal const expression carry no header". The subject of the second item is the header itself, so the sentence says that a header carries no header. P20, the glossary, CHANGELOG and the rustdoc all say that the *method* carries no header.
+- **Recommendation**: "(`cfg`-split methods, and methods of an impl whose header holds a non-literal const expression, carry no header, so they still need the span)".
 
 ## Verified clean
 
-- No leftover old contradiction rule. "each side names a path the other lacks" survives only in a test docstring (src/charon_names.rs:3572-3573) that describes an LLBC rendering and then says LLBC segments are no evidence. That is a factual description, not the rule. No KB, docs, CHANGELOG or auditor-rule text uses "subset" or "superset" for header evidence.
-- Contradicted has one meaning in P20 (properties.md:198), the glossary (glossary.md:69), SCHEMA (`charon-def-id` row), CHANGELOG 0.12.1 and the `HeaderEvidence::Contradicted` rustdoc: a Manifest segment lacks a header path. The code (`header_evidence`) returns Contradicted only on that condition.
-- "Only Manifest segments are evidence" and "LLBC candidates are always compatible" agree across P20, glossary, SCHEMA ("LLBC segments are no evidence"), CHANGELOG ("LLBC segments are no evidence ... matched by span as before"), the code-quality rule ("Manifest only") and the code (early return for non-Manifest sources).
-- Lone candidate: contradicted is NoMatch and exact trait-impl is Match without span, both Manifest-only. P20 now drops "from the Manifest source" from the exact clause. That is correct, because LLBC candidates are never exact. The glossary "Candidate resolution" entry says "(both only on the Manifest source)", and SCHEMA says "a lone manifest candidate". These agree with `validate_single_candidate`.
-- Exact has one definition (same paths, same order, nothing else, complete header) in P20, glossary, SCHEMA, CHANGELOG and the `HeaderEvidence::Exact` rustdoc.
-- The P20 example of extra Manifest paths (`TryFrom<u8, alloc::string::String>`) and of LLBC adding an associated type (`{Mul<c::Wrapper, c::Bar> for c::X}`) match the rustdoc and the tests.
-- Terms used by the change (impl-header evidence, Manifest source, LLBC source, match key, file proof, span disambiguation) all have glossary entries.
+- The rule is the same in P20 (properties.md:198), the glossary (glossary.md:69), SCHEMA (`charon-def-id` row), CHANGELOG 0.12.1 and the `FunctionSpan::impl_header` rustdoc: the method carries no header paths, because Charon renders the evaluated value, and the span decides. The `[u8; 4usize]` rendering example matches `test_resolve_const_expression_header_left_to_span` (src/charon_names.rs) and `test_impl_header_dropped_for_const_expression` (src/rust_parser.rs).
+- The code matches the text. `impl_header_has_const_expression` scans only the trait path and self type, which are the header ranges. A dropped header also leaves `impl_header_path_count` at `None`. The `impl_header_path_count` rustdoc covers this case ("or when `impl_header` is empty").
+- No passage lists the no-header cases incompletely. P20, the glossary, SCHEMA, CHANGELOG and the rustdoc each name both the `cfg`-split case and the const-expression case. In P20, "carries header paths only when its method name occurs once" is a necessary condition. The next sentence adds the const-expression case with "either". The two do not conflict.
+- Three passages name only the `cfg`-split case, but none claims to list all no-header cases. `drop_repeated_impl_headers` (src/rust_parser.rs:215-217) and the test comment at src/rust_parser.rs:918 describe only that mechanism. `is_trait_impl_segment` (src/charon_names.rs:840-845) gives the `cfg`-split drop as the reason that an exact header is unique. The const-expression drop does not change that reason. The glossary "Known limits" (macro-generated impls carry no header) is a separate, still-accurate case.
+- architecture.md:100 and the code-quality auditor rule (.cursor/rules/auditors/code-quality-auditor.md:33) describe the header stage without listing no-header cases, so they need no change.
+- P20 "Where" names `impl_header_has_const_expression`, and the function exists in src/rust_parser.rs.
 - `last-updated` of properties.md, glossary.md and architecture.md is 2026-10-27. kb/index.md (2026-09-01) and kb/engineering/index.md (2026-08-11) are older than 30 days. This change does not touch what they describe.
+
+## Resolution
+
+- W1: P20 now defines a non-literal const expression (anything other than a literal or a single name), and the glossary, CHANGELOG-adjacent rustdoc and code match. The code now keeps the header for a single name such as `[u8; N]`, so the `Bits<N>` / `[u8; N]` inconsistency is gone. A test pins `[u8; N]` (kept) and `[u8; Foo::LEN]` (dropped).
+- I1: SCHEMA now says "methods of an impl whose header holds a non-literal const expression".
