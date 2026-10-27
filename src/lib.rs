@@ -299,17 +299,18 @@ pub struct AtomWithLines {
     /// For a method of an `impl` block: the Rust paths (`krate::module::Type`)
     /// of the trait and types that SCIP resolves in the impl header (trait
     /// path and self type), in source order, one entry per reference. Type
-    /// parameters and primitive types are left out. Empty for an impl header
-    /// that names a crate-local type alias, for every other function, and
-    /// for a method whose name occurs more than once under the same impl
-    /// header in its file. Internal: used
-    /// to tell same-named Charon candidates apart without line numbers (see
-    /// `charon_names::resolve_charon_candidate`), never emitted.
+    /// parameters and primitive types are left out. Empty for every other
+    /// function, and for a method whose impl header gives no usable evidence:
+    /// the method name repeats under the header in its file, or the header
+    /// holds a non-literal const expression, a qualified path, a type alias
+    /// defined in the workspace, or a type whose crate is unknown (KB P20).
+    /// Internal: used to tell same-named Charon candidates apart without line
+    /// numbers (see `charon_names::resolve_charon_candidate`), never emitted.
     #[serde(skip)]
     pub impl_header_paths: Vec<String>,
     /// `true` when `impl_header_paths` is the whole impl header: the header is
     /// made of type paths only, and SCIP resolved every one of them to a
-    /// trait or type (no primitive, type parameter, reference, alias, ...).
+    /// trait or type (no primitive, type parameter, reference, ...).
     /// Internal, never emitted.
     #[serde(skip)]
     pub impl_header_complete: bool,
@@ -564,7 +565,7 @@ struct HeaderSymbolRef {
     /// 1-based line and 0-based column where the reference ends.
     end: (usize, usize),
     /// `None` when the crate segment is unknown (see [`CrateNames`]) or the
-    /// reference names a crate-local type alias.
+    /// reference names a type alias defined in the workspace.
     path: Option<String>,
 }
 
@@ -580,8 +581,9 @@ pub struct ImplHeaderSymbols {
 impl ImplHeaderSymbols {
     /// Paths of the references in `file` that lie inside one of `ranges`, in
     /// source order, one entry per reference. Empty when one of these
-    /// references has an unknown crate segment or names a crate-local type
-    /// alias: the header could then contradict the right candidate.
+    /// references has an unknown crate segment or names a type alias defined
+    /// in the workspace: the header could then contradict the right
+    /// candidate.
     #[must_use]
     pub fn paths_in(&self, file: &str, ranges: &[rust_parser::SourceRange]) -> Vec<String> {
         let Some(refs) = self.by_file.get(file) else {
@@ -606,8 +608,8 @@ impl ImplHeaderSymbols {
 /// named through a re-export alias (`pub use serialize::Error as
 /// SerializationError`) still yields its defining path
 /// (`spqr::serialize::Error`), the same path Charon prints. A reference to a
-/// crate-local type alias (`type X = ...;`) gives no path, and
-/// [`ImplHeaderSymbols::paths_in`] then drops the whole header. Charon
+/// type alias (`type X = ...;`) defined in the indexed workspace gives no
+/// path, and [`ImplHeaderSymbols::paths_in`] then drops the whole header. Charon
 /// expands the alias, and the expansion can differ from the alias arguments:
 /// with `type Alias<T> = <T as HasType>::Item`, Charon prints the bound type
 /// of `Alias<Marker>`, not `Marker`.
@@ -2709,7 +2711,9 @@ mod tests {
                 {"name": "wire-pkg", "version": "1.0.0", "targets": [{"name": "wire_v1", "kind": ["lib"]}]},
                 {"name": "wire-pkg", "version": "2.0.0", "targets": [{"name": "wire_pkg", "kind": ["lib"]}]},
                 {"name": "fork-pkg", "version": "1.0.0", "targets": [{"name": "fork_registry", "kind": ["lib"]}]},
-                {"name": "fork-pkg", "version": "1.0.0", "targets": [{"name": "fork_git", "kind": ["lib"]}]}
+                {"name": "fork-pkg", "version": "1.0.0", "targets": [{"name": "fork_git", "kind": ["lib"]}]},
+                {"name": "same-pkg", "version": "1.0.0", "targets": [{"name": "same_pkg", "kind": ["lib"]}]},
+                {"name": "same-pkg", "version": "1.0.0", "targets": [{"name": "same_pkg", "kind": ["lib"]}]}
             ]}"#,
         );
         let name = |p: &str, v: &str| crates.crate_name(p, v);
@@ -2722,6 +2726,8 @@ mod tests {
         // Two sources build one name and version under different crate names.
         assert_eq!(name("fork-pkg", "1.0.0"), None);
         assert_eq!(name("fork-pkg", "2.0.0"), None);
+        // Two sources that agree keep the name.
+        assert_eq!(name("same-pkg", "1.0.0").as_deref(), Some("same_pkg"));
         // A version missing from the metadata: the versions disagree.
         assert_eq!(name("wire-pkg", "3.0.0"), None);
         // A version missing from the metadata: the package has one name.
@@ -2835,7 +2841,7 @@ mod tests {
 
     /// `impl From<Alias<Marker>> for X` with `type Alias<T: HasType> = <T as
     /// HasType>::Item`: Charon prints the bound type, not `Marker`, so a
-    /// header that names a crate-local alias gives no paths at all.
+    /// header that names a workspace alias gives no paths at all.
     #[test]
     fn test_impl_header_symbols_alias_drops_header() {
         let from =
