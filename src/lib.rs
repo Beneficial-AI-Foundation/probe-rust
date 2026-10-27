@@ -299,9 +299,10 @@ pub struct AtomWithLines {
     /// For a method of an `impl` block: the Rust paths (`krate::module::Type`)
     /// of the trait and types that SCIP resolves in the impl header (trait
     /// path and self type), in source order, one entry per reference. Type
-    /// parameters, primitive types and crate-local type aliases are left out.
-    /// Empty for every other function and for a method whose name occurs
-    /// more than once under the same impl header in its file. Internal: used
+    /// parameters and primitive types are left out. Empty for an impl header
+    /// that names a crate-local type alias, for every other function, and
+    /// for a method whose name occurs more than once under the same impl
+    /// header in its file. Internal: used
     /// to tell same-named Charon candidates apart without line numbers (see
     /// `charon_names::resolve_charon_candidate`), never emitted.
     #[serde(skip)]
@@ -562,7 +563,8 @@ struct HeaderSymbolRef {
     start: (usize, usize),
     /// 1-based line and 0-based column where the reference ends.
     end: (usize, usize),
-    /// `None` when the crate segment is unknown (see [`CrateNames`]).
+    /// `None` when the crate segment is unknown (see [`CrateNames`]) or the
+    /// reference names a crate-local type alias.
     path: Option<String>,
 }
 
@@ -578,8 +580,8 @@ pub struct ImplHeaderSymbols {
 impl ImplHeaderSymbols {
     /// Paths of the references in `file` that lie inside one of `ranges`, in
     /// source order, one entry per reference. Empty when one of these
-    /// references has an unknown crate segment: a header path with a guessed
-    /// crate could contradict the right candidate.
+    /// references has an unknown crate segment or names a crate-local type
+    /// alias: the header could then contradict the right candidate.
     #[must_use]
     pub fn paths_in(&self, file: &str, ranges: &[rust_parser::SourceRange]) -> Vec<String> {
         let Some(refs) = self.by_file.get(file) else {
@@ -603,9 +605,12 @@ impl ImplHeaderSymbols {
 /// rust-analyzer resolves each reference to the defining symbol, so a type
 /// named through a re-export alias (`pub use serialize::Error as
 /// SerializationError`) still yields its defining path
-/// (`spqr::serialize::Error`), the same path Charon prints. References to a
-/// crate-local type alias (`type X = ...;`) are skipped: Charon expands
-/// aliases, so the alias path would never appear in a Charon name.
+/// (`spqr::serialize::Error`), the same path Charon prints. A reference to a
+/// crate-local type alias (`type X = ...;`) gives no path, and
+/// [`ImplHeaderSymbols::paths_in`] then drops the whole header. Charon
+/// expands the alias, and the expansion can differ from the alias arguments:
+/// with `type Alias<T> = <T as HasType>::Item`, Charon prints the bound type
+/// of `Alias<Marker>`, not `Marker`.
 ///
 /// SCIP names a crate by its Cargo package and version; Charon prints the
 /// crate name. `crate_names` gives the crate name of each package (see
@@ -623,11 +628,16 @@ pub fn build_impl_header_symbols(scip: &ScipIndex, crate_names: &CrateNames) -> 
     let mut by_file: HashMap<String, Vec<HeaderSymbolRef>> = HashMap::new();
     for doc in &scip.documents {
         for occ in &doc.occurrences {
-            if is_definition(occ.symbol_roles) || aliases.contains(occ.symbol.as_str()) {
+            if is_definition(occ.symbol_roles) {
                 continue;
             }
-            let Some(path) = scip_type_symbol_to_path(&occ.symbol, crate_names) else {
-                continue;
+            let path = if aliases.contains(occ.symbol.as_str()) {
+                None
+            } else {
+                let Some(path) = scip_type_symbol_to_path(&occ.symbol, crate_names) else {
+                    continue;
+                };
+                path
             };
             let Some((start, end)) = occurrence_bounds(&occ.range) else {
                 continue;
@@ -678,6 +688,8 @@ pub struct CrateNames {
     /// Keyed by package name and version. `None` when the lib and bin
     /// targets of the package build crates with different names: a SCIP
     /// symbol names the package, not the target, so the crate is unknown.
+    /// `None` also when two packages from different sources share the name
+    /// and version but disagree.
     by_version: HashMap<(String, String), Option<String>>,
     /// The same keyed by package name only, for a SCIP version that is not in
     /// `by_version`. `None` also when two versions disagree.
@@ -763,18 +775,21 @@ fn crate_names_from_metadata(json: &str) -> CrateNames {
             1 => crates.into_iter().next(),
             _ => None,
         };
+        let merge = |known: &mut Option<String>| {
+            if *known != name {
+                *known = None;
+            }
+        };
         names
             .by_name
             .entry(package_name.to_string())
-            .and_modify(|known| {
-                if *known != name {
-                    *known = None;
-                }
-            })
+            .and_modify(merge)
             .or_insert_with(|| name.clone());
         names
             .by_version
-            .insert((package_name.to_string(), version.to_string()), name);
+            .entry((package_name.to_string(), version.to_string()))
+            .and_modify(merge)
+            .or_insert(name);
     }
     names
 }
@@ -2692,7 +2707,9 @@ mod tests {
                 {"name": "tool-pkg", "version": "1.0.0", "targets": [{"name": "tool", "kind": ["bin"]}, {"name": "build-script-build", "kind": ["custom-build"]}]},
                 {"name": "two-bins", "version": "1.0.0", "targets": [{"name": "a", "kind": ["bin"]}, {"name": "b", "kind": ["bin"]}]},
                 {"name": "wire-pkg", "version": "1.0.0", "targets": [{"name": "wire_v1", "kind": ["lib"]}]},
-                {"name": "wire-pkg", "version": "2.0.0", "targets": [{"name": "wire_pkg", "kind": ["lib"]}]}
+                {"name": "wire-pkg", "version": "2.0.0", "targets": [{"name": "wire_pkg", "kind": ["lib"]}]},
+                {"name": "fork-pkg", "version": "1.0.0", "targets": [{"name": "fork_registry", "kind": ["lib"]}]},
+                {"name": "fork-pkg", "version": "1.0.0", "targets": [{"name": "fork_git", "kind": ["lib"]}]}
             ]}"#,
         );
         let name = |p: &str, v: &str| crates.crate_name(p, v);
@@ -2702,6 +2719,9 @@ mod tests {
         assert_eq!(name("two-bins", "1.0.0"), None);
         assert_eq!(name("wire-pkg", "1.0.0").as_deref(), Some("wire_v1"));
         assert_eq!(name("wire-pkg", "2.0.0").as_deref(), Some("wire_pkg"));
+        // Two sources build one name and version under different crate names.
+        assert_eq!(name("fork-pkg", "1.0.0"), None);
+        assert_eq!(name("fork-pkg", "2.0.0"), None);
         // A version missing from the metadata: the versions disagree.
         assert_eq!(name("wire-pkg", "3.0.0"), None);
         // A version missing from the metadata: the package has one name.
@@ -2717,9 +2737,8 @@ mod tests {
     }
 
     /// The SPQR header `impl From<serialize::Error> for Error` (line 138):
-    /// the references resolve to the defining paths, a crate-local type alias
-    /// and the module segment are skipped, and only references inside the
-    /// queried ranges count.
+    /// the references resolve to the defining paths, the module segment is
+    /// skipped, and only references inside the queried ranges count.
     #[test]
     fn test_impl_header_symbols_paths_in() {
         let from =
@@ -2727,7 +2746,6 @@ mod tests {
         let module = "rust-analyzer cargo spqr 1.6.0 serialize/";
         let ser_error = "rust-analyzer cargo spqr 1.6.0 serialize/Error#";
         let error = "rust-analyzer cargo spqr 1.6.0 Error#";
-        let alias = "rust-analyzer cargo spqr 1.6.0 Secret#";
         let occ = |sym: &str, line: i32, start: i32, end: i32| Occurrence {
             range: vec![line, start, end],
             symbol: sym.into(),
@@ -2744,21 +2762,15 @@ mod tests {
                     occ(from, 137, 5, 9),
                     occ(module, 137, 10, 19),
                     occ(ser_error, 137, 21, 26),
-                    occ(alias, 137, 40, 46),
                     // Outside the header: the method's return type.
                     occ(error, 138, 30, 35),
                 ],
-                symbols: vec![make_symbol(
-                    alias,
-                    SCIP_KIND_TYPE_ALIAS,
-                    "Secret",
-                    "type Secret",
-                )],
+                symbols: Vec::new(),
             }],
         };
         let symbols = build_impl_header_symbols(&scip, &CrateNames::default());
         // `From<serialize::Error>` spans columns 5..27 of line 138 (1-based),
-        // the self type `Error` 32..37, and the alias sits after them.
+        // the self type `Error` 32..37.
         let header = [
             rust_parser::SourceRange {
                 start_line: 138,
@@ -2770,7 +2782,7 @@ mod tests {
                 start_line: 138,
                 start_column: 32,
                 end_line: 138,
-                end_column: 46,
+                end_column: 37,
             },
         ];
         assert_eq!(
@@ -2818,6 +2830,57 @@ mod tests {
         assert_eq!(
             symbols.paths_in("src/lib.rs", &trait_only),
             vec!["core::convert::From"]
+        );
+    }
+
+    /// `impl From<Alias<Marker>> for X` with `type Alias<T: HasType> = <T as
+    /// HasType>::Item`: Charon prints the bound type, not `Marker`, so a
+    /// header that names a crate-local alias gives no paths at all.
+    #[test]
+    fn test_impl_header_symbols_alias_drops_header() {
+        let from =
+            "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#";
+        let alias = "rust-analyzer cargo x 0.1.0 Alias#";
+        let marker = "rust-analyzer cargo x 0.1.0 Marker#";
+        let x = "rust-analyzer cargo x 0.1.0 X#";
+        let occ = |sym: &str, start: i32, end: i32| Occurrence {
+            range: vec![9, start, end],
+            symbol: sym.into(),
+            symbol_roles: None,
+        };
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "src/lib.rs".into(),
+                occurrences: vec![
+                    occ(from, 5, 9),
+                    occ(alias, 10, 15),
+                    occ(marker, 16, 22),
+                    occ(x, 28, 29),
+                ],
+                symbols: vec![make_symbol(
+                    alias,
+                    SCIP_KIND_TYPE_ALIAS,
+                    "Alias",
+                    "type Alias<T: HasType> = <T as HasType>::Item",
+                )],
+            }],
+        };
+        let symbols = build_impl_header_symbols(&scip, &CrateNames::default());
+        let range = |start_column, end_column| rust_parser::SourceRange {
+            start_line: 10,
+            start_column,
+            end_line: 10,
+            end_column,
+        };
+        assert!(symbols
+            .paths_in("src/lib.rs", &[range(5, 23), range(28, 29)])
+            .is_empty());
+        // Without the alias, the same references keep their paths.
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &[range(5, 9), range(16, 29)]),
+            vec!["core::convert::From", "x::Marker", "x::X"]
         );
     }
 }
