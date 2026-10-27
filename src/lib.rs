@@ -298,12 +298,12 @@ pub struct AtomWithLines {
     pub charon_version: Option<String>,
     /// For a method of an `impl` block: the Rust paths (`krate::module::Type`)
     /// of the trait and types that SCIP resolves in the impl header (trait
-    /// path and self type), sorted, one entry per reference. Type parameters,
-    /// primitive types and crate-local type aliases are left out. Empty for
-    /// every other function and for a method whose name occurs more than once
-    /// under the same impl header in its file. Internal: used to tell same-named Charon candidates apart
-    /// without line numbers (see `charon_names::resolve_charon_candidate`),
-    /// never emitted.
+    /// path and self type), in source order, one entry per reference. Type
+    /// parameters, primitive types and crate-local type aliases are left out.
+    /// Empty for every other function and for a method whose name occurs
+    /// more than once under the same impl header in its file. Internal: used
+    /// to tell same-named Charon candidates apart without line numbers (see
+    /// `charon_names::resolve_charon_candidate`), never emitted.
     #[serde(skip)]
     pub impl_header_paths: Vec<String>,
     /// `true` when `impl_header_paths` is the whole impl header: the header is
@@ -575,20 +575,19 @@ pub struct ImplHeaderSymbols {
 }
 
 impl ImplHeaderSymbols {
-    /// Sorted paths of the references in `file` that lie inside one of
-    /// `ranges`, one entry per reference.
+    /// Paths of the references in `file` that lie inside one of `ranges`, in
+    /// source order, one entry per reference.
     #[must_use]
     pub fn paths_in(&self, file: &str, ranges: &[rust_parser::SourceRange]) -> Vec<String> {
         let Some(refs) = self.by_file.get(file) else {
             return Vec::new();
         };
-        let mut paths: Vec<String> = refs
+        let mut inside: Vec<&HeaderSymbolRef> = refs
             .iter()
             .filter(|r| ranges.iter().any(|range| range.contains(r.start, r.end)))
-            .map(|r| r.path.clone())
             .collect();
-        paths.sort_unstable();
-        paths
+        inside.sort_by_key(|r| r.start);
+        inside.into_iter().map(|r| r.path.clone()).collect()
     }
 }
 
@@ -1561,7 +1560,8 @@ fn convert_to_atoms_with_lines_internal(
                 _ => Vec::new(),
             };
             let impl_header_complete = !impl_header_paths.is_empty()
-                && span_info.and_then(|s| s.impl_header_paths) == Some(impl_header_paths.len());
+                && span_info.and_then(|s| s.impl_header_path_count)
+                    == Some(impl_header_paths.len());
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -2549,8 +2549,8 @@ mod tests {
             from.impl_header_paths,
             vec![
                 "core::convert::From",
-                "xlib::Error",
-                "xlib::serialize::Error"
+                "xlib::serialize::Error",
+                "xlib::Error"
             ]
         );
         assert!(from.impl_header_complete);
@@ -2651,11 +2651,12 @@ mod tests {
             documents: vec![Document {
                 language: "rust".into(),
                 relative_path: "src/lib.rs".into(),
+                // Listed out of source order: `paths_in` sorts by position.
                 occurrences: vec![
+                    occ(error, 137, 32, 37),
                     occ(from, 137, 5, 9),
                     occ(module, 137, 10, 19),
                     occ(ser_error, 137, 21, 26),
-                    occ(error, 137, 32, 37),
                     occ(alias, 137, 40, 46),
                     // Outside the header: the method's return type.
                     occ(error, 138, 30, 35),
@@ -2689,8 +2690,8 @@ mod tests {
             symbols.paths_in("src/lib.rs", &header),
             vec![
                 "core::convert::From",
-                "spqr::Error",
-                "spqr::serialize::Error"
+                "spqr::serialize::Error",
+                "spqr::Error"
             ]
         );
         // One entry per reference: the second line names `Error` again.
@@ -2704,9 +2705,9 @@ mod tests {
             symbols.paths_in("src/lib.rs", &two_lines),
             vec![
                 "core::convert::From",
+                "spqr::serialize::Error",
                 "spqr::Error",
-                "spqr::Error",
-                "spqr::serialize::Error"
+                "spqr::Error"
             ]
         );
         assert!(symbols.paths_in("src/other.rs", &header).is_empty());

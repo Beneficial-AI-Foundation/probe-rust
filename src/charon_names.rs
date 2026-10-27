@@ -732,7 +732,7 @@ fn last_impl_block(qualified_name: &str) -> Option<&str> {
 /// What a Charon qualified name's last impl segment names.
 struct ImplSegment<'q> {
     /// The paths (`krate::module::Name`) of the trait, its type arguments and
-    /// the self type, sorted, one entry per occurrence.
+    /// the self type, in rendering order, one entry per occurrence.
     paths: Vec<&'q str>,
     /// `true` when the segment is made of these paths only: no primitive
     /// type, type parameter, reference, slice, array, tuple, pointer or
@@ -768,67 +768,57 @@ fn impl_segment(qualified_name: &str) -> Option<ImplSegment<'_>> {
     if paths.is_empty() {
         return None;
     }
-    paths.sort_unstable();
     Some(ImplSegment { paths, path_only })
 }
 
 /// How a candidate's impl segment relates to the atom's impl header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderEvidence {
-    /// The segment names exactly the atom's complete header: both are made
-    /// of the same paths and nothing else. Identifies a trait-impl method
-    /// without line numbers.
+    /// The segment names exactly the atom's complete header: the same paths
+    /// in the same order, and nothing else.
     Exact,
-    /// The segment names every path of the atom's header, and possibly more.
-    /// Primitive arguments and references are not paths, so impls that differ
-    /// only in those (`TryFrom<u8>`, `TryFrom<i32>`) all confirm.
-    Confirmed,
+    /// The segment does not contradict the header: it names every header
+    /// path and possibly more (Charon adds default and associated type
+    /// arguments, and primitives such as the `u8` of `TryFrom<u8>` are not
+    /// paths), or a subset of them (the LLBC rendering drops an ADT's generic
+    /// arguments), or there is nothing to compare (no header paths, no typed
+    /// impl segment).
+    Compatible,
     /// Each side names a path that the other lacks: the candidate is a
     /// different impl.
     Contradicted,
-    /// No evidence: the atom has no header paths, the candidate has no typed
-    /// impl segment, or the segment names a subset of the header (the LLBC
-    /// rendering drops an ADT's generic arguments).
-    Unknown,
-}
-
-impl HeaderEvidence {
-    fn confirms(self) -> bool {
-        matches!(self, HeaderEvidence::Exact | HeaderEvidence::Confirmed)
-    }
 }
 
 /// Compare the paths that SCIP resolves in the atom's impl header with the
 /// paths of the candidate's impl segment. Both sides name the defining
 /// paths, so this needs no line numbers: it stays correct when Charon ran on
 /// a patched copy of the source whose line numbers differ from the indexed
-/// one.
+/// one. Exactness compares the paths in order (source order on the atom,
+/// rendering order on the segment, both `Trait<args> for Self`), so
+/// `Tr<A, B>` is not exactly `Tr<B, A>`.
 fn header_evidence(c: &CharonFunInfo, atom: &crate::AtomWithLines) -> HeaderEvidence {
     if atom.impl_header_paths.is_empty() {
-        return HeaderEvidence::Unknown;
+        return HeaderEvidence::Compatible;
     }
     let Some(segment) = impl_segment(&c.qualified_name) else {
-        return HeaderEvidence::Unknown;
+        return HeaderEvidence::Compatible;
     };
     let header: HashSet<&str> = atom.impl_header_paths.iter().map(String::as_str).collect();
     let named: HashSet<&str> = segment.paths.iter().copied().collect();
-    if header.is_subset(&named) {
-        let exact = atom.impl_header_complete
-            && segment.path_only
-            && segment
-                .paths
-                .iter()
-                .copied()
-                .eq(atom.impl_header_paths.iter().map(String::as_str));
-        if exact {
-            HeaderEvidence::Exact
-        } else {
-            HeaderEvidence::Confirmed
-        }
-    } else if named.is_subset(&header) {
-        HeaderEvidence::Unknown
+    if !header.is_subset(&named) && !named.is_subset(&header) {
+        return HeaderEvidence::Contradicted;
+    }
+    let exact = atom.impl_header_complete
+        && segment.path_only
+        && segment
+            .paths
+            .iter()
+            .copied()
+            .eq(atom.impl_header_paths.iter().map(String::as_str));
+    if exact {
+        HeaderEvidence::Exact
     } else {
-        HeaderEvidence::Contradicted
+        HeaderEvidence::Compatible
     }
 }
 
@@ -894,8 +884,9 @@ enum ResolveOutcome<'a> {
 ///
 /// The [impl-header evidence](header_evidence) decides first when it can: a
 /// contradicted candidate is rejected, and an exactly matching trait-impl
-/// candidate is accepted without the span check (its lines may come from a
-/// patched copy of the source). Otherwise the span must overlap as before.
+/// candidate from the manifest is accepted without the span check (its lines
+/// may come from a patched copy of the source). Otherwise the span must
+/// overlap as before.
 ///
 /// This prevents two mis-assignment patterns:
 /// 1. Cross-file collisions (e.g. `subtle::{impl}::from` assigned to every
@@ -937,12 +928,19 @@ fn validate_single_candidate<'a>(
         return ResolveOutcome::NoMatch;
     }
     // The impl header names the impl without line numbers: a contradicting
-    // header rejects the candidate, and an exact trait-impl header accepts it
-    // even when the spans disagree (Charon ran on patched source).
+    // header rejects the candidate, and an exact trait-impl header from the
+    // manifest accepts it even when the spans disagree (Charon ran on patched
+    // source). The LLBC rendering drops an ADT's generic arguments, so its
+    // segments cannot be exact evidence: `impl Tr for W` and `impl Tr for
+    // W<bool>` (with `struct W<T = u8>`) both render `{Tr for W}`.
     match header_evidence(c, atom) {
         HeaderEvidence::Contradicted => return ResolveOutcome::NoMatch,
-        HeaderEvidence::Exact if is_trait_impl_segment(c) => return ResolveOutcome::Match(c),
-        HeaderEvidence::Exact | HeaderEvidence::Confirmed | HeaderEvidence::Unknown => {}
+        HeaderEvidence::Exact
+            if source == EnrichmentSource::Manifest && is_trait_impl_segment(c) =>
+        {
+            return ResolveOutcome::Match(c)
+        }
+        HeaderEvidence::Exact | HeaderEvidence::Compatible => {}
     }
     // Compare spans only when both the atom and the candidate carry usable
     // line numbers (`span_overlap` returns `None` otherwise), so a span-less
@@ -967,10 +965,9 @@ fn validate_single_candidate<'a>(
 ///    restrict to those candidates;
 /// 3. **dedup**: survivors agreeing on `(def_id, qualified_name)` collapse to
 ///    one (Manifest loop helpers share their parent's `def_id`);
-/// 4. **impl header**: keep the candidates whose impl segment names every
-///    path of the atom's impl header; with none, drop the contradicted ones,
-///    and when every candidate is contradicted the result is NoMatch (see
-///    [`header_evidence`]);
+/// 4. **impl header**: drop the candidates whose impl segment contradicts
+///    the atom's impl header; when every candidate is contradicted the result
+///    is NoMatch (see [`header_evidence`]);
 /// 5. **span**: among the rest, the strict-maximum positive overlap wins.
 ///
 /// A single survivor still goes through [`validate_single_candidate`]. When
@@ -1033,16 +1030,14 @@ fn resolve_charon_candidate<'a>(
         }
     }
 
-    // Header stage: keep the candidates whose impl segment names every path
-    // of the atom's impl header. When there are none, drop the contradicted
-    // ones; when every candidate is contradicted, the atom is none of them.
-    let evidence: Vec<HeaderEvidence> = distinct.iter().map(|c| header_evidence(c, atom)).collect();
-    if evidence.iter().any(|e| e.confirms()) {
-        distinct = filter_by_evidence(&distinct, &evidence, HeaderEvidence::confirms);
-    } else if evidence.iter().all(|e| *e == HeaderEvidence::Contradicted) {
+    // Header stage: drop the candidates whose impl segment contradicts the
+    // atom's impl header; when every candidate is contradicted, the atom is
+    // none of them. A compatible candidate is never dropped in favor of
+    // another: on the LLBC source the atom's own impl may render as a subset
+    // of its header while a sibling names every header path.
+    distinct.retain(|c| header_evidence(c, atom) != HeaderEvidence::Contradicted);
+    if distinct.is_empty() {
         return ResolveOutcome::NoMatch;
-    } else {
-        distinct = filter_by_evidence(&distinct, &evidence, |e| e != HeaderEvidence::Contradicted);
     }
 
     if let [single] = distinct.as_slice() {
@@ -1076,20 +1071,6 @@ fn resolve_charon_candidate<'a>(
         None if overlaps.iter().all(|o| o.is_some()) => ResolveOutcome::NoMatch,
         None => ResolveOutcome::Ambiguous,
     }
-}
-
-/// The candidates whose header evidence satisfies `keep`, in order.
-fn filter_by_evidence<'a>(
-    candidates: &[&'a CharonFunInfo],
-    evidence: &[HeaderEvidence],
-    keep: impl Fn(HeaderEvidence) -> bool,
-) -> Vec<&'a CharonFunInfo> {
-    candidates
-        .iter()
-        .zip(evidence)
-        .filter(|(_, e)| keep(**e))
-        .map(|(c, _)| *c)
-        .collect()
 }
 
 /// Which source produced an [`Enrichment`] — for logging and test assertions.
@@ -3217,7 +3198,8 @@ mod tests {
         }
     }
 
-    /// An atom in `src/lib.rs` with the given impl-header paths.
+    /// An atom in `src/lib.rs` with the given impl-header paths, in source
+    /// order.
     fn header_atom(lines: (usize, usize), header: &[&str]) -> crate::AtomWithLines {
         let mut atom = test_atom();
         atom.display_name = "Error::from".to_string();
@@ -3226,9 +3208,7 @@ mod tests {
             lines_start: lines.0,
             lines_end: lines.1,
         };
-        let mut paths: Vec<String> = header.iter().map(|p| p.to_string()).collect();
-        paths.sort_unstable();
-        atom.impl_header_paths = paths;
+        atom.impl_header_paths = header.iter().map(|p| p.to_string()).collect();
         atom.impl_header_complete = true;
         atom
     }
@@ -3258,24 +3238,24 @@ mod tests {
             (133, 135),
             &[
                 "core::convert::From",
-                "spqr::Error",
                 "spqr::encoding::EncodingError",
+                "spqr::Error",
             ],
         );
         let authenticator = header_atom(
             (145, 147),
             &[
                 "core::convert::From",
-                "spqr::Error",
                 "spqr::authenticator::Error",
+                "spqr::Error",
             ],
         );
         let serialize = header_atom(
             (139, 141),
             &[
                 "core::convert::From",
-                "spqr::Error",
                 "spqr::serialize::Error",
+                "spqr::Error",
             ],
         );
 
@@ -3292,9 +3272,10 @@ mod tests {
     }
 
     /// A lone candidate: a contradicting header rejects it even when the
-    /// spans overlap; a confirmed trait-impl header accepts it even when the
-    /// spans are disjoint; a confirmed inherent-impl header still needs the
-    /// span check, because one type can have several inherent impl blocks.
+    /// spans overlap; an exact trait-impl header from the manifest accepts it
+    /// even when the spans are disjoint; an exact inherent-impl header still
+    /// needs the span check, because one type can have several inherent impl
+    /// blocks.
     #[test]
     fn test_resolve_single_candidate_impl_header() {
         let trait_impl = [candidate(
@@ -3307,24 +3288,28 @@ mod tests {
             (139, 141),
             &[
                 "core::convert::From",
-                "spqr::Error",
                 "spqr::serialize::Error",
+                "spqr::Error",
             ],
         );
         assert!(matches!(
             resolve_charon_candidate(&trait_impl, &contradicted, EnrichmentSource::Manifest),
             ResolveOutcome::NoMatch
         ));
-        let confirmed = header_atom(
+        let exact = header_atom(
             (133, 135),
             &[
                 "core::convert::From",
-                "spqr::Error",
                 "spqr::encoding::EncodingError",
+                "spqr::Error",
             ],
         );
+        assert_eq!(
+            header_evidence(&trait_impl[0], &exact),
+            HeaderEvidence::Exact
+        );
         assert!(matches!(
-            resolve_charon_candidate(&trait_impl, &confirmed, EnrichmentSource::Manifest),
+            resolve_charon_candidate(&trait_impl, &exact, EnrichmentSource::Manifest),
             ResolveOutcome::Match(c) if c.def_id == 60
         ));
 
@@ -3346,10 +3331,10 @@ mod tests {
         ));
     }
 
-    /// Without typed impl segments (legacy `{impl Trait}`), the header gives
-    /// no evidence and the span stage decides as before.
+    /// Without typed impl segments (legacy `{impl Trait}`), every candidate
+    /// is compatible and the span stage decides as before.
     #[test]
-    fn test_resolve_impl_header_unknown_falls_back_to_span() {
+    fn test_resolve_untyped_impl_segment_falls_back_to_span() {
         let candidates = vec![
             candidate(1, "c::m::{impl c::T}::conv", "src/lib.rs", (10, 12)),
             candidate(2, "c::m::{impl c::T}::conv", "src/lib.rs", (20, 22)),
@@ -3361,9 +3346,10 @@ mod tests {
         ));
     }
 
-    /// A lone sibling impl that differs only in a primitive argument confirms
-    /// the header (`u8` and `i32` are not paths) but is not exact, so the span
-    /// still decides: Aeneas may have left the atom's own impl out.
+    /// A lone sibling impl that differs only in a primitive argument is
+    /// compatible with the header (`u8` and `i32` are not paths) but not
+    /// exact, so the span still decides: Aeneas may have left the atom's own
+    /// impl out.
     #[test]
     fn test_resolve_single_candidate_primitive_sibling_needs_span() {
         let sibling = [candidate(
@@ -3376,7 +3362,7 @@ mod tests {
         // `syn` but no SCIP type, so the header is not complete.
         let mut atom = header_atom(
             (741, 743),
-            &["c::address::DeviceId", "core::convert::TryFrom"],
+            &["core::convert::TryFrom", "c::address::DeviceId"],
         );
         atom.impl_header_complete = false;
         assert!(matches!(
@@ -3396,11 +3382,10 @@ mod tests {
 
     /// The LLBC rendering drops an ADT's generic arguments
     /// (`From<alloc::vec::Vec>` for `From<Vec<Foo>>`). A segment that names
-    /// a subset of the header is no evidence either way, so the span decides;
-    /// with a contradicted candidate beside it, only the contradicted one is
-    /// dropped.
+    /// a subset of the header is compatible, so the span decides; with a
+    /// contradicted candidate beside it, only the contradicted one is dropped.
     #[test]
-    fn test_resolve_header_subset_is_unknown() {
+    fn test_resolve_header_subset_is_compatible() {
         let candidates = vec![
             candidate(
                 1,
@@ -3418,10 +3403,10 @@ mod tests {
         let atom = header_atom(
             (10, 12),
             &[
+                "core::convert::From",
                 "alloc::vec::Vec",
                 "c::m::Foo",
                 "c::m::X",
-                "core::convert::From",
             ],
         );
         assert!(matches!(
@@ -3434,8 +3419,8 @@ mod tests {
         ));
     }
 
-    /// Exactness compares paths with their multiplicity: a header that names
-    /// `Error` twice is not exactly a segment that names it once.
+    /// Exactness compares the paths in order, repeats included: a segment
+    /// that names `Error` twice is not exactly a header that names it once.
     #[test]
     fn test_header_evidence_exact_counts_repeats() {
         let c = candidate(
@@ -3444,10 +3429,128 @@ mod tests {
             "src/lib.rs",
             (1, 3),
         );
-        let twice = header_atom((50, 52), &["c::Error", "c::Error", "core::convert::From"]);
+        let twice = header_atom((50, 52), &["core::convert::From", "c::Error", "c::Error"]);
         assert_eq!(header_evidence(&c, &twice), HeaderEvidence::Exact);
-        let once = header_atom((50, 52), &["c::Error", "core::convert::From"]);
-        assert_eq!(header_evidence(&c, &once), HeaderEvidence::Confirmed);
+        let once = header_atom((50, 52), &["core::convert::From", "c::Error"]);
+        assert_eq!(header_evidence(&c, &once), HeaderEvidence::Compatible);
+    }
+
+    /// An exact candidate does not drop a compatible sibling in the
+    /// multi-candidate stage: both go on to the span stage, which decides.
+    /// Candidate 1 names exactly the atom's header; candidate 2 names it plus
+    /// `Box` and the `Global` that Charon adds, so it is only compatible. The
+    /// span overlaps candidate 2, and the span wins.
+    #[test]
+    fn test_resolve_exact_candidate_does_not_drop_compatible_sibling() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::{impl core::convert::From<c::Foo> for c::X}::from",
+                "src/lib.rs",
+                (20, 22),
+            ),
+            candidate(
+                2,
+                "c::{impl core::convert::From<alloc::boxed::Box<c::Foo, alloc::alloc::Global>> for c::X}::from",
+                "src/lib.rs",
+                (10, 12),
+            ),
+        ];
+        let mut atom = header_atom((10, 12), &["core::convert::From", "c::Foo", "c::X"]);
+        atom.display_name = "X::from".to_string();
+        assert_eq!(
+            header_evidence(&candidates[0], &atom),
+            HeaderEvidence::Exact
+        );
+        assert_eq!(
+            header_evidence(&candidates[1], &atom),
+            HeaderEvidence::Compatible
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 2
+        ));
+    }
+
+    /// Exactness compares paths in order: `Tr<A, B> for X` is not exactly
+    /// `Tr<B, A> for X`, so a lone swapped sibling still needs the span.
+    #[test]
+    fn test_resolve_single_candidate_swapped_arguments_need_span() {
+        let sibling = [candidate(
+            9,
+            "c::{impl c::Tr<c::B, c::A> for c::X}::f",
+            "src/lib.rs",
+            (20, 22),
+        )];
+        let mut atom = header_atom((10, 12), &["c::Tr", "c::A", "c::B", "c::X"]);
+        atom.display_name = "X::f".to_string();
+        assert_eq!(
+            header_evidence(&sibling[0], &atom),
+            HeaderEvidence::Compatible
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&sibling, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// The LLBC rendering drops an ADT's generic arguments, so an exact LLBC
+    /// segment is no proof of identity: `impl Tr for W` and `impl Tr for
+    /// W<bool>` (with `struct W<T = u8>`) both render `{c::Tr for c::W}`. A
+    /// lone LLBC candidate still needs the span.
+    #[test]
+    fn test_resolve_single_llbc_candidate_exact_needs_span() {
+        let sibling = [candidate(
+            9,
+            "c::{c::Tr for c::W}::f",
+            "src/lib.rs",
+            (20, 22),
+        )];
+        let mut atom = header_atom((10, 12), &["c::Tr", "c::W"]);
+        atom.display_name = "W::f".to_string();
+        assert_eq!(header_evidence(&sibling[0], &atom), HeaderEvidence::Exact);
+        assert!(matches!(
+            resolve_charon_candidate(&sibling, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// On the LLBC source the atom's own impl can render as a subset of its
+    /// header while a sibling names every header path. The header stage keeps
+    /// both, and the span picks the atom's own impl.
+    #[test]
+    fn test_resolve_llbc_subset_candidate_kept_beside_superset_sibling() {
+        // `impl PartialEq<Wrapper<Foo>> for Wrapper<Foo>` (the atom) and
+        // `impl PartialEq<Foo> for Wrapper<Foo>`.
+        let candidates = vec![
+            candidate(
+                1,
+                "c::{core::cmp::PartialEq<c::Wrapper> for c::Wrapper}::eq",
+                "src/lib.rs",
+                (10, 12),
+            ),
+            candidate(
+                2,
+                "c::{core::cmp::PartialEq<c::Foo> for c::Wrapper}::eq",
+                "src/lib.rs",
+                (20, 22),
+            ),
+        ];
+        let mut atom = header_atom(
+            (10, 12),
+            &[
+                "core::cmp::PartialEq",
+                "c::Wrapper",
+                "c::Foo",
+                "c::Wrapper",
+                "c::Foo",
+            ],
+        );
+        atom.display_name = "Wrapper::eq".to_string();
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Match(c) if c.def_id == 1
+        ));
     }
 
     #[test]
@@ -3458,7 +3561,7 @@ mod tests {
         assert_eq!(
             parse("spqr::{impl core::convert::TryFrom<u8, alloc::string::String> for spqr::proto::Version}::try_from"),
             Some((
-                vec!["alloc::string::String", "core::convert::TryFrom", "spqr::proto::Version"],
+                vec!["core::convert::TryFrom", "alloc::string::String", "spqr::proto::Version"],
                 false
             ))
         );
@@ -3472,7 +3575,7 @@ mod tests {
         assert_eq!(
             parse("c::m::{core::ops::arith::Mul<&'0 (c::s::Scalar)> for &'1 (c::e::Point)}::mul"),
             Some((
-                vec!["c::e::Point", "c::s::Scalar", "core::ops::arith::Mul"],
+                vec!["core::ops::arith::Mul", "c::s::Scalar", "c::e::Point"],
                 false
             ))
         );

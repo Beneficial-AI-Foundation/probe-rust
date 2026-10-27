@@ -51,11 +51,13 @@ pub fn cmd_extract(
     println!("Converting to atoms format with accurate line numbers...");
     println!("  Parsing source files with syn for accurate function spans...");
 
-    let header_symbols = build_impl_header_symbols(&scip_index, &lib_crate_names(&project_path));
+    // Only Charon enrichment reads the impl-header paths.
+    let header_symbols = (translation.is_some() || with_charon)
+        .then(|| build_impl_header_symbols(&scip_index, &lib_crate_names(&project_path)));
     let atoms = convert_to_atoms_with_parsed_spans(
         &call_graph,
         &symbol_to_display_name,
-        Some(&header_symbols),
+        header_symbols.as_ref(),
         &project_path,
         with_locations,
     );
