@@ -298,12 +298,20 @@ pub struct AtomWithLines {
     pub charon_version: Option<String>,
     /// For a method of an `impl` block: the Rust paths (`krate::module::Type`)
     /// of the trait and types that SCIP resolves in the impl header (trait
-    /// path and self type), sorted and deduplicated. Type parameters and
-    /// crate-local type aliases are left out. Empty for every other function.
-    /// Internal: used to tell same-named Charon candidates apart without line
-    /// numbers (see `charon_names::resolve_charon_candidate`), never emitted.
+    /// path and self type), sorted, one entry per reference. Type parameters,
+    /// primitive types and crate-local type aliases are left out. Empty for
+    /// every other function and for a method whose name repeats in its impl
+    /// block. Internal: used to tell same-named Charon candidates apart
+    /// without line numbers (see `charon_names::resolve_charon_candidate`),
+    /// never emitted.
     #[serde(skip)]
     pub impl_header_paths: Vec<String>,
+    /// `true` when `impl_header_paths` is the whole impl header: the header is
+    /// made of type paths only, and SCIP resolved every one of them to a
+    /// trait or type (no primitive, type parameter, reference, alias, ...).
+    /// Internal, never emitted.
+    #[serde(skip)]
+    pub impl_header_complete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -567,19 +575,20 @@ pub struct ImplHeaderSymbols {
 }
 
 impl ImplHeaderSymbols {
-    /// Sorted, deduplicated paths of the references in `file` that lie inside
-    /// one of `ranges`.
+    /// Sorted paths of the references in `file` that lie inside one of
+    /// `ranges`, one entry per reference.
     #[must_use]
     pub fn paths_in(&self, file: &str, ranges: &[rust_parser::SourceRange]) -> Vec<String> {
         let Some(refs) = self.by_file.get(file) else {
             return Vec::new();
         };
-        let paths: BTreeSet<&str> = refs
+        let mut paths: Vec<String> = refs
             .iter()
             .filter(|r| ranges.iter().any(|range| range.contains(r.start, r.end)))
-            .map(|r| r.path.as_str())
+            .map(|r| r.path.clone())
             .collect();
-        paths.into_iter().map(str::to_string).collect()
+        paths.sort_unstable();
+        paths
     }
 }
 
@@ -1482,6 +1491,8 @@ fn convert_to_atoms_with_lines_internal(
                 }
                 _ => Vec::new(),
             };
+            let impl_header_complete = !impl_header_paths.is_empty()
+                && span_info.and_then(|s| s.impl_header_paths) == Some(impl_header_paths.len());
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -1507,6 +1518,7 @@ fn convert_to_atoms_with_lines_internal(
                 charon_def_id: None,
                 charon_version: None,
                 impl_header_paths,
+                impl_header_complete,
             }
         })
         .collect();
@@ -1621,6 +1633,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 charon_def_id: None,
                 charon_version: None,
                 impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
     }
@@ -1737,6 +1750,7 @@ mod tests {
                 charon_def_id: None,
                 charon_version: None,
                 impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2180,6 +2194,7 @@ mod tests {
             charon_def_id: None,
             charon_version: None,
             impl_header_paths: Vec::new(),
+            impl_header_complete: false,
         }
     }
 
@@ -2377,6 +2392,109 @@ mod tests {
         assert_eq!(dead.cfg, None, "unmounted files carry no chain gate");
     }
 
+    /// End-to-end over the parsed-spans path with SCIP header symbols: a
+    /// method of a path-only trait impl gets its resolved header paths and a
+    /// complete header; a method of `impl TryFrom<u8> for Error` gets the
+    /// resolved paths, but `u8` resolves to no type, so its header is not
+    /// complete.
+    #[test]
+    fn test_convert_with_impl_header_symbols() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "mod serialize { pub struct Error; }\n\
+             pub struct Error;\n\
+             impl From<serialize::Error> for Error {\n\
+             \x20   fn from(_v: serialize::Error) -> Self { Error }\n\
+             }\n\
+             impl TryFrom<u8> for Error {\n\
+             \x20   type Error = ();\n\
+             \x20   fn try_from(_v: u8) -> Result<Self, ()> { Ok(Error) }\n\
+             }\n",
+        )
+        .unwrap();
+
+        let core = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core";
+        let occ = |sym: String, line: i32, start: i32, end: i32| Occurrence {
+            range: vec![line, start, end],
+            symbol: sym,
+            symbol_roles: None,
+        };
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "src/lib.rs".into(),
+                occurrences: vec![
+                    occ(format!("{core} convert/From#"), 2, 5, 9),
+                    occ("rust-analyzer cargo x 0.1.0 serialize/".into(), 2, 10, 19),
+                    occ(
+                        "rust-analyzer cargo x 0.1.0 serialize/Error#".into(),
+                        2,
+                        21,
+                        26,
+                    ),
+                    occ("rust-analyzer cargo x 0.1.0 Error#".into(), 2, 32, 37),
+                    occ(format!("{core} convert/TryFrom#"), 5, 5, 12),
+                    occ("rust-analyzer cargo x 0.1.0 Error#".into(), 5, 21, 26),
+                ],
+                symbols: Vec::new(),
+            }],
+        };
+        let symbols = build_impl_header_symbols(&scip);
+
+        let mk_node = |symbol: &str, name: &str, line0: i32| FunctionNode {
+            symbol: symbol.to_string(),
+            display_name: name.to_string(),
+            signature_text: format!("fn {}()", name),
+            relative_path: "src/lib.rs".to_string(),
+            callees: HashSet::new(),
+            range: vec![line0, 7, line0, 11],
+            self_type: None,
+            definition_type_context: Vec::new(),
+        };
+        let mut graph = HashMap::new();
+        graph.insert("s1".to_string(), mk_node("s1", "from", 3));
+        graph.insert("s2".to_string(), mk_node("s2", "try_from", 7));
+
+        let atoms = convert_to_atoms_with_parsed_spans(
+            &graph,
+            &HashMap::new(),
+            Some(&symbols),
+            root,
+            false,
+        );
+        let by = |n: &str| atoms.iter().find(|a| a.display_name == n).unwrap();
+
+        let from = by("from");
+        assert_eq!(
+            from.impl_header_paths,
+            vec!["core::convert::From", "x::Error", "x::serialize::Error"]
+        );
+        assert!(from.impl_header_complete);
+
+        let try_from = by("try_from");
+        assert_eq!(
+            try_from.impl_header_paths,
+            vec!["core::convert::TryFrom", "x::Error"]
+        );
+        assert!(!try_from.impl_header_complete);
+    }
+
+    #[test]
+    fn test_occurrence_bounds() {
+        assert_eq!(occurrence_bounds(&[2, 5, 9]), Some(((3, 5), (3, 9))));
+        assert_eq!(occurrence_bounds(&[2, 5, 4, 1]), Some(((3, 5), (5, 1))));
+        assert_eq!(occurrence_bounds(&[2, 5]), None);
+    }
+
     #[test]
     fn test_scip_type_symbol_to_path() {
         assert_eq!(
@@ -2466,6 +2584,22 @@ mod tests {
             symbols.paths_in("src/lib.rs", &header),
             vec![
                 "core::convert::From",
+                "spqr::Error",
+                "spqr::serialize::Error"
+            ]
+        );
+        // One entry per reference: the second line names `Error` again.
+        let two_lines = [rust_parser::SourceRange {
+            start_line: 138,
+            start_column: 0,
+            end_line: 139,
+            end_column: 40,
+        }];
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &two_lines),
+            vec![
+                "core::convert::From",
+                "spqr::Error",
                 "spqr::Error",
                 "spqr::serialize::Error"
             ]

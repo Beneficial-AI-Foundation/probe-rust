@@ -33,10 +33,33 @@ pub struct FunctionSpan {
     /// body.
     pub trait_required: bool,
     /// For a method of an `impl` block: the source ranges of that impl's
-    /// trait path (trait impls only) and self type. Empty for every other
-    /// function. Consumers resolve the names in these ranges to identify the
-    /// impl without relying on line numbers.
+    /// trait path (trait impls only) and self type. Consumers resolve the
+    /// names in these ranges to identify the method without relying on line
+    /// numbers. Empty for every other function, and for a method whose name
+    /// occurs more than once under the same impl header in the file
+    /// (`cfg`-split variants, in one impl block or in several, share the
+    /// header, so it cannot tell them apart).
     pub impl_header: Vec<SourceRange>,
+    /// The number of type paths in that impl header (the trait path, its type
+    /// arguments, the self type and their nested type arguments) when the
+    /// header is made of type paths only; `None` when it also contains a
+    /// reference, slice, array, tuple, pointer, trait object or associated
+    /// type binding, or when `impl_header` is empty. Primitive types and type
+    /// parameters are paths to `syn` and are counted, so a consumer that
+    /// resolves fewer types than this count knows the header names more than
+    /// the resolved paths.
+    pub impl_header_paths: Option<usize>,
+}
+
+/// The impl header that methods of the innermost enclosing item inherit.
+#[derive(Default)]
+struct ImplHeaderFrame {
+    ranges: Vec<SourceRange>,
+    /// See [`FunctionSpan::impl_header_paths`].
+    path_count: Option<usize>,
+    /// The header's tokens (trait path and self type), which identify impl
+    /// blocks with the same header within a file.
+    key: String,
 }
 
 /// A source range in `syn` coordinates: 1-based lines, 0-based columns.
@@ -110,6 +133,8 @@ pub struct SpanInfo {
     pub trait_required: bool,
     /// Enclosing impl header ranges (see [`FunctionSpan::impl_header`]).
     pub impl_header: Vec<SourceRange>,
+    /// Type-path count of that header (see [`FunctionSpan::impl_header_paths`]).
+    pub impl_header_paths: Option<usize>,
 }
 
 /// Extract the predicates of **all** item-gating `#[cfg(...)]` attributes on an
@@ -156,7 +181,10 @@ struct FunctionSpanVisitor {
     /// `impl` block pushes its trait-path and self-type ranges; a free
     /// function, trait or module pushes an empty entry, so a function nested
     /// in one of them is not attributed to an outer impl.
-    impl_header_stack: Vec<Vec<SourceRange>>,
+    impl_header_stack: Vec<ImplHeaderFrame>,
+    /// For each entry of `functions`, the header key of its impl when it
+    /// recorded a header (see [`ImplHeaderFrame::key`]).
+    impl_header_keys: Vec<Option<String>>,
 }
 
 impl FunctionSpanVisitor {
@@ -165,17 +193,62 @@ impl FunctionSpanVisitor {
             functions: Vec::new(),
             cfg_stack: Vec::new(),
             impl_header_stack: Vec::new(),
+            impl_header_keys: Vec::new(),
         }
     }
 
-    /// Header ranges of the innermost enclosing impl, or empty.
-    fn current_impl_header(&self) -> Vec<SourceRange> {
-        self.impl_header_stack.last().cloned().unwrap_or_default()
+    /// Record `span`, with the header key of the enclosing impl when it
+    /// carries a header.
+    fn push_function(&mut self, span: FunctionSpan) {
+        let key = if span.impl_header.is_empty() {
+            None
+        } else {
+            self.impl_header_stack.last().map(|frame| frame.key.clone())
+        };
+        self.impl_header_keys.push(key);
+        self.functions.push(span);
     }
 
-    /// Run `f` with `header` as the innermost enclosing impl header.
-    fn with_impl_header(&mut self, header: Vec<SourceRange>, f: impl FnOnce(&mut Self)) {
-        self.impl_header_stack.push(header);
+    /// Drop the impl header of every method whose name occurs more than once
+    /// under the same header key: those are `cfg`-split variants, and the
+    /// header cannot tell them apart.
+    fn drop_repeated_impl_headers(&mut self) {
+        let mut counts: HashMap<(&str, &str), usize> = HashMap::new();
+        for (span, key) in self.functions.iter().zip(&self.impl_header_keys) {
+            if let Some(key) = key {
+                *counts
+                    .entry((key.as_str(), span.name.as_str()))
+                    .or_default() += 1;
+            }
+        }
+        let repeated: Vec<bool> = self
+            .functions
+            .iter()
+            .zip(&self.impl_header_keys)
+            .map(|(span, key)| {
+                key.as_deref()
+                    .is_some_and(|k| counts[&(k, span.name.as_str())] > 1)
+            })
+            .collect();
+        for (span, repeated) in self.functions.iter_mut().zip(repeated) {
+            if repeated {
+                span.impl_header.clear();
+                span.impl_header_paths = None;
+            }
+        }
+    }
+
+    /// Header ranges and path count of the innermost enclosing impl, or none.
+    fn current_impl_header(&self) -> (Vec<SourceRange>, Option<usize>) {
+        match self.impl_header_stack.last() {
+            Some(frame) => (frame.ranges.clone(), frame.path_count),
+            None => (Vec::new(), None),
+        }
+    }
+
+    /// Run `f` with `frame` as the innermost enclosing impl header.
+    fn with_impl_header(&mut self, frame: ImplHeaderFrame, f: impl FnOnce(&mut Self)) {
+        self.impl_header_stack.push(frame);
         f(self);
         self.impl_header_stack.pop();
     }
@@ -208,7 +281,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let end_line = span.end().line;
         let cfg = self.combined_cfg(&node.attrs);
 
-        self.functions.push(FunctionSpan {
+        self.push_function(FunctionSpan {
             name,
             start_line,
             end_line,
@@ -216,9 +289,12 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             is_foreign: false,
             trait_required: false,
             impl_header: Vec::new(),
+            impl_header_paths: None,
         });
 
-        self.with_impl_header(Vec::new(), |v| syn::visit::visit_item_fn(v, node));
+        self.with_impl_header(ImplHeaderFrame::default(), |v| {
+            syn::visit::visit_item_fn(v, node)
+        });
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
@@ -227,15 +303,17 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let start_line = span.start().line;
         let end_line = span.end().line;
         let cfg = self.combined_cfg(&node.attrs);
+        let (impl_header, impl_header_paths) = self.current_impl_header();
 
-        self.functions.push(FunctionSpan {
+        self.push_function(FunctionSpan {
             name,
             start_line,
             end_line,
             cfg,
             is_foreign: false,
             trait_required: false,
-            impl_header: self.current_impl_header(),
+            impl_header,
+            impl_header_paths,
         });
 
         syn::visit::visit_impl_item_fn(self, node);
@@ -248,7 +326,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let end_line = span.end().line;
         let cfg = self.combined_cfg(&node.attrs);
 
-        self.functions.push(FunctionSpan {
+        self.push_function(FunctionSpan {
             name,
             start_line,
             end_line,
@@ -256,6 +334,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             is_foreign: false,
             trait_required: node.default.is_none(),
             impl_header: Vec::new(),
+            impl_header_paths: None,
         });
 
         syn::visit::visit_trait_item_fn(self, node);
@@ -268,7 +347,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let end_line = span.end().line;
         let cfg = self.combined_cfg(&node.attrs);
 
-        self.functions.push(FunctionSpan {
+        self.push_function(FunctionSpan {
             name,
             start_line,
             end_line,
@@ -276,31 +355,52 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             is_foreign: true,
             trait_required: false,
             impl_header: Vec::new(),
+            impl_header_paths: None,
         });
 
         syn::visit::visit_foreign_item_fn(self, node);
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        let mut header: Vec<SourceRange> = node
+        let mut ranges: Vec<SourceRange> = node
             .trait_
             .iter()
             .map(|(_, path, _)| SourceRange::of(path.span()))
             .collect();
-        header.push(SourceRange::of(node.self_ty.span()));
-        self.with_impl_header(header, |v| {
+        ranges.push(SourceRange::of(node.self_ty.span()));
+        let key = format!(
+            "{} for {}",
+            node.trait_
+                .as_ref()
+                .map(|(_, path, _)| path.to_token_stream().to_string())
+                .unwrap_or_default(),
+            node.self_ty.to_token_stream()
+        );
+        let trait_paths = match &node.trait_ {
+            Some((_, path, _)) => path_only_count(path),
+            None => Some(0),
+        };
+        let path_count = trait_paths
+            .zip(type_path_only_count(&node.self_ty))
+            .map(|(a, b)| a + b);
+        let frame = ImplHeaderFrame {
+            ranges,
+            path_count,
+            key,
+        };
+        self.with_impl_header(frame, |v| {
             v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_impl(v, node))
         });
     }
 
     fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
-        self.with_impl_header(Vec::new(), |v| {
+        self.with_impl_header(ImplHeaderFrame::default(), |v| {
             v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_trait(v, node))
         });
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        self.with_impl_header(Vec::new(), |v| {
+        self.with_impl_header(ImplHeaderFrame::default(), |v| {
             v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_mod(v, node))
         });
     }
@@ -319,6 +419,39 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         }
         syn::visit::visit_item_macro(self, node);
     }
+}
+
+/// The number of type paths in `ty` and its type arguments when `ty` is made
+/// of type paths only (see [`FunctionSpan::impl_header_paths`]), else `None`.
+fn type_path_only_count(ty: &syn::Type) -> Option<usize> {
+    match ty {
+        syn::Type::Path(tp) if tp.qself.is_none() => path_only_count(&tp.path),
+        syn::Type::Paren(inner) => type_path_only_count(&inner.elem),
+        syn::Type::Group(inner) => type_path_only_count(&inner.elem),
+        _ => None,
+    }
+}
+
+/// One for `path` itself plus the type paths in its generic arguments, or
+/// `None` when an argument is not a type path (lifetimes are ignored).
+fn path_only_count(path: &syn::Path) -> Option<usize> {
+    let mut count = 1;
+    for segment in &path.segments {
+        match &segment.arguments {
+            syn::PathArguments::None => {}
+            syn::PathArguments::AngleBracketed(args) => {
+                for arg in &args.args {
+                    match arg {
+                        syn::GenericArgument::Lifetime(_) => {}
+                        syn::GenericArgument::Type(ty) => count += type_path_only_count(ty)?,
+                        _ => return None,
+                    }
+                }
+            }
+            syn::PathArguments::Parenthesized(_) => return None,
+        }
+    }
+    Some(count)
 }
 
 /// Try to parse a `cfg_if!` macro node and return the items from all branches.
@@ -401,6 +534,7 @@ pub fn parse_file_for_spans(file_path: &Path) -> Result<Vec<FunctionSpan>, Strin
     // file, exactly like an enclosing mod gate.
     visitor.cfg_stack = cfg_predicates_of(&syntax_tree.attrs);
     visitor.visit_file(&syntax_tree);
+    visitor.drop_repeated_impl_headers();
 
     Ok(visitor.functions)
 }
@@ -619,6 +753,7 @@ pub fn build_function_span_map(
                         is_foreign: func.is_foreign,
                         trait_required: func.trait_required,
                         impl_header: func.impl_header,
+                        impl_header_paths: func.impl_header_paths,
                     },
                 );
             }
@@ -710,14 +845,14 @@ mod tests {
     use tempfile::NamedTempFile;
 
     /// A method records its impl's trait-path and self-type ranges; a free
-    /// function nested in the method body, a trait method and a free
-    /// function record none.
+    /// function nested in the method body, a trait method, a free function
+    /// and a method repeated under the same header record none.
     #[test]
     fn test_impl_header_ranges() {
         let mut file = NamedTempFile::new().unwrap();
         write!(
             file,
-            "impl From<serialize::Error> for Error {{\n    fn from(v: serialize::Error) -> Self {{\n        fn helper() {{}}\n        Error::Serialization(v)\n    }}\n}}\ntrait T {{\n    fn t() {{}}\n}}\nfn free() {{}}\n"
+            "impl From<serialize::Error> for Error {{\n    fn from(v: serialize::Error) -> Self {{\n        fn helper() {{}}\n        Error::Serialization(v)\n    }}\n}}\ntrait T {{\n    fn t() {{}}\n}}\nfn free() {{}}\nimpl T for X {{\n    #[cfg(a)]\n    fn split() {{}}\n    #[cfg(not(a))]\n    fn split() {{}}\n}}\n#[cfg(a)]\nimpl T for Y {{\n    fn across() {{}}\n}}\n#[cfg(not(a))]\nimpl T for Y {{\n    fn across() {{}}\n}}\n"
         )
         .unwrap();
 
@@ -737,9 +872,25 @@ mod tests {
             end_column,
         };
         assert_eq!(header("from"), vec![range(5, 27), range(32, 37)]);
+        let paths = |name: &str| {
+            spans
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap()
+                .impl_header_paths
+        };
+        // `From`, `serialize::Error`, `Error`.
+        assert_eq!(paths("from"), Some(3));
+        assert_eq!(paths("free"), None);
         assert!(header("helper").is_empty());
         assert!(header("t").is_empty());
         assert!(header("free").is_empty());
+        // `cfg`-split variants share one header, in one impl block or in two,
+        // so none of them records it.
+        assert!(spans
+            .iter()
+            .filter(|s| s.name == "split" || s.name == "across")
+            .all(|s| s.impl_header.is_empty() && s.impl_header_paths.is_none()));
     }
 
     #[test]
@@ -1008,6 +1159,7 @@ impl Foo {{
                 is_foreign: false,
                 trait_required: false,
                 impl_header: Vec::new(),
+                impl_header_paths: None,
             },
         );
         span_map.insert(
@@ -1018,6 +1170,7 @@ impl Foo {{
                 is_foreign: false,
                 trait_required: false,
                 impl_header: Vec::new(),
+                impl_header_paths: None,
             },
         );
 
