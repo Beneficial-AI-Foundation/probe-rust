@@ -3,8 +3,8 @@ auditor: ambiguity-auditor
 date: 2026-10-27
 repo: probe-rust
 kb: kb/ (probe-rust own KB. The hub ../probe/kb/ consulted for cross-repo contracts only)
-scope: round 2. Uncommitted working tree on top of 97c5f19, branch fix/impl-header-candidate-filter. It adds `CrateNames` and `crate_names` and drops headers with a qualified path (`impl_header_hides_types`). It touches P20, the glossary, docs/SCHEMA.md and CHANGELOG.md. P20 is amended in the same tree. The code and the amendment ship in one PR, so they must merge together.
-status: 0 critical, 0 warnings, 1 info
+scope: round 4. Commits 313fc16 and fc9afb8 on branch fix/impl-header-candidate-filter. A type alias defined in the workspace drops the impl header. Two packages with one name and version but different crate names give an unknown crate. fc9afb8 fixes the wording from round 3. P20 is amended on this branch, not on main. The code and the amendment ship in one PR (#40), so they must merge together.
+status: 0 critical, 0 warnings, 0 info
 ---
 
 ## Critical
@@ -17,23 +17,18 @@ None.
 
 ## Info
 
-### [I1] Secondary docs name two of the three unknown-crate causes
-- **Location**: kb/engineering/glossary.md:69, docs/SCHEMA.md:174, CHANGELOG.md:11
-- **Issue**: P20 (properties.md:198) lists three causes. The first is a lib and a bin with different crate names. The second is a package without a lib that builds two bins with different names. The third is a missing SCIP version whose other versions disagree. The glossary, the SCHEMA row and the CHANGELOG name only the first and the third. A bin-only package builds no lib, so "lib and bin crates with different names" does not clearly cover the second cause.
-- **Evidence**: `crate_names_from_metadata` gives `None` for any lib/bin crate set with more than one name (`_ => None`). The test asserts `name("two-bins", "1.0.0") == None`.
-- **Recommendation**: In the three texts, say "the lib and bin targets build more than one crate name". The glossary already points at P20, so this is minor.
+None.
 
-## Round-1 fixes verified
+## Round-3 findings verified
 
-- **(a) Unknown-crate causes**: P20 (properties.md:198) now lists all three causes. It also says what happens if the versions disagree: the crate is unknown. The secondary docs keep a small gap (I1).
-- **(b) `Input` and "normalizes"**: P20 now defines the binding: "where `impl HasType for Marker` sets `type Item = Input`". It states the claim with a condition: "when it can resolve the projection". The glossary, the CHANGELOG and both rustdoc comments in src/rust_parser.rs use the same form. No "normalizes" wording is left for this rule.
-- **(c) Circular wording**: the glossary and the CHANGELOG now make the method the subject. This agrees with P20.
-- **(d) Missing test**: the new `trait_only` case in src/lib.rs closes it. See test-report.md.
+- **W1 (alias scope)**: fixed. P20 (properties.md:198) and the glossary (glossary.md:69) now say "a type alias defined in the indexed workspace". docs/SCHEMA.md:174, CHANGELOG.md:11 and the doc comments in src/lib.rs say "defined in the workspace". The known limit now names "an alias from a dependency outside the workspace". This matches the code: `aliases` (src/lib.rs:622) holds every alias with a definition in the SCIP index, and `rust-analyzer scip .` indexes the workspace. No "crate-local" or "another crate" remains in the KB, SCHEMA, CHANGELOG or src/lib.rs for this rule.
+- **I1 (completeness clause)**: fixed. P20, the glossary and the `impl_header_complete` doc no longer list aliases as something the completeness count guards. The CHANGELOG and SCHEMA exactness conditions now say "no primitive or type parameter".
 
 ## Verified clean
 
-- **P20** (properties.md:196-212): every new claim matches the code. The lookup is per package version (`CrateNames::crate_name`). If the version is missing, the lookup falls back to `by_name`. If the versions disagree, `by_name` holds `None`. A package absent from the metadata is read with `-` as `_`. `crate_names` tries `--offline` first and then `--no-deps`. If a reference in range has an unknown crate, `paths_in` returns nothing and the span check decides. `impl_header_hides_types` visits only the trait path and the self type. All names in the **Where** list exist.
-- **Stale names**: kb/engineering, docs/, README.md, CHANGELOG.md and src/ hold no `lib_crate_names`, `lib_crate_names_from_metadata` or `impl_header_has_const_expression`.
-- **Cross-file consistency**: P20, the glossary, the SCHEMA row and the CHANGELOG agree on the qualified-path rule and the crate-name rule. I1 is the only gap.
-- **Glossary terms**: P20 and the glossary use "exact", "compatible", "contradicted" and "complete" with the same meaning.
-- **Stamps**: properties.md and glossary.md show `last-updated: 2026-10-27`.
+- P20, alias rule: P20, the glossary, SCHEMA and CHANGELOG give the same rule and the same reason (Charon expands the alias, and the expansion can drop its arguments).
+- P20, a dependency alias: the texts say it reads as a contradiction. That is still true. SCIP renders it as a path such as `dep::Alias`, and the Charon segment does not hold it. Such a header is not exact either, so removing "alias" from the exactness clauses does not allow a wrong match.
+- P20, unknown-crate causes: the four texts list the same three causes as `crate_names_from_metadata` (src/lib.rs:741).
+- P20 **Where** list: the named functions exist.
+- Phrasing: P20 and the glossary say "indexed workspace", and SCHEMA, CHANGELOG and the code say "workspace". In this context both mean the same set. I do not count this as a finding.
+- Other properties (P1-P19, C1-C3): not touched by these commits. Not judged again.
