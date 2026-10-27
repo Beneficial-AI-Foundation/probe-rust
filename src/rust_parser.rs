@@ -42,7 +42,10 @@ pub struct FunctionSpan {
     /// whose header holds a non-literal const expression, that is one other
     /// than a literal or a single name such as `N` (Charon evaluates
     /// `[u8; size_of::<Foo>()]` to `[u8; 4usize]`, so the types named in the
-    /// expression do not appear in its rendering).
+    /// expression do not appear in its rendering), or a qualified path such
+    /// as `<Marker as HasType>::Item` (when Charon can resolve it, it prints
+    /// the type that the impl binds to `Item`, so `Marker` and `HasType` do
+    /// not appear either).
     pub impl_header: Vec<SourceRange>,
     /// The number of type paths in that impl header (the trait path, its type
     /// arguments, the self type and their nested type arguments) when the
@@ -366,7 +369,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        if impl_header_has_const_expression(node) {
+        if impl_header_hides_types(node) {
             self.with_impl_header(ImplHeaderFrame::default(), |v| {
                 v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_impl(v, node))
             });
@@ -431,16 +434,22 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
     }
 }
 
-/// `true` when the trait path or self type of `node` holds a non-literal
-/// const expression: any expression other than a literal (`4`) or a single
-/// name (`N`, a const parameter or constant), such as the array length in
-/// `From<[u8; core::mem::size_of::<Foo>()]>`, `Foo::LEN`, or a `{ N + 1 }`
-/// const argument. Only such an expression can name a type that disappears
-/// when Charon evaluates it; a single name refers to no type.
-fn impl_header_has_const_expression(node: &syn::ItemImpl) -> bool {
+/// `true` when the trait path or self type of `node` names types that Charon
+/// does not print:
+/// - a non-literal const expression, that is any expression other than a
+///   literal (`4`) or a single name (`N`, a const parameter or constant),
+///   such as the array length in `From<[u8; core::mem::size_of::<Foo>()]>`,
+///   `Foo::LEN`, or a `{ N + 1 }` const argument. Charon evaluates it; a
+///   single name refers to no type.
+/// - a qualified path (`<Marker as HasType>::Item`). When `impl HasType for
+///   Marker` sets `type Item = Input`, Charon prints `Input` instead.
+fn impl_header_hides_types(node: &syn::ItemImpl) -> bool {
     #[derive(Default)]
     struct Finder(bool);
     impl<'ast> Visit<'ast> for Finder {
+        fn visit_qself(&mut self, _: &'ast syn::QSelf) {
+            self.0 = true;
+        }
         fn visit_expr(&mut self, expr: &'ast syn::Expr) {
             let simple = match expr {
                 syn::Expr::Lit(_) => true,
@@ -936,12 +945,14 @@ mod tests {
     /// `Foo`, but Charon renders the evaluated length (`[u8; 4usize]`), so a
     /// method of that impl records no header, nor does one under
     /// `Foo::LEN` or `{ N + 1 }`. A literal or a single name keeps it.
+    /// Charon also replaces `<Marker as HasType>::Item` with the type that
+    /// the impl binds to `Item`, so a qualified path drops the header too.
     #[test]
-    fn test_impl_header_dropped_for_const_expression() {
+    fn test_impl_header_dropped_for_hidden_types() {
         let mut file = NamedTempFile::new().unwrap();
         write!(
             file,
-            "impl From<(Foo, u8)> for X {{\n    fn a() {{}}\n}}\nimpl From<[u8; core::mem::size_of::<Foo>()]> for X {{\n    fn b() {{}}\n}}\nimpl From<[u8; 4]> for X {{\n    fn c() {{}}\n}}\nimpl From<[u8; N]> for X {{\n    fn e() {{}}\n}}\n#[cfg(feature = \"x\")]\nimpl From<[u8; Foo::LEN]> for X {{\n    fn f() {{}}\n}}\nimpl Tr for [u8; core::mem::size_of::<Foo>()] {{\n    fn g() {{}}\n}}\nimpl A for B {{\n    fn outer() {{\n        impl From<[u8; Foo::LEN]> for Y {{\n            fn nested() {{}}\n        }}\n    }}\n}}\nimpl From<Bits<{{ N + 1 }}>> for X {{\n    fn d() {{}}\n}}\n"
+            "impl From<(Foo, u8)> for X {{\n    fn a() {{}}\n}}\nimpl From<[u8; core::mem::size_of::<Foo>()]> for X {{\n    fn b() {{}}\n}}\nimpl From<[u8; 4]> for X {{\n    fn c() {{}}\n}}\nimpl From<[u8; N]> for X {{\n    fn e() {{}}\n}}\n#[cfg(feature = \"x\")]\nimpl From<[u8; Foo::LEN]> for X {{\n    fn f() {{}}\n}}\nimpl Tr for [u8; core::mem::size_of::<Foo>()] {{\n    fn g() {{}}\n}}\nimpl A for B {{\n    fn outer() {{\n        impl From<[u8; Foo::LEN]> for Y {{\n            fn nested() {{}}\n        }}\n    }}\n}}\nimpl From<Bits<{{ N + 1 }}>> for X {{\n    fn d() {{}}\n}}\nimpl From<<Marker as HasType>::Item> for X {{\n    fn h() {{}}\n}}\nimpl Tr for Vec<<Marker as HasType>::Item> {{\n    fn i() {{}}\n}}\n"
         )
         .unwrap();
         let spans = parse_file_for_spans(file.path()).unwrap();
@@ -962,6 +973,9 @@ mod tests {
         // inherit the outer header.
         assert!(!span("outer").impl_header.is_empty());
         assert!(span("nested").impl_header.is_empty());
+        // A qualified path, in the trait arguments or in the self type.
+        assert!(span("h").impl_header.is_empty());
+        assert!(span("i").impl_header.is_empty());
     }
 
     #[test]

@@ -3,8 +3,8 @@
 use crate::{
     add_external_stubs, build_call_graph, build_impl_header_symbols,
     charon_cache::CharonCache,
-    charon_names, convert_to_atoms_with_parsed_spans, find_duplicate_code_names, is_library_crate,
-    lib_crate_names,
+    charon_names, convert_to_atoms_with_parsed_spans, crate_names, find_duplicate_code_names,
+    is_library_crate,
     metadata::{gather_metadata, get_default_output_path, wrap_in_envelope},
     parse_scip_json, public_api,
     scip_cache::ScipCache,
@@ -53,7 +53,7 @@ pub fn cmd_extract(
 
     // Only Charon enrichment reads the impl-header paths.
     let header_symbols = (translation.is_some() || with_charon)
-        .then(|| build_impl_header_symbols(&scip_index, &lib_crate_names(&project_path)));
+        .then(|| build_impl_header_symbols(&scip_index, &crate_names(&project_path)));
     let atoms = convert_to_atoms_with_parsed_spans(
         &call_graph,
         &symbol_to_display_name,

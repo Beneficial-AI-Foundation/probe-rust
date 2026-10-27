@@ -562,7 +562,8 @@ struct HeaderSymbolRef {
     start: (usize, usize),
     /// 1-based line and 0-based column where the reference ends.
     end: (usize, usize),
-    path: String,
+    /// `None` when the crate segment is unknown (see [`CrateNames`]).
+    path: Option<String>,
 }
 
 /// Per file, the SCIP references to traits and types, rendered as Rust paths.
@@ -576,7 +577,9 @@ pub struct ImplHeaderSymbols {
 
 impl ImplHeaderSymbols {
     /// Paths of the references in `file` that lie inside one of `ranges`, in
-    /// source order, one entry per reference.
+    /// source order, one entry per reference. Empty when one of these
+    /// references has an unknown crate segment: a header path with a guessed
+    /// crate could contradict the right candidate.
     #[must_use]
     pub fn paths_in(&self, file: &str, ranges: &[rust_parser::SourceRange]) -> Vec<String> {
         let Some(refs) = self.by_file.get(file) else {
@@ -587,7 +590,11 @@ impl ImplHeaderSymbols {
             .filter(|r| ranges.iter().any(|range| range.contains(r.start, r.end)))
             .collect();
         inside.sort_by_key(|r| r.start);
-        inside.into_iter().map(|r| r.path.clone()).collect()
+        inside
+            .into_iter()
+            .map(|r| r.path.clone())
+            .collect::<Option<Vec<String>>>()
+            .unwrap_or_default()
     }
 }
 
@@ -600,15 +607,11 @@ impl ImplHeaderSymbols {
 /// crate-local type alias (`type X = ...;`) are skipped: Charon expands
 /// aliases, so the alias path would never appear in a Charon name.
 ///
-/// SCIP names a crate by its Cargo package; Charon prints the lib crate
-/// name. `lib_names` maps each package whose lib target is renamed
-/// (`[lib] name = ...`) to that name (see [`lib_crate_names`]); any other
-/// package is read with `-` as `_`.
+/// SCIP names a crate by its Cargo package and version; Charon prints the
+/// crate name. `crate_names` gives the crate name of each package (see
+/// [`crate_names`]).
 #[must_use]
-pub fn build_impl_header_symbols(
-    scip: &ScipIndex,
-    lib_names: &HashMap<String, String>,
-) -> ImplHeaderSymbols {
+pub fn build_impl_header_symbols(scip: &ScipIndex, crate_names: &CrateNames) -> ImplHeaderSymbols {
     let aliases: HashSet<&str> = scip
         .documents
         .iter()
@@ -623,7 +626,7 @@ pub fn build_impl_header_symbols(
             if is_definition(occ.symbol_roles) || aliases.contains(occ.symbol.as_str()) {
                 continue;
             }
-            let Some(path) = scip_type_symbol_to_path(&occ.symbol, lib_names) else {
+            let Some(path) = scip_type_symbol_to_path(&occ.symbol, crate_names) else {
                 continue;
             };
             let Some((start, end)) = occurrence_bounds(&occ.range) else {
@@ -640,11 +643,11 @@ pub fn build_impl_header_symbols(
 
 /// Render a SCIP global symbol for a trait or type as a Rust path, e.g.
 /// `rust-analyzer cargo spqr 1.6.0 serialize/Error#` becomes
-/// `spqr::serialize::Error`. The crate segment is the package's lib name from
-/// `lib_names`, else the package name with `-` read as `_`. `None` for
-/// locals and for every other descriptor: namespaces, functions, fields, and
-/// impl-scoped names such as type parameters.
-fn scip_type_symbol_to_path(symbol: &str, lib_names: &HashMap<String, String>) -> Option<String> {
+/// `Some(Some("spqr::serialize::Error"))`. The crate segment comes from
+/// `crate_names`; the inner `None` means it is unknown. The outer `None` is
+/// for locals and for every other descriptor: namespaces, functions, fields,
+/// and impl-scoped names such as type parameters.
+fn scip_type_symbol_to_path(symbol: &str, crate_names: &CrateNames) -> Option<Option<String>> {
     if symbol.starts_with("local ") {
         return None;
     }
@@ -652,34 +655,55 @@ fn scip_type_symbol_to_path(symbol: &str, lib_names: &HashMap<String, String>) -
     let _scheme = fields.next()?;
     let _manager = fields.next()?;
     let package = fields.next()?;
-    let _version = fields.next()?;
+    let version = fields.next()?;
     let descriptors = fields.next()?;
     let body = descriptors.strip_suffix('#')?;
     if body.is_empty() || body.contains(['#', '[', '(', '.', '!', '`', ' ']) {
         return None;
     }
-    let krate = lib_names
-        .get(package)
-        .cloned()
-        .unwrap_or_else(|| package.replace('-', "_"));
-    let mut segments = vec![krate];
-    for segment in body.split('/') {
-        if segment.is_empty() {
-            return None;
-        }
-        segments.push(segment.to_string());
+    if body.split('/').any(str::is_empty) {
+        return None;
     }
-    Some(segments.join("::"))
+    Some(
+        crate_names
+            .crate_name(package, version)
+            .map(|krate| format!("{krate}::{}", body.replace('/', "::"))),
+    )
 }
 
-/// For each package of `project_path` and its dependencies whose lib target
-/// is renamed (`[lib] name = "md5"` in package `md-5`), map the package name
-/// to the lib name. Reads `cargo metadata --offline`, falling back to
-/// `cargo metadata --no-deps` (workspace packages only) when the dependency
-/// graph cannot be resolved offline. Empty when both fail: every package is
-/// then read with `-` as `_`.
+/// The crate name of each Cargo package, as Charon prints it. Built by
+/// [`crate_names`] from `cargo metadata`.
+#[derive(Debug, Default)]
+pub struct CrateNames {
+    /// Keyed by package name and version. `None` when the lib and bin
+    /// targets of the package build crates with different names: a SCIP
+    /// symbol names the package, not the target, so the crate is unknown.
+    by_version: HashMap<(String, String), Option<String>>,
+    /// The same keyed by package name only, for a SCIP version that is not in
+    /// `by_version`. `None` also when two versions disagree.
+    by_name: HashMap<String, Option<String>>,
+}
+
+impl CrateNames {
+    /// The crate name of `package` at `version`, `None` when it is unknown.
+    /// A package absent from the metadata is read with `-` as `_`.
+    fn crate_name(&self, package: &str, version: &str) -> Option<String> {
+        self.by_version
+            .get(&(package.to_string(), version.to_string()))
+            .or_else(|| self.by_name.get(package))
+            .cloned()
+            .unwrap_or_else(|| Some(package.replace('-', "_")))
+    }
+}
+
+/// The crate names of the packages of `project_path` and its dependencies
+/// (see [`CrateNames`]). A package can rename its lib target (`[lib] name =
+/// "md5"` in package `md-5`) or build only a bin with another name. Reads
+/// `cargo metadata --offline`, falling back to `cargo metadata --no-deps`
+/// (workspace packages only) when the dependency graph cannot be resolved
+/// offline. Empty when both fail: every package is then read with `-` as `_`.
 #[must_use]
-pub fn lib_crate_names(project_path: &Path) -> HashMap<String, String> {
+pub fn crate_names(project_path: &Path) -> CrateNames {
     let run = |extra: &str| {
         let output = std::process::Command::new("cargo")
             .args(["metadata", extra, "--format-version", "1"])
@@ -690,40 +714,67 @@ pub fn lib_crate_names(project_path: &Path) -> HashMap<String, String> {
         output
             .status
             .success()
-            .then(|| lib_crate_names_from_metadata(&String::from_utf8_lossy(&output.stdout)))
+            .then(|| crate_names_from_metadata(&String::from_utf8_lossy(&output.stdout)))
     };
     run("--offline")
         .or_else(|| run("--no-deps"))
         .unwrap_or_default()
 }
 
-/// The renamed-lib map of [`lib_crate_names`], from `cargo metadata` JSON.
-fn lib_crate_names_from_metadata(json: &str) -> HashMap<String, String> {
-    const LIB_KINDS: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"];
+/// The [`CrateNames`] of `cargo metadata` JSON. Only lib and bin targets
+/// count: Charon does not translate tests, examples, benches or build
+/// scripts. A target's crate name is its name with `-` read as `_`.
+fn crate_names_from_metadata(json: &str) -> CrateNames {
+    const KINDS: &[&str] = &[
+        "lib",
+        "rlib",
+        "dylib",
+        "cdylib",
+        "staticlib",
+        "proc-macro",
+        "bin",
+    ];
     let Ok(root) = serde_json::from_str::<serde_json::Value>(json) else {
-        return HashMap::new();
+        return CrateNames::default();
     };
-    let mut names = HashMap::new();
+    let mut names = CrateNames::default();
     for package in root["packages"].as_array().into_iter().flatten() {
-        let Some(package_name) = package["name"].as_str() else {
+        let (Some(package_name), Some(version)) =
+            (package["name"].as_str(), package["version"].as_str())
+        else {
             continue;
         };
-        let lib = package["targets"]
+        let crates: BTreeSet<String> = package["targets"]
             .as_array()
             .into_iter()
             .flatten()
-            .find(|t| {
+            .filter(|t| {
                 t["kind"].as_array().is_some_and(|kinds| {
                     kinds
                         .iter()
-                        .any(|k| k.as_str().is_some_and(|k| LIB_KINDS.contains(&k)))
+                        .any(|k| k.as_str().is_some_and(|k| KINDS.contains(&k)))
                 })
-            });
-        if let Some(lib_name) = lib.and_then(|t| t["name"].as_str()) {
-            if lib_name != package_name.replace('-', "_") {
-                names.insert(package_name.to_string(), lib_name.to_string());
-            }
-        }
+            })
+            .filter_map(|t| t["name"].as_str())
+            .map(|name| name.replace('-', "_"))
+            .collect();
+        let name = match crates.len() {
+            0 => continue,
+            1 => crates.into_iter().next(),
+            _ => None,
+        };
+        names
+            .by_name
+            .entry(package_name.to_string())
+            .and_modify(|known| {
+                if *known != name {
+                    *known = None;
+                }
+            })
+            .or_insert_with(|| name.clone());
+        names
+            .by_version
+            .insert((package_name.to_string(), version.to_string()), name);
     }
     names
 }
@@ -2518,8 +2569,11 @@ mod tests {
             }],
         };
         // Package `x` builds the lib `xlib`, as Charon prints it.
-        let lib_names = HashMap::from([("x".to_string(), "xlib".to_string())]);
-        let symbols = build_impl_header_symbols(&scip, &lib_names);
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [{"name": "x", "version": "0.1.0",
+                "targets": [{"name": "xlib", "kind": ["lib"]}]}]}"#,
+        );
+        let symbols = build_impl_header_symbols(&scip, &crates);
 
         let mk_node = |symbol: &str, name: &str, line0: i32| FunctionNode {
             symbol: symbol.to_string(),
@@ -2572,27 +2626,25 @@ mod tests {
 
     #[test]
     fn test_scip_type_symbol_to_path() {
-        let none = HashMap::new();
+        let none = CrateNames::default();
+        let path = |symbol: &str, crates: &CrateNames| scip_type_symbol_to_path(symbol, crates);
         assert_eq!(
-            scip_type_symbol_to_path("rust-analyzer cargo spqr 1.6.0 serialize/Error#", &none)
-                .as_deref(),
-            Some("spqr::serialize::Error")
+            path("rust-analyzer cargo spqr 1.6.0 serialize/Error#", &none),
+            Some(Some("spqr::serialize::Error".to_string()))
         );
         assert_eq!(
-            scip_type_symbol_to_path(
+            path(
                 "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#",
                 &none
-            )
-            .as_deref(),
-            Some("core::convert::From")
+            ),
+            Some(Some("core::convert::From".to_string()))
         );
         assert_eq!(
-            scip_type_symbol_to_path(
+            path(
                 "rust-analyzer cargo curve25519-dalek 4.2.0 scalar/Scalar#",
                 &none
-            )
-            .as_deref(),
-            Some("curve25519_dalek::scalar::Scalar")
+            ),
+            Some(Some("curve25519_dalek::scalar::Scalar".to_string()))
         );
         for not_a_type in [
             "local 3",
@@ -2601,32 +2653,67 @@ mod tests {
             "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]",
             "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]from().",
         ] {
-            assert_eq!(
-                scip_type_symbol_to_path(not_a_type, &none),
-                None,
-                "{not_a_type}"
-            );
+            assert_eq!(path(not_a_type, &none), None, "{not_a_type}");
         }
-        // A package with a renamed lib target is printed under the lib name.
-        let renamed = HashMap::from([("my-pkg".to_string(), "mylib".to_string())]);
+        // The crate segment follows the package version; an unknown crate
+        // gives an unknown path.
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [
+                {"name": "wire-pkg", "version": "1.0.0", "targets": [{"name": "wire_v1", "kind": ["lib"]}]},
+                {"name": "wire-pkg", "version": "2.0.0", "targets": [{"name": "wire_pkg", "kind": ["lib"]}]},
+                {"name": "demo-pkg", "version": "0.1.0", "targets": [{"name": "worker", "kind": ["bin"]}]},
+                {"name": "mixed", "version": "0.1.0", "targets": [{"name": "mixed", "kind": ["lib"]}, {"name": "tool", "kind": ["bin"]}]}
+            ]}"#,
+        );
         assert_eq!(
-            scip_type_symbol_to_path("rust-analyzer cargo my-pkg 1.0.0 io/E#", &renamed).as_deref(),
-            Some("mylib::io::E")
+            path("rust-analyzer cargo wire-pkg 1.0.0 io/E#", &crates),
+            Some(Some("wire_v1::io::E".to_string()))
+        );
+        assert_eq!(
+            path("rust-analyzer cargo wire-pkg 2.0.0 io/E#", &crates),
+            Some(Some("wire_pkg::io::E".to_string()))
+        );
+        assert_eq!(
+            path("rust-analyzer cargo demo-pkg 0.1.0 X#", &crates),
+            Some(Some("worker::X".to_string()))
+        );
+        assert_eq!(
+            path("rust-analyzer cargo mixed 0.1.0 X#", &crates),
+            Some(None)
         );
     }
 
     #[test]
-    fn test_lib_crate_names_from_metadata() {
-        let json = r#"{"packages": [
-            {"name": "my-pkg", "targets": [{"name": "mylib", "kind": ["lib"]}, {"name": "my-pkg", "kind": ["bin"]}]},
-            {"name": "plain-pkg", "targets": [{"name": "plain_pkg", "kind": ["rlib"]}]},
-            {"name": "tool", "targets": [{"name": "tool", "kind": ["bin"]}]}
-        ]}"#;
-        assert_eq!(
-            lib_crate_names_from_metadata(json),
-            HashMap::from([("my-pkg".to_string(), "mylib".to_string())])
+    fn test_crate_names_from_metadata() {
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [
+                {"name": "my-pkg", "version": "1.0.0", "targets": [{"name": "mylib", "kind": ["lib"]}, {"name": "mylib", "kind": ["bin"]}, {"name": "it", "kind": ["test"]}]},
+                {"name": "plain-pkg", "version": "1.0.0", "targets": [{"name": "plain_pkg", "kind": ["rlib"]}, {"name": "plain-pkg", "kind": ["bin"]}]},
+                {"name": "tool-pkg", "version": "1.0.0", "targets": [{"name": "tool", "kind": ["bin"]}, {"name": "build-script-build", "kind": ["custom-build"]}]},
+                {"name": "two-bins", "version": "1.0.0", "targets": [{"name": "a", "kind": ["bin"]}, {"name": "b", "kind": ["bin"]}]},
+                {"name": "wire-pkg", "version": "1.0.0", "targets": [{"name": "wire_v1", "kind": ["lib"]}]},
+                {"name": "wire-pkg", "version": "2.0.0", "targets": [{"name": "wire_pkg", "kind": ["lib"]}]}
+            ]}"#,
         );
-        assert!(lib_crate_names_from_metadata("not json").is_empty());
+        let name = |p: &str, v: &str| crates.crate_name(p, v);
+        assert_eq!(name("my-pkg", "1.0.0").as_deref(), Some("mylib"));
+        assert_eq!(name("plain-pkg", "1.0.0").as_deref(), Some("plain_pkg"));
+        assert_eq!(name("tool-pkg", "1.0.0").as_deref(), Some("tool"));
+        assert_eq!(name("two-bins", "1.0.0"), None);
+        assert_eq!(name("wire-pkg", "1.0.0").as_deref(), Some("wire_v1"));
+        assert_eq!(name("wire-pkg", "2.0.0").as_deref(), Some("wire_pkg"));
+        // A version missing from the metadata: the versions disagree.
+        assert_eq!(name("wire-pkg", "3.0.0"), None);
+        // A version missing from the metadata: the package has one name.
+        assert_eq!(name("my-pkg", "9.9.9").as_deref(), Some("mylib"));
+        // A package missing from the metadata.
+        assert_eq!(name("other-pkg", "1.0.0").as_deref(), Some("other_pkg"));
+        assert_eq!(
+            crate_names_from_metadata("not json")
+                .crate_name("my-pkg", "1.0.0")
+                .as_deref(),
+            Some("my_pkg")
+        );
     }
 
     /// The SPQR header `impl From<serialize::Error> for Error` (line 138):
@@ -2669,7 +2756,7 @@ mod tests {
                 )],
             }],
         };
-        let symbols = build_impl_header_symbols(&scip, &HashMap::new());
+        let symbols = build_impl_header_symbols(&scip, &CrateNames::default());
         // `From<serialize::Error>` spans columns 5..27 of line 138 (1-based),
         // the self type `Error` 32..37, and the alias sits after them.
         let header = [
@@ -2711,5 +2798,26 @@ mod tests {
             ]
         );
         assert!(symbols.paths_in("src/other.rs", &header).is_empty());
+
+        // When `spqr` builds a lib and a bin with other names, its crate is
+        // unknown and the header gives no paths at all.
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [{"name": "spqr", "version": "1.6.0", "targets": [
+                {"name": "spqr", "kind": ["lib"]}, {"name": "spqr-cli", "kind": ["bin"]}]}]}"#,
+        );
+        let symbols = build_impl_header_symbols(&scip, &crates);
+        assert!(symbols.paths_in("src/lib.rs", &header).is_empty());
+        // A header that names no `spqr` type keeps its paths, even though
+        // `spqr` types appear elsewhere in the file.
+        let trait_only = [rust_parser::SourceRange {
+            start_line: 138,
+            start_column: 5,
+            end_line: 138,
+            end_column: 9,
+        }];
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &trait_only),
+            vec!["core::convert::From"]
+        );
     }
 }
