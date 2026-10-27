@@ -22,7 +22,7 @@
 //!   crates pulled in via `--include`) and `{...}` impl blocks to get the
 //!   same `scalar::from_bytes_mod_order` key.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -691,7 +691,20 @@ fn in_atom_file(c: &CharonFunInfo, norm_atom_path: &str) -> bool {
 /// - legacy trait impl without type info: `..::{impl Trait}::m` -> `None`
 /// - no impl segment (free function): `None`
 fn self_type_from_qualified_name(qualified_name: &str) -> Option<String> {
-    // Find the content of the last top-level `{...}` block.
+    let content = last_impl_block(qualified_name)?;
+    if content.starts_with("impl ") {
+        return None;
+    }
+    let self_part = match content.rfind(" for ") {
+        Some(idx) => &content[idx + 5..],
+        None => content,
+    };
+    Some(bare_type_name(self_part)?.to_string())
+}
+
+/// The content of the last top-level `{...}` block of a Charon qualified name
+/// (its innermost impl segment), or `None` when there is none.
+fn last_impl_block(qualified_name: &str) -> Option<&str> {
     let mut last_block: Option<(usize, usize)> = None;
     let mut depth = 0usize;
     let mut start = 0usize;
@@ -713,15 +726,75 @@ fn self_type_from_qualified_name(qualified_name: &str) -> Option<String> {
         }
     }
     let (s, e) = last_block?;
-    let content = &qualified_name[s..e];
-    if content.starts_with("impl ") {
-        return None;
+    Some(&qualified_name[s..e])
+}
+
+/// The paths (`krate::module::Name`) that a Charon qualified name's last impl
+/// segment names: the trait, its type arguments and the self type, in both
+/// renderings (`{impl Trait<..> for Self}` from `translation.json`,
+/// `{Trait<..> for Self}` from the LLBC, `{Self}` for inherent impls).
+/// `None` when there is no impl segment or it names no path, as in the legacy
+/// `{impl Trait}` form without type information.
+fn impl_segment_paths(qualified_name: &str) -> Option<HashSet<&str>> {
+    let content = last_impl_block(qualified_name)?;
+    if let Some(rest) = content.strip_prefix("impl ") {
+        if !rest.contains(" for ") {
+            return None;
+        }
     }
-    let self_part = match content.rfind(" for ") {
-        Some(idx) => &content[idx + 5..],
-        None => content,
-    };
-    Some(bare_type_name(self_part)?.to_string())
+    let paths: HashSet<&str> = content
+        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+        .map(|token| token.trim_matches(':'))
+        .filter(|token| token.contains("::"))
+        .collect();
+    if paths.is_empty() {
+        None
+    } else {
+        Some(paths)
+    }
+}
+
+/// How a candidate's impl segment relates to the atom's impl header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderEvidence {
+    /// The segment names every path of the atom's impl header.
+    Confirmed,
+    /// The segment carries paths, and one of the header paths is missing.
+    Contradicted,
+    /// No evidence: the atom has no header paths, or the candidate has no
+    /// typed impl segment.
+    Unknown,
+}
+
+/// Compare the paths that SCIP resolves in the atom's impl header with the
+/// paths of the candidate's impl segment. Both sides name the defining
+/// paths, so this needs no line numbers: it stays correct when Charon ran on
+/// a patched copy of the source whose line numbers differ from the indexed
+/// one.
+fn header_evidence(c: &CharonFunInfo, atom: &crate::AtomWithLines) -> HeaderEvidence {
+    if atom.impl_header_paths.is_empty() {
+        return HeaderEvidence::Unknown;
+    }
+    match impl_segment_paths(&c.qualified_name) {
+        None => HeaderEvidence::Unknown,
+        Some(paths)
+            if atom
+                .impl_header_paths
+                .iter()
+                .all(|p| paths.contains(p.as_str())) =>
+        {
+            HeaderEvidence::Confirmed
+        }
+        Some(_) => HeaderEvidence::Contradicted,
+    }
+}
+
+/// `true` when the candidate's impl segment is a trait impl (`... for ...`).
+/// Coherence allows one impl of a trait (with given type arguments) for a
+/// given self type, so a confirmed header identifies a trait-impl method
+/// on its own; inherent impls of one type can be split across blocks.
+fn is_trait_impl_segment(c: &CharonFunInfo) -> bool {
+    last_impl_block(&c.qualified_name).is_some_and(|content| content.contains(" for "))
 }
 
 /// Extract the bare self-type name from an atom display name:
@@ -811,6 +884,14 @@ fn validate_single_candidate<'a>(
     if !in_atom_file(c, normalize_source_path(&atom.code_path)) {
         return ResolveOutcome::NoMatch;
     }
+    // The impl header names the impl without line numbers: a contradicting
+    // header rejects the candidate, and a confirmed trait-impl header accepts
+    // it even when the spans disagree (Charon ran on patched source).
+    match header_evidence(c, atom) {
+        HeaderEvidence::Contradicted => return ResolveOutcome::NoMatch,
+        HeaderEvidence::Confirmed if is_trait_impl_segment(c) => return ResolveOutcome::Match(c),
+        HeaderEvidence::Confirmed | HeaderEvidence::Unknown => {}
+    }
     // Compare spans only when both the atom and the candidate carry usable
     // line numbers (`span_overlap` returns `None` otherwise), so a span-less
     // compiler-generated item is still accepted on the file-path match alone
@@ -896,6 +977,18 @@ fn resolve_charon_candidate<'a>(
         }
     }
 
+    // Header stage: keep the candidates whose impl segment names every path
+    // of the atom's impl header. When there are none, drop the contradicted
+    // ones; when every candidate is contradicted, the atom is none of them.
+    let evidence: Vec<HeaderEvidence> = distinct.iter().map(|c| header_evidence(c, atom)).collect();
+    if evidence.contains(&HeaderEvidence::Confirmed) {
+        distinct = filter_by_evidence(&distinct, &evidence, |e| e == HeaderEvidence::Confirmed);
+    } else if evidence.iter().all(|e| *e == HeaderEvidence::Contradicted) {
+        return ResolveOutcome::NoMatch;
+    } else {
+        distinct = filter_by_evidence(&distinct, &evidence, |e| e != HeaderEvidence::Contradicted);
+    }
+
     if let [single] = distinct.as_slice() {
         return validate_single_candidate(single, atom, source);
     }
@@ -927,6 +1020,20 @@ fn resolve_charon_candidate<'a>(
         None if overlaps.iter().all(|o| o.is_some()) => ResolveOutcome::NoMatch,
         None => ResolveOutcome::Ambiguous,
     }
+}
+
+/// The candidates whose header evidence satisfies `keep`, in order.
+fn filter_by_evidence<'a>(
+    candidates: &[&'a CharonFunInfo],
+    evidence: &[HeaderEvidence],
+    keep: impl Fn(HeaderEvidence) -> bool,
+) -> Vec<&'a CharonFunInfo> {
+    candidates
+        .iter()
+        .zip(evidence)
+        .filter(|(_, e)| keep(**e))
+        .map(|(c, _)| *c)
+        .collect()
 }
 
 /// Which source produced an [`Enrichment`] — for logging and test assertions.
@@ -1762,6 +1869,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -1842,6 +1950,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -1926,6 +2035,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2009,6 +2119,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2077,6 +2188,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2178,6 +2290,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2279,6 +2392,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
         atoms.insert(
@@ -2307,6 +2421,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2361,6 +2476,7 @@ mod tests {
             is_public_api: None,
             charon_def_id: None,
             charon_version: None,
+            impl_header_paths: Vec::new(),
         };
 
         let json = serde_json::to_value(&atom).unwrap();
@@ -2400,6 +2516,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             }
         };
 
@@ -2444,6 +2561,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2522,6 +2640,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2602,6 +2721,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2684,6 +2804,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2765,6 +2886,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2852,6 +2974,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -2900,6 +3023,7 @@ mod tests {
             is_public_api: None,
             charon_def_id: None,
             charon_version: None,
+            impl_header_paths: Vec::new(),
         }
     }
 
@@ -3018,6 +3142,172 @@ mod tests {
                 _ => panic!("expected a unique match for {display} at {lines:?}"),
             }
         }
+    }
+
+    /// An atom in `src/lib.rs` with the given impl-header paths.
+    fn header_atom(lines: (usize, usize), header: &[&str]) -> crate::AtomWithLines {
+        let mut atom = test_atom();
+        atom.display_name = "Error::from".to_string();
+        atom.code_path = "src/lib.rs".to_string();
+        atom.code_text = crate::CodeTextInfo {
+            lines_start: lines.0,
+            lines_end: lines.1,
+        };
+        atom.impl_header_paths = header.iter().map(|p| p.to_string()).collect();
+        atom
+    }
+
+    /// The SPQR collision (probe-rust#39): Charon ran on a patched `lib.rs`
+    /// whose lines are 8 below the indexed source, so the manifest spans of
+    /// the three `From<_> for Error` impls do not match the atoms. Before the
+    /// header stage, `From<serialize::Error>` (139-141) overlapped def 60 by
+    /// one line and took it. The header names each impl without lines.
+    #[test]
+    fn test_resolve_multi_candidate_by_impl_header_with_shifted_spans() {
+        let candidates = vec![
+            candidate(
+                60,
+                "spqr::{impl core::convert::From<spqr::encoding::EncodingError> for spqr::Error}::from",
+                "src/lib.rs",
+                (141, 143),
+            ),
+            candidate(
+                62,
+                "spqr::{impl core::convert::From<spqr::authenticator::Error> for spqr::Error}::from",
+                "src/lib.rs",
+                (153, 155),
+            ),
+        ];
+        let encoding = header_atom(
+            (133, 135),
+            &[
+                "core::convert::From",
+                "spqr::Error",
+                "spqr::encoding::EncodingError",
+            ],
+        );
+        let authenticator = header_atom(
+            (145, 147),
+            &[
+                "core::convert::From",
+                "spqr::Error",
+                "spqr::authenticator::Error",
+            ],
+        );
+        let serialize = header_atom(
+            (139, 141),
+            &[
+                "core::convert::From",
+                "spqr::Error",
+                "spqr::serialize::Error",
+            ],
+        );
+
+        for (atom, want) in [(&encoding, 60), (&authenticator, 62)] {
+            match resolve_charon_candidate(&candidates, atom, EnrichmentSource::Manifest) {
+                ResolveOutcome::Match(c) => assert_eq!(c.def_id, want),
+                _ => panic!("expected def {want}"),
+            }
+        }
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &serialize, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// A lone candidate: a contradicting header rejects it even when the
+    /// spans overlap; a confirmed trait-impl header accepts it even when the
+    /// spans are disjoint; a confirmed inherent-impl header still needs the
+    /// span check, because one type can have several inherent impl blocks.
+    #[test]
+    fn test_resolve_single_candidate_impl_header() {
+        let trait_impl = [candidate(
+            60,
+            "spqr::{impl core::convert::From<spqr::encoding::EncodingError> for spqr::Error}::from",
+            "src/lib.rs",
+            (141, 143),
+        )];
+        let contradicted = header_atom(
+            (139, 141),
+            &[
+                "core::convert::From",
+                "spqr::Error",
+                "spqr::serialize::Error",
+            ],
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&trait_impl, &contradicted, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+        let confirmed = header_atom(
+            (133, 135),
+            &[
+                "core::convert::From",
+                "spqr::Error",
+                "spqr::encoding::EncodingError",
+            ],
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&trait_impl, &confirmed, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 60
+        ));
+
+        let inherent = [candidate(
+            7,
+            "spqr::{spqr::SecretOutput}::secret",
+            "src/lib.rs",
+            (160, 165),
+        )];
+        let inherent_atom = header_atom((150, 155), &["spqr::SecretOutput"]);
+        assert!(matches!(
+            resolve_charon_candidate(&inherent, &inherent_atom, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+        let inherent_atom = header_atom((160, 165), &["spqr::SecretOutput"]);
+        assert!(matches!(
+            resolve_charon_candidate(&inherent, &inherent_atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 7
+        ));
+    }
+
+    /// Without typed impl segments (legacy `{impl Trait}`), the header gives
+    /// no evidence and the span stage decides as before.
+    #[test]
+    fn test_resolve_impl_header_unknown_falls_back_to_span() {
+        let candidates = vec![
+            candidate(1, "c::m::{impl c::T}::conv", "src/lib.rs", (10, 12)),
+            candidate(2, "c::m::{impl c::T}::conv", "src/lib.rs", (20, 22)),
+        ];
+        let atom = header_atom((20, 22), &["c::T", "c::m::Alpha"]);
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Match(c) if c.def_id == 2
+        ));
+    }
+
+    #[test]
+    fn test_impl_segment_paths() {
+        fn paths(q: &str) -> Option<Vec<&str>> {
+            impl_segment_paths(q).map(|set| {
+                let mut v: Vec<&str> = set.into_iter().collect();
+                v.sort_unstable();
+                v
+            })
+        }
+        assert_eq!(
+            paths("spqr::{impl core::convert::TryFrom<u8, alloc::string::String> for spqr::proto::Version}::try_from"),
+            Some(vec!["alloc::string::String", "core::convert::TryFrom", "spqr::proto::Version"])
+        );
+        assert_eq!(
+            paths("c::m::{core::ops::arith::Mul<&'0 (c::s::Scalar)> for &'1 (c::e::Point)}::mul"),
+            Some(vec!["c::e::Point", "c::s::Scalar", "core::ops::arith::Mul"])
+        );
+        assert_eq!(
+            paths("spqr::chain::{spqr::chain::Chain}::from_pb"),
+            Some(vec!["spqr::chain::Chain"])
+        );
+        assert_eq!(paths("c::m::{impl c::T}::conv"), None);
+        assert_eq!(paths("c::m::free_fn"), None);
     }
 
     /// Self type alone resolves a collision even when spans are unusable —

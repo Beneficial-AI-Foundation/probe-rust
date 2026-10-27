@@ -20,7 +20,7 @@ pub use error::{ProbeError, ProbeResult};
 
 use constants::{
     is_definition, is_external_function_symbol, is_function_like_kind, PROBE_URI_PREFIX,
-    SCIP_SYMBOL_PREFIX, TYPE_CONTEXT_LOOKBACK_LINES,
+    SCIP_KIND_TYPE_ALIAS, SCIP_SYMBOL_PREFIX, TYPE_CONTEXT_LOOKBACK_LINES,
 };
 
 // =============================================================================
@@ -296,6 +296,14 @@ pub struct AtomWithLines {
         default
     )]
     pub charon_version: Option<String>,
+    /// For a method of an `impl` block: the Rust paths (`krate::module::Type`)
+    /// of the trait and types that SCIP resolves in the impl header (trait
+    /// path and self type), sorted and deduplicated. Type parameters and
+    /// crate-local type aliases are left out. Empty for every other function.
+    /// Internal: used to tell same-named Charon candidates apart without line
+    /// numbers (see `charon_names::resolve_charon_candidate`), never emitted.
+    #[serde(skip)]
+    pub impl_header_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -533,6 +541,126 @@ fn collect_self_types(scip_data: &ScipIndex) -> HashMap<String, Vec<String>> {
         }
     }
     enclosing_to_self_types
+}
+
+// =============================================================================
+// Impl-header symbols
+// =============================================================================
+
+/// One SCIP reference to a trait or type, rendered as a Rust path.
+#[derive(Debug, Clone)]
+struct HeaderSymbolRef {
+    /// 1-based line and 0-based column where the reference starts.
+    start: (usize, usize),
+    /// 1-based line and 0-based column where the reference ends.
+    end: (usize, usize),
+    path: String,
+}
+
+/// Per file, the SCIP references to traits and types, rendered as Rust paths.
+/// Built once per index by [`build_impl_header_symbols`]; queried with the
+/// impl-header ranges from `rust_parser` to fill
+/// [`AtomWithLines::impl_header_paths`].
+#[derive(Debug, Default)]
+pub struct ImplHeaderSymbols {
+    by_file: HashMap<String, Vec<HeaderSymbolRef>>,
+}
+
+impl ImplHeaderSymbols {
+    /// Sorted, deduplicated paths of the references in `file` that lie inside
+    /// one of `ranges`.
+    #[must_use]
+    pub fn paths_in(&self, file: &str, ranges: &[rust_parser::SourceRange]) -> Vec<String> {
+        let Some(refs) = self.by_file.get(file) else {
+            return Vec::new();
+        };
+        let paths: BTreeSet<&str> = refs
+            .iter()
+            .filter(|r| ranges.iter().any(|range| range.contains(r.start, r.end)))
+            .map(|r| r.path.as_str())
+            .collect();
+        paths.into_iter().map(str::to_string).collect()
+    }
+}
+
+/// Collect the trait and type references of every document in `scip`.
+///
+/// rust-analyzer resolves each reference to the defining symbol, so a type
+/// named through a re-export alias (`pub use serialize::Error as
+/// SerializationError`) still yields its defining path
+/// (`spqr::serialize::Error`), the same path Charon prints. References to a
+/// crate-local type alias (`type X = ...;`) are skipped: Charon expands
+/// aliases, so the alias path would never appear in a Charon name.
+#[must_use]
+pub fn build_impl_header_symbols(scip: &ScipIndex) -> ImplHeaderSymbols {
+    let aliases: HashSet<&str> = scip
+        .documents
+        .iter()
+        .flat_map(|doc| &doc.symbols)
+        .filter(|sym| sym.kind == SCIP_KIND_TYPE_ALIAS)
+        .map(|sym| sym.symbol.as_str())
+        .collect();
+
+    let mut by_file: HashMap<String, Vec<HeaderSymbolRef>> = HashMap::new();
+    for doc in &scip.documents {
+        for occ in &doc.occurrences {
+            if is_definition(occ.symbol_roles) || aliases.contains(occ.symbol.as_str()) {
+                continue;
+            }
+            let Some(path) = scip_type_symbol_to_path(&occ.symbol) else {
+                continue;
+            };
+            let Some((start, end)) = occurrence_bounds(&occ.range) else {
+                continue;
+            };
+            by_file
+                .entry(doc.relative_path.clone())
+                .or_default()
+                .push(HeaderSymbolRef { start, end, path });
+        }
+    }
+    ImplHeaderSymbols { by_file }
+}
+
+/// Render a SCIP global symbol for a trait or type as a Rust path, e.g.
+/// `rust-analyzer cargo spqr 1.6.0 serialize/Error#` becomes
+/// `spqr::serialize::Error` (a `-` in the package name becomes `_`). `None`
+/// for locals and for every other descriptor: namespaces, functions, fields,
+/// and impl-scoped names such as type parameters.
+fn scip_type_symbol_to_path(symbol: &str) -> Option<String> {
+    if symbol.starts_with("local ") {
+        return None;
+    }
+    let mut fields = symbol.splitn(5, ' ');
+    let _scheme = fields.next()?;
+    let _manager = fields.next()?;
+    let package = fields.next()?;
+    let _version = fields.next()?;
+    let descriptors = fields.next()?;
+    let body = descriptors.strip_suffix('#')?;
+    if body.is_empty() || body.contains(['#', '[', '(', '.', '!', '`', ' ']) {
+        return None;
+    }
+    let mut segments = vec![package.replace('-', "_")];
+    for segment in body.split('/') {
+        if segment.is_empty() {
+            return None;
+        }
+        segments.push(segment.to_string());
+    }
+    Some(segments.join("::"))
+}
+
+/// Start and end of a SCIP occurrence range (`[line, start_col, end_col]` or
+/// `[start_line, start_col, end_line, end_col]`, all 0-based) as 1-based line
+/// and 0-based column pairs.
+fn occurrence_bounds(range: &[i32]) -> Option<((usize, usize), (usize, usize))> {
+    let at = |i: usize| range.get(i).map(|v| (*v).max(0) as usize);
+    match range.len() {
+        3 => Some(((at(0)? + 1, at(1)?), (at(0)? + 1, at(2)?))),
+        4 => Some(((at(0)? + 1, at(1)?), (at(2)? + 1, at(3)?))),
+        _ => None,
+    }
 }
 
 /// Build a call graph from SCIP data.
@@ -969,6 +1097,7 @@ fn symbol_to_code_name_full(
 pub fn convert_to_atoms_with_parsed_spans(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
+    header_symbols: Option<&ImplHeaderSymbols>,
     project_root: &Path,
     with_locations: bool,
 ) -> Vec<AtomWithLines> {
@@ -1004,6 +1133,7 @@ pub fn convert_to_atoms_with_parsed_spans(
         symbol_to_display_name,
         Some(&span_map),
         Some(&chain_facts),
+        header_symbols,
         with_locations,
     );
     // A failed span-map lookup silently degrades the atom (`lines-end` falls
@@ -1032,6 +1162,7 @@ fn convert_to_atoms_with_lines_internal(
     symbol_to_display_name: &HashMap<String, String>,
     span_map: Option<&HashMap<(String, String, usize), rust_parser::SpanInfo>>,
     chain_facts: Option<&mod_chain::ModChainFacts>,
+    header_symbols: Option<&ImplHeaderSymbols>,
     with_locations: bool,
 ) -> (Vec<AtomWithLines>, usize) {
     // === Phase 1: Compute line ranges and base code_names for all nodes ===
@@ -1345,6 +1476,12 @@ fn convert_to_atoms_with_lines_internal(
             };
             let is_unmounted =
                 chain_facts.is_some_and(|f| f.unmounted.contains(&data.node.relative_path));
+            let impl_header_paths = match (header_symbols, span_info) {
+                (Some(symbols), Some(info)) if !info.impl_header.is_empty() => {
+                    symbols.paths_in(&data.node.relative_path, &info.impl_header)
+                }
+                _ => Vec::new(),
+            };
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -1369,6 +1506,7 @@ fn convert_to_atoms_with_lines_internal(
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths,
             }
         })
         .collect();
@@ -1482,6 +1620,7 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
     }
@@ -1597,6 +1736,7 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
             },
         );
 
@@ -1914,8 +2054,14 @@ mod tests {
             }
 
             // Now convert to atoms to test the disambiguation path
-            let (atoms, _span_misses) =
-                convert_to_atoms_with_lines_internal(&graph, &display_names, None, None, false);
+            let (atoms, _span_misses) = convert_to_atoms_with_lines_internal(
+                &graph,
+                &display_names,
+                None,
+                None,
+                None,
+                false,
+            );
 
             let caller_atom = atoms.iter().find(|a| a.display_name == "caller");
             if let Some(atom) = caller_atom {
@@ -2033,6 +2179,7 @@ mod tests {
             is_public_api: None,
             charon_def_id: None,
             charon_version: None,
+            impl_header_paths: Vec::new(),
         }
     }
 
@@ -2134,12 +2281,13 @@ mod tests {
             &HashMap::new(),
             Some(&empty_span_map),
             None,
+            None,
             false,
         );
         assert_eq!(misses, 2);
 
         let (_, misses_without_map) =
-            convert_to_atoms_with_lines_internal(&graph, &HashMap::new(), None, None, false);
+            convert_to_atoms_with_lines_internal(&graph, &HashMap::new(), None, None, None, false);
         assert_eq!(misses_without_map, 0);
     }
 
@@ -2196,7 +2344,7 @@ mod tests {
             graph.insert(sym.to_string(), mk_node(sym, name, path, line0));
         }
 
-        let atoms = convert_to_atoms_with_parsed_spans(&graph, &HashMap::new(), root, false);
+        let atoms = convert_to_atoms_with_parsed_spans(&graph, &HashMap::new(), None, root, false);
         let by = |n: &str| atoms.iter().find(|a| a.display_name == n).unwrap();
 
         let own = by("own_gate");
@@ -2227,5 +2375,101 @@ mod tests {
         let dead = by("dead");
         assert!(dead.is_unmounted);
         assert_eq!(dead.cfg, None, "unmounted files carry no chain gate");
+    }
+
+    #[test]
+    fn test_scip_type_symbol_to_path() {
+        assert_eq!(
+            scip_type_symbol_to_path("rust-analyzer cargo spqr 1.6.0 serialize/Error#").as_deref(),
+            Some("spqr::serialize::Error")
+        );
+        assert_eq!(
+            scip_type_symbol_to_path(
+                "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#"
+            )
+            .as_deref(),
+            Some("core::convert::From")
+        );
+        assert_eq!(
+            scip_type_symbol_to_path("rust-analyzer cargo curve25519-dalek 4.2.0 scalar/Scalar#")
+                .as_deref(),
+            Some("curve25519_dalek::scalar::Scalar")
+        );
+        for not_a_type in [
+            "local 3",
+            "rust-analyzer cargo spqr 1.6.0 serialize/",
+            "rust-analyzer cargo spqr 1.6.0 Error#Serialization#",
+            "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]",
+            "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]from().",
+        ] {
+            assert_eq!(scip_type_symbol_to_path(not_a_type), None, "{not_a_type}");
+        }
+    }
+
+    /// The SPQR header `impl From<serialize::Error> for Error` (line 138):
+    /// the references resolve to the defining paths, a crate-local type alias
+    /// and the module segment are skipped, and only references inside the
+    /// queried ranges count.
+    #[test]
+    fn test_impl_header_symbols_paths_in() {
+        let from =
+            "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#";
+        let module = "rust-analyzer cargo spqr 1.6.0 serialize/";
+        let ser_error = "rust-analyzer cargo spqr 1.6.0 serialize/Error#";
+        let error = "rust-analyzer cargo spqr 1.6.0 Error#";
+        let alias = "rust-analyzer cargo spqr 1.6.0 Secret#";
+        let occ = |sym: &str, line: i32, start: i32, end: i32| Occurrence {
+            range: vec![line, start, end],
+            symbol: sym.into(),
+            symbol_roles: None,
+        };
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "src/lib.rs".into(),
+                occurrences: vec![
+                    occ(from, 137, 5, 9),
+                    occ(module, 137, 10, 19),
+                    occ(ser_error, 137, 21, 26),
+                    occ(error, 137, 32, 37),
+                    occ(alias, 137, 40, 46),
+                    // Outside the header: the method's return type.
+                    occ(error, 138, 30, 35),
+                ],
+                symbols: vec![make_symbol(
+                    alias,
+                    SCIP_KIND_TYPE_ALIAS,
+                    "Secret",
+                    "type Secret",
+                )],
+            }],
+        };
+        let symbols = build_impl_header_symbols(&scip);
+        // `From<serialize::Error>` spans columns 5..27 of line 138 (1-based),
+        // the self type `Error` 32..37, and the alias sits after them.
+        let header = [
+            rust_parser::SourceRange {
+                start_line: 138,
+                start_column: 5,
+                end_line: 138,
+                end_column: 27,
+            },
+            rust_parser::SourceRange {
+                start_line: 138,
+                start_column: 32,
+                end_line: 138,
+                end_column: 46,
+            },
+        ];
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &header),
+            vec![
+                "core::convert::From",
+                "spqr::Error",
+                "spqr::serialize::Error"
+            ]
+        );
+        assert!(symbols.paths_in("src/other.rs", &header).is_empty());
     }
 }

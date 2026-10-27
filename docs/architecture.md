@@ -22,7 +22,7 @@ Implemented across `src/commands/extract.rs` and `src/rust_parser.rs`.
 | `src/commands/extract.rs` | Main extraction pipeline |
 | `src/commands/callee_crates.rs` | BFS crate dependency traversal |
 | `src/commands/list_functions.rs` | Function enumeration |
-| `src/rust_parser.rs` | syn AST visitor for function body spans |
+| `src/rust_parser.rs` | syn AST visitor for function body spans and impl-header ranges |
 | `src/scip_cache.rs` | SCIP index caching and generation |
 | `src/tool_manager.rs` | Auto-download of external tools |
 | `src/metadata.rs` | Git + Cargo metadata gathering, envelope construction |

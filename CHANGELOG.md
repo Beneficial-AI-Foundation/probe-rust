@@ -5,6 +5,11 @@ All notable changes to probe-rust are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-10-27
+
+### Fixed
+- **Charon candidates are told apart by the impl header, not only by line overlap** (probe-rust#39). When Charon ran on a patched copy of the source (SPQR applies `translation-patches/` only for the Charon run), the manifest spans are shifted, and the span tiebreak gave `impl From<serialize::Error> for Error` the `def_id` of `impl From<EncodingError> for Error`, while the two real matches got none. probe-rust now records each method's impl-header ranges, collects the trait and type paths that SCIP resolves there (defining paths, so re-export aliases do not matter), and compares them with each candidate's impl segment before the span stage. A contradicted candidate is dropped, and a confirmed trait-impl candidate is accepted even when the spans disagree. On SPQR this fixes the three `From<_> for Error` atoms and binds `TryFrom<u8> for Version` and `From<Version> for u8`, which had no `charon-def-id` before.
+
 ## [0.12.0] - 2026-10-06
 
 ### Fixed

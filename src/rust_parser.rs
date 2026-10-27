@@ -32,6 +32,37 @@ pub struct FunctionSpan {
     /// implementations, not here. `false` for trait methods with a default
     /// body.
     pub trait_required: bool,
+    /// For a method of an `impl` block: the source ranges of that impl's
+    /// trait path (trait impls only) and self type. Empty for every other
+    /// function. Consumers resolve the names in these ranges to identify the
+    /// impl without relying on line numbers.
+    pub impl_header: Vec<SourceRange>,
+}
+
+/// A source range in `syn` coordinates: 1-based lines, 0-based columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceRange {
+    pub start_line: usize,
+    pub start_column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
+}
+
+impl SourceRange {
+    fn of(span: proc_macro2::Span) -> Self {
+        Self {
+            start_line: span.start().line,
+            start_column: span.start().column,
+            end_line: span.end().line,
+            end_column: span.end().column,
+        }
+    }
+
+    /// `true` when the range `[start, end)` given as 1-based line and 0-based
+    /// column pairs lies inside this range.
+    pub fn contains(&self, start: (usize, usize), end: (usize, usize)) -> bool {
+        (self.start_line, self.start_column) <= start && end <= (self.end_line, self.end_column)
+    }
 }
 
 // =============================================================================
@@ -77,6 +108,8 @@ pub struct SpanInfo {
     pub is_foreign: bool,
     /// Bodyless trait signature (see [`FunctionSpan::trait_required`]).
     pub trait_required: bool,
+    /// Enclosing impl header ranges (see [`FunctionSpan::impl_header`]).
+    pub impl_header: Vec<SourceRange>,
 }
 
 /// Extract the predicates of **all** item-gating `#[cfg(...)]` attributes on an
@@ -119,6 +152,11 @@ struct FunctionSpanVisitor {
     /// Stack of `#[cfg(...)]` predicates from enclosing `mod`/`impl`/`trait`
     /// blocks. A function's effective predicate is `all(stack + own_cfg)`.
     cfg_stack: Vec<String>,
+    /// Header ranges of the innermost enclosing item that owns methods: an
+    /// `impl` block pushes its trait-path and self-type ranges; a free
+    /// function, trait or module pushes an empty entry, so a function nested
+    /// in one of them is not attributed to an outer impl.
+    impl_header_stack: Vec<Vec<SourceRange>>,
 }
 
 impl FunctionSpanVisitor {
@@ -126,7 +164,20 @@ impl FunctionSpanVisitor {
         Self {
             functions: Vec::new(),
             cfg_stack: Vec::new(),
+            impl_header_stack: Vec::new(),
         }
+    }
+
+    /// Header ranges of the innermost enclosing impl, or empty.
+    fn current_impl_header(&self) -> Vec<SourceRange> {
+        self.impl_header_stack.last().cloned().unwrap_or_default()
+    }
+
+    /// Run `f` with `header` as the innermost enclosing impl header.
+    fn with_impl_header(&mut self, header: Vec<SourceRange>, f: impl FnOnce(&mut Self)) {
+        self.impl_header_stack.push(header);
+        f(self);
+        self.impl_header_stack.pop();
     }
 
     /// Combined predicate for a function with the given `attrs`: enclosing gates
@@ -164,9 +215,10 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             cfg,
             is_foreign: false,
             trait_required: false,
+            impl_header: Vec::new(),
         });
 
-        syn::visit::visit_item_fn(self, node);
+        self.with_impl_header(Vec::new(), |v| syn::visit::visit_item_fn(v, node));
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
@@ -183,6 +235,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             cfg,
             is_foreign: false,
             trait_required: false,
+            impl_header: self.current_impl_header(),
         });
 
         syn::visit::visit_impl_item_fn(self, node);
@@ -202,6 +255,7 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             cfg,
             is_foreign: false,
             trait_required: node.default.is_none(),
+            impl_header: Vec::new(),
         });
 
         syn::visit::visit_trait_item_fn(self, node);
@@ -221,21 +275,34 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
             cfg,
             is_foreign: true,
             trait_required: false,
+            impl_header: Vec::new(),
         });
 
         syn::visit::visit_foreign_item_fn(self, node);
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_impl(v, node));
+        let mut header: Vec<SourceRange> = node
+            .trait_
+            .iter()
+            .map(|(_, path, _)| SourceRange::of(path.span()))
+            .collect();
+        header.push(SourceRange::of(node.self_ty.span()));
+        self.with_impl_header(header, |v| {
+            v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_impl(v, node))
+        });
     }
 
     fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
-        self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_trait(v, node));
+        self.with_impl_header(Vec::new(), |v| {
+            v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_trait(v, node))
+        });
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        self.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_mod(v, node));
+        self.with_impl_header(Vec::new(), |v| {
+            v.with_enclosing_cfg(&node.attrs, |v| syn::visit::visit_item_mod(v, node))
+        });
     }
 
     fn visit_item_foreign_mod(&mut self, node: &'ast syn::ItemForeignMod) {
@@ -551,6 +618,7 @@ pub fn build_function_span_map(
                         cfg: func.cfg.clone(),
                         is_foreign: func.is_foreign,
                         trait_required: func.trait_required,
+                        impl_header: func.impl_header,
                     },
                 );
             }
@@ -640,6 +708,39 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    /// A method records its impl's trait-path and self-type ranges; a free
+    /// function nested in the method body, a trait method and a free
+    /// function record none.
+    #[test]
+    fn test_impl_header_ranges() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            "impl From<serialize::Error> for Error {{\n    fn from(v: serialize::Error) -> Self {{\n        fn helper() {{}}\n        Error::Serialization(v)\n    }}\n}}\ntrait T {{\n    fn t() {{}}\n}}\nfn free() {{}}\n"
+        )
+        .unwrap();
+
+        let spans = parse_file_for_spans(file.path()).unwrap();
+        let header = |name: &str| {
+            spans
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap()
+                .impl_header
+                .clone()
+        };
+        let range = |start_column, end_column| SourceRange {
+            start_line: 1,
+            start_column,
+            end_line: 1,
+            end_column,
+        };
+        assert_eq!(header("from"), vec![range(5, 27), range(32, 37)]);
+        assert!(header("helper").is_empty());
+        assert!(header("t").is_empty());
+        assert!(header("free").is_empty());
+    }
 
     #[test]
     fn test_parse_simple_function() {
@@ -906,6 +1007,7 @@ impl Foo {{
                 cfg: Some("test".to_string()),
                 is_foreign: false,
                 trait_required: false,
+                impl_header: Vec::new(),
             },
         );
         span_map.insert(
@@ -915,6 +1017,7 @@ impl Foo {{
                 cfg: None,
                 is_foreign: false,
                 trait_required: false,
+                impl_header: Vec::new(),
             },
         );
 

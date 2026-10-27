@@ -1,7 +1,7 @@
 //! Extract command - Generate call graph atoms from SCIP indexes.
 
 use crate::{
-    add_external_stubs, build_call_graph,
+    add_external_stubs, build_call_graph, build_impl_header_symbols,
     charon_cache::CharonCache,
     charon_names, convert_to_atoms_with_parsed_spans, find_duplicate_code_names, is_library_crate,
     metadata::{gather_metadata, get_default_output_path, wrap_in_envelope},
@@ -50,9 +50,11 @@ pub fn cmd_extract(
     println!("Converting to atoms format with accurate line numbers...");
     println!("  Parsing source files with syn for accurate function spans...");
 
+    let header_symbols = build_impl_header_symbols(&scip_index);
     let atoms = convert_to_atoms_with_parsed_spans(
         &call_graph,
         &symbol_to_display_name,
+        Some(&header_symbols),
         &project_path,
         with_locations,
     );
