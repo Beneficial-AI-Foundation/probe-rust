@@ -673,24 +673,29 @@ fn scip_type_symbol_to_path(symbol: &str, lib_names: &HashMap<String, String>) -
     Some(segments.join("::"))
 }
 
-/// For each workspace package of `project_path` whose lib target is renamed
-/// (`[lib] name = "mylib"` in package `my-pkg`), map the package name to the
-/// lib name, from `cargo metadata --no-deps`. Empty when `cargo metadata`
-/// fails: every package is then read with `-` as `_`.
+/// For each package of `project_path` and its dependencies whose lib target
+/// is renamed (`[lib] name = "md5"` in package `md-5`), map the package name
+/// to the lib name. Reads `cargo metadata --offline`, falling back to
+/// `cargo metadata --no-deps` (workspace packages only) when the dependency
+/// graph cannot be resolved offline. Empty when both fail: every package is
+/// then read with `-` as `_`.
 #[must_use]
 pub fn lib_crate_names(project_path: &Path) -> HashMap<String, String> {
-    let Ok(output) = std::process::Command::new("cargo")
-        .args(["metadata", "--no-deps", "--format-version", "1"])
-        .current_dir(project_path)
-        .stderr(std::process::Stdio::null())
-        .output()
-    else {
-        return HashMap::new();
+    let run = |extra: &str| {
+        let output = std::process::Command::new("cargo")
+            .args(["metadata", extra, "--format-version", "1"])
+            .current_dir(project_path)
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| lib_crate_names_from_metadata(&String::from_utf8_lossy(&output.stdout)))
     };
-    if !output.status.success() {
-        return HashMap::new();
-    }
-    lib_crate_names_from_metadata(&String::from_utf8_lossy(&output.stdout))
+    run("--offline")
+        .or_else(|| run("--no-deps"))
+        .unwrap_or_default()
 }
 
 /// The renamed-lib map of [`lib_crate_names`], from `cargo metadata` JSON.
@@ -2512,7 +2517,9 @@ mod tests {
                 symbols: Vec::new(),
             }],
         };
-        let symbols = build_impl_header_symbols(&scip, &HashMap::new());
+        // Package `x` builds the lib `xlib`, as Charon prints it.
+        let lib_names = HashMap::from([("x".to_string(), "xlib".to_string())]);
+        let symbols = build_impl_header_symbols(&scip, &lib_names);
 
         let mk_node = |symbol: &str, name: &str, line0: i32| FunctionNode {
             symbol: symbol.to_string(),
@@ -2540,14 +2547,18 @@ mod tests {
         let from = by("from");
         assert_eq!(
             from.impl_header_paths,
-            vec!["core::convert::From", "x::Error", "x::serialize::Error"]
+            vec![
+                "core::convert::From",
+                "xlib::Error",
+                "xlib::serialize::Error"
+            ]
         );
         assert!(from.impl_header_complete);
 
         let try_from = by("try_from");
         assert_eq!(
             try_from.impl_header_paths,
-            vec!["core::convert::TryFrom", "x::Error"]
+            vec!["core::convert::TryFrom", "xlib::Error"]
         );
         assert!(!try_from.impl_header_complete);
     }
