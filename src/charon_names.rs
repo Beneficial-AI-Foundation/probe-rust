@@ -55,8 +55,6 @@ pub struct LlbcNames {
     pub by_match_key: HashMap<String, Vec<CharonFunInfo>>,
     /// Top-level `charon_version`, `None` if absent or non-string.
     pub charon_version: Option<String>,
-    /// `translated.crate_name`, `None` if absent or empty.
-    pub crate_name: Option<String>,
 }
 
 /// Parse an LLBC JSON file into [`LlbcNames`].
@@ -145,7 +143,6 @@ pub fn parse_llbc_names(llbc_path: &Path) -> Result<LlbcNames, String> {
     Ok(LlbcNames {
         by_match_key: result,
         charon_version,
-        crate_name: Some(crate_name.to_string()).filter(|name| !name.is_empty()),
     })
 }
 
@@ -1113,12 +1110,6 @@ pub struct Enrichment {
     pub by_match_key: HashMap<String, Vec<CharonFunInfo>>,
     pub charon_version: Option<String>,
     pub source: EnrichmentSource,
-    /// The crate name Charon prints as the first segment of the crate's own
-    /// paths (`translated.crate_name`, or the manifest's `crate`). Atom impl
-    /// headers are rendered with the Cargo package name, which differs when
-    /// the package renames its `[lib]`; [`enrich_atoms`] rewrites them to this
-    /// name before comparing.
-    pub crate_name: Option<String>,
 }
 
 impl Enrichment {
@@ -1130,7 +1121,6 @@ impl Enrichment {
             by_match_key: parsed.by_match_key,
             charon_version: parsed.charon_version,
             source: EnrichmentSource::Llbc,
-            crate_name: parsed.crate_name,
         })
     }
 
@@ -1150,8 +1140,6 @@ impl Enrichment {
         struct Manifest {
             #[serde(default)]
             charon_version: Option<String>,
-            #[serde(default, rename = "crate")]
-            crate_name: Option<String>,
             #[serde(default)]
             functions: Vec<ManifestFn>,
         }
@@ -1205,7 +1193,6 @@ impl Enrichment {
             by_match_key,
             charon_version: manifest.charon_version,
             source: EnrichmentSource::Manifest,
-            crate_name: manifest.crate_name.filter(|name| !name.is_empty()),
         })
     }
 }
@@ -1266,9 +1253,6 @@ pub fn enrich_atoms(
 
         if atom.code_path.is_empty() {
             continue;
-        }
-        if let Some(crate_name) = &enrichment.crate_name {
-            rename_own_crate_in_header(atom, crate_name);
         }
 
         let match_key = make_match_key_from_atom(
@@ -1344,31 +1328,6 @@ pub fn enrich_atoms(
     }
 
     enriched
-}
-
-/// Rewrite the first segment of the atom's own-crate header paths (the Cargo
-/// package name, `-` read as `_`, taken from the atom's code-name
-/// `probe:<package>/<version>/...`) to `crate_name`, the name Charon prints.
-/// The two differ when the package renames its `[lib]`.
-fn rename_own_crate_in_header(atom: &mut crate::AtomWithLines, crate_name: &str) {
-    let Some(package) = atom
-        .code_name
-        .strip_prefix(crate::constants::PROBE_URI_PREFIX)
-        .and_then(|rest| rest.split('/').next())
-        .map(|package| package.replace('-', "_"))
-    else {
-        return;
-    };
-    if package == crate_name {
-        return;
-    }
-    let own_prefix = format!("{package}::");
-    for path in &mut atom.impl_header_paths {
-        if let Some(rest) = path.strip_prefix(&own_prefix) {
-            *path = format!("{crate_name}::{rest}");
-        }
-    }
-    atom.impl_header_paths.sort_unstable();
 }
 
 /// Enrich atoms from a charon LLBC file (legacy convenience wrapper over
@@ -3491,30 +3450,6 @@ mod tests {
         assert_eq!(header_evidence(&c, &once), HeaderEvidence::Confirmed);
     }
 
-    /// A package that renames its `[lib]` (`my-pkg` built as `mylib`):
-    /// Charon prints `mylib::`, SCIP the package name. The header is
-    /// rewritten so that the right candidate still confirms.
-    #[test]
-    fn test_rename_own_crate_in_header() {
-        let mut atom = header_atom(
-            (1, 3),
-            &["core::convert::From", "my_pkg::Error", "my_pkg::io::E"],
-        );
-        atom.code_name = "probe:my-pkg/1.0.0/impl#[Error][From<E>]from()".to_string();
-        rename_own_crate_in_header(&mut atom, "mylib");
-        assert_eq!(
-            atom.impl_header_paths,
-            vec!["core::convert::From", "mylib::Error", "mylib::io::E"]
-        );
-        let c = candidate(
-            1,
-            "mylib::{impl core::convert::From<mylib::io::E> for mylib::Error}::from",
-            "src/lib.rs",
-            (40, 42),
-        );
-        assert_eq!(header_evidence(&c, &atom), HeaderEvidence::Exact);
-    }
-
     #[test]
     fn test_impl_segment() {
         fn parse(q: &str) -> Option<(Vec<&str>, bool)> {
@@ -3829,7 +3764,6 @@ mod tests {
             by_match_key,
             charon_version: Some("0.1.214".to_string()),
             source: EnrichmentSource::Llbc,
-            crate_name: None,
         };
 
         let mut atom = address_atom("Alpha::conv", (10, 20));
@@ -3908,7 +3842,6 @@ mod tests {
                 by_match_key,
                 charon_version: Some("0.1.214".to_string()),
                 source,
-                crate_name: None,
             };
 
             let mut atom = address_atom("Alpha::conv", (10, 20));

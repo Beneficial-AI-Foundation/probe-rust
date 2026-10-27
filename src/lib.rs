@@ -300,8 +300,8 @@ pub struct AtomWithLines {
     /// of the trait and types that SCIP resolves in the impl header (trait
     /// path and self type), sorted, one entry per reference. Type parameters,
     /// primitive types and crate-local type aliases are left out. Empty for
-    /// every other function and for a method whose name repeats in its impl
-    /// block. Internal: used to tell same-named Charon candidates apart
+    /// every other function and for a method whose name occurs more than once
+    /// under the same impl header in its file. Internal: used to tell same-named Charon candidates apart
     /// without line numbers (see `charon_names::resolve_charon_candidate`),
     /// never emitted.
     #[serde(skip)]
@@ -600,8 +600,16 @@ impl ImplHeaderSymbols {
 /// (`spqr::serialize::Error`), the same path Charon prints. References to a
 /// crate-local type alias (`type X = ...;`) are skipped: Charon expands
 /// aliases, so the alias path would never appear in a Charon name.
+///
+/// SCIP names a crate by its Cargo package; Charon prints the lib crate
+/// name. `lib_names` maps each package whose lib target is renamed
+/// (`[lib] name = ...`) to that name (see [`lib_crate_names`]); any other
+/// package is read with `-` as `_`.
 #[must_use]
-pub fn build_impl_header_symbols(scip: &ScipIndex) -> ImplHeaderSymbols {
+pub fn build_impl_header_symbols(
+    scip: &ScipIndex,
+    lib_names: &HashMap<String, String>,
+) -> ImplHeaderSymbols {
     let aliases: HashSet<&str> = scip
         .documents
         .iter()
@@ -616,7 +624,7 @@ pub fn build_impl_header_symbols(scip: &ScipIndex) -> ImplHeaderSymbols {
             if is_definition(occ.symbol_roles) || aliases.contains(occ.symbol.as_str()) {
                 continue;
             }
-            let Some(path) = scip_type_symbol_to_path(&occ.symbol) else {
+            let Some(path) = scip_type_symbol_to_path(&occ.symbol, lib_names) else {
                 continue;
             };
             let Some((start, end)) = occurrence_bounds(&occ.range) else {
@@ -633,10 +641,11 @@ pub fn build_impl_header_symbols(scip: &ScipIndex) -> ImplHeaderSymbols {
 
 /// Render a SCIP global symbol for a trait or type as a Rust path, e.g.
 /// `rust-analyzer cargo spqr 1.6.0 serialize/Error#` becomes
-/// `spqr::serialize::Error` (a `-` in the package name becomes `_`). `None`
-/// for locals and for every other descriptor: namespaces, functions, fields,
-/// and impl-scoped names such as type parameters.
-fn scip_type_symbol_to_path(symbol: &str) -> Option<String> {
+/// `spqr::serialize::Error`. The crate segment is the package's lib name from
+/// `lib_names`, else the package name with `-` read as `_`. `None` for
+/// locals and for every other descriptor: namespaces, functions, fields, and
+/// impl-scoped names such as type parameters.
+fn scip_type_symbol_to_path(symbol: &str, lib_names: &HashMap<String, String>) -> Option<String> {
     if symbol.starts_with("local ") {
         return None;
     }
@@ -650,7 +659,11 @@ fn scip_type_symbol_to_path(symbol: &str) -> Option<String> {
     if body.is_empty() || body.contains(['#', '[', '(', '.', '!', '`', ' ']) {
         return None;
     }
-    let mut segments = vec![package.replace('-', "_")];
+    let krate = lib_names
+        .get(package)
+        .cloned()
+        .unwrap_or_else(|| package.replace('-', "_"));
+    let mut segments = vec![krate];
     for segment in body.split('/') {
         if segment.is_empty() {
             return None;
@@ -658,6 +671,57 @@ fn scip_type_symbol_to_path(symbol: &str) -> Option<String> {
         segments.push(segment.to_string());
     }
     Some(segments.join("::"))
+}
+
+/// For each workspace package of `project_path` whose lib target is renamed
+/// (`[lib] name = "mylib"` in package `my-pkg`), map the package name to the
+/// lib name, from `cargo metadata --no-deps`. Empty when `cargo metadata`
+/// fails: every package is then read with `-` as `_`.
+#[must_use]
+pub fn lib_crate_names(project_path: &Path) -> HashMap<String, String> {
+    let Ok(output) = std::process::Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(project_path)
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return HashMap::new();
+    };
+    if !output.status.success() {
+        return HashMap::new();
+    }
+    lib_crate_names_from_metadata(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The renamed-lib map of [`lib_crate_names`], from `cargo metadata` JSON.
+fn lib_crate_names_from_metadata(json: &str) -> HashMap<String, String> {
+    const LIB_KINDS: &[&str] = &["lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"];
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(json) else {
+        return HashMap::new();
+    };
+    let mut names = HashMap::new();
+    for package in root["packages"].as_array().into_iter().flatten() {
+        let Some(package_name) = package["name"].as_str() else {
+            continue;
+        };
+        let lib = package["targets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|t| {
+                t["kind"].as_array().is_some_and(|kinds| {
+                    kinds
+                        .iter()
+                        .any(|k| k.as_str().is_some_and(|k| LIB_KINDS.contains(&k)))
+                })
+            });
+        if let Some(lib_name) = lib.and_then(|t| t["name"].as_str()) {
+            if lib_name != package_name.replace('-', "_") {
+                names.insert(package_name.to_string(), lib_name.to_string());
+            }
+        }
+    }
+    names
 }
 
 /// Start and end of a SCIP occurrence range (`[line, start_col, end_col]` or
@@ -2448,7 +2512,7 @@ mod tests {
                 symbols: Vec::new(),
             }],
         };
-        let symbols = build_impl_header_symbols(&scip);
+        let symbols = build_impl_header_symbols(&scip, &HashMap::new());
 
         let mk_node = |symbol: &str, name: &str, line0: i32| FunctionNode {
             symbol: symbol.to_string(),
@@ -2497,20 +2561,26 @@ mod tests {
 
     #[test]
     fn test_scip_type_symbol_to_path() {
+        let none = HashMap::new();
         assert_eq!(
-            scip_type_symbol_to_path("rust-analyzer cargo spqr 1.6.0 serialize/Error#").as_deref(),
+            scip_type_symbol_to_path("rust-analyzer cargo spqr 1.6.0 serialize/Error#", &none)
+                .as_deref(),
             Some("spqr::serialize::Error")
         );
         assert_eq!(
             scip_type_symbol_to_path(
-                "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#"
+                "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#",
+                &none
             )
             .as_deref(),
             Some("core::convert::From")
         );
         assert_eq!(
-            scip_type_symbol_to_path("rust-analyzer cargo curve25519-dalek 4.2.0 scalar/Scalar#")
-                .as_deref(),
+            scip_type_symbol_to_path(
+                "rust-analyzer cargo curve25519-dalek 4.2.0 scalar/Scalar#",
+                &none
+            )
+            .as_deref(),
             Some("curve25519_dalek::scalar::Scalar")
         );
         for not_a_type in [
@@ -2520,8 +2590,32 @@ mod tests {
             "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]",
             "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]from().",
         ] {
-            assert_eq!(scip_type_symbol_to_path(not_a_type), None, "{not_a_type}");
+            assert_eq!(
+                scip_type_symbol_to_path(not_a_type, &none),
+                None,
+                "{not_a_type}"
+            );
         }
+        // A package with a renamed lib target is printed under the lib name.
+        let renamed = HashMap::from([("my-pkg".to_string(), "mylib".to_string())]);
+        assert_eq!(
+            scip_type_symbol_to_path("rust-analyzer cargo my-pkg 1.0.0 io/E#", &renamed).as_deref(),
+            Some("mylib::io::E")
+        );
+    }
+
+    #[test]
+    fn test_lib_crate_names_from_metadata() {
+        let json = r#"{"packages": [
+            {"name": "my-pkg", "targets": [{"name": "mylib", "kind": ["lib"]}, {"name": "my-pkg", "kind": ["bin"]}]},
+            {"name": "plain-pkg", "targets": [{"name": "plain_pkg", "kind": ["rlib"]}]},
+            {"name": "tool", "targets": [{"name": "tool", "kind": ["bin"]}]}
+        ]}"#;
+        assert_eq!(
+            lib_crate_names_from_metadata(json),
+            HashMap::from([("my-pkg".to_string(), "mylib".to_string())])
+        );
+        assert!(lib_crate_names_from_metadata("not json").is_empty());
     }
 
     /// The SPQR header `impl From<serialize::Error> for Error` (line 138):
@@ -2563,7 +2657,7 @@ mod tests {
                 )],
             }],
         };
-        let symbols = build_impl_header_symbols(&scip);
+        let symbols = build_impl_header_symbols(&scip, &HashMap::new());
         // `From<serialize::Error>` spans columns 5..27 of line 138 (1-based),
         // the self type `Error` 32..37, and the alias sits after them.
         let header = [
