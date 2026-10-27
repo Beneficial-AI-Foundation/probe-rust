@@ -3,44 +3,37 @@ auditor: ambiguity-auditor
 date: 2026-10-27
 repo: probe-rust
 kb: kb/ (probe-rust own KB. The hub ../probe/kb/ consulted for cross-repo contracts only)
-scope: branch fix/impl-header-candidate-filter, uncommitted working tree on top of 3b6b773 (a method of an impl whose header holds a non-literal const expression carries no header paths. Touches P20, glossary "Impl-header evidence", docs/SCHEMA.md, CHANGELOG.md and the `FunctionSpan::impl_header` rustdoc)
-status: 0 critical, 0 open (1 warning and 1 info fixed in this round)
+scope: round 2. Uncommitted working tree on top of 97c5f19, branch fix/impl-header-candidate-filter. It adds `CrateNames` and `crate_names` and drops headers with a qualified path (`impl_header_hides_types`). It touches P20, the glossary, docs/SCHEMA.md and CHANGELOG.md. P20 is amended in the same tree. The code and the amendment ship in one PR, so they must merge together.
+status: 0 critical, 0 warnings, 1 info
 ---
 
-KB revision: audited on the feature branch working tree. The P20, glossary,
-SCHEMA and CHANGELOG edits ship in the same pull request as the code, so there
-is no cross-PR merge-order constraint.
+## Critical
 
-The five passages agree on the rule and on its reason (Charon renders the
-evaluated value). The examples are the only definition of "non-literal
-const expression". They do not show that a bare const parameter in an array
-length also counts. One SCHEMA phrase has the wrong subject.
+None.
 
 ## Warnings
 
-### [W1] "Non-literal const expression" is defined only by examples, and the examples hide the common case
-- **Location**: kb/engineering/properties.md:198 (P20), kb/engineering/glossary.md:69 ("Impl-header evidence"), docs/SCHEMA.md:174 (`charon-def-id`), CHANGELOG.md:11, src/rust_parser.rs:41-45 (`FunctionSpan::impl_header`) and src/rust_parser.rs (`impl_header_has_const_expression`)
-- **Issue**: If any `syn::Expr` in the trait path or self type is not `Expr::Lit`, the code drops the header. All five documents explain the term with computed expressions only (`size_of::<Foo>()`, `{ N + 1 }`). By the code, three more forms count as non-literal. The first is a const parameter as an array length (`[u8; N]`, an `Expr::Path`). The second is a braced literal (`{ 4 }`, an `Expr::Block`). The third is a negative number (`-1`, an `Expr::Unary`). A reader of P20 expects `impl From<[u8; N]> for X` to keep its header, because `N` names no type and Charon does not evaluate it away. In a generic argument without braces (`Bits<N>`), `syn` parses the const parameter as a type. So `Bits<N>` keeps the header, but `[u8; N]` drops it. The rule is conservative (a dropped header only sends the method to the span stage), so this does not cause wrong matches. But the behavior is not in the documents, and it loses header evidence for every impl over `[T; N]`.
-- **Recommendation**: Define the term once in P20. Proposed text: "any expression in the trait path or self type other than one literal token. This includes a const parameter as an array length (`[u8; N]`), a braced literal (`{ 4 }`) and a negative number (`-1`)." Point the glossary, SCHEMA and the rustdoc at P20, or use the same words there. To keep the header of `[u8; N]`, change the code to accept an `Expr::Path` with one segment, and document that instead.
+None.
 
 ## Info
 
-### [I1] SCHEMA says impl headers carry no header
-- **Location**: docs/SCHEMA.md:174 (`charon-def-id` row)
-- **Issue**: The new parenthesis reads "`cfg`-split methods and impl headers with a non-literal const expression carry no header". The subject of the second item is the header itself, so the sentence says that a header carries no header. P20, the glossary, CHANGELOG and the rustdoc all say that the *method* carries no header.
-- **Recommendation**: "(`cfg`-split methods, and methods of an impl whose header holds a non-literal const expression, carry no header, so they still need the span)".
+### [I1] Secondary docs name two of the three unknown-crate causes
+- **Location**: kb/engineering/glossary.md:69, docs/SCHEMA.md:174, CHANGELOG.md:11
+- **Issue**: P20 (properties.md:198) lists three causes. The first is a lib and a bin with different crate names. The second is a package without a lib that builds two bins with different names. The third is a missing SCIP version whose other versions disagree. The glossary, the SCHEMA row and the CHANGELOG name only the first and the third. A bin-only package builds no lib, so "lib and bin crates with different names" does not clearly cover the second cause.
+- **Evidence**: `crate_names_from_metadata` gives `None` for any lib/bin crate set with more than one name (`_ => None`). The test asserts `name("two-bins", "1.0.0") == None`.
+- **Recommendation**: In the three texts, say "the lib and bin targets build more than one crate name". The glossary already points at P20, so this is minor.
+
+## Round-1 fixes verified
+
+- **(a) Unknown-crate causes**: P20 (properties.md:198) now lists all three causes. It also says what happens if the versions disagree: the crate is unknown. The secondary docs keep a small gap (I1).
+- **(b) `Input` and "normalizes"**: P20 now defines the binding: "where `impl HasType for Marker` sets `type Item = Input`". It states the claim with a condition: "when it can resolve the projection". The glossary, the CHANGELOG and both rustdoc comments in src/rust_parser.rs use the same form. No "normalizes" wording is left for this rule.
+- **(c) Circular wording**: the glossary and the CHANGELOG now make the method the subject. This agrees with P20.
+- **(d) Missing test**: the new `trait_only` case in src/lib.rs closes it. See test-report.md.
 
 ## Verified clean
 
-- The rule is the same in P20 (properties.md:198), the glossary (glossary.md:69), SCHEMA (`charon-def-id` row), CHANGELOG 0.12.1 and the `FunctionSpan::impl_header` rustdoc: the method carries no header paths, because Charon renders the evaluated value, and the span decides. The `[u8; 4usize]` rendering example matches `test_resolve_const_expression_header_left_to_span` (src/charon_names.rs) and `test_impl_header_dropped_for_const_expression` (src/rust_parser.rs).
-- The code matches the text. `impl_header_has_const_expression` scans only the trait path and self type, which are the header ranges. A dropped header also leaves `impl_header_path_count` at `None`. The `impl_header_path_count` rustdoc covers this case ("or when `impl_header` is empty").
-- No passage lists the no-header cases incompletely. P20, the glossary, SCHEMA, CHANGELOG and the rustdoc each name both the `cfg`-split case and the const-expression case. In P20, "carries header paths only when its method name occurs once" is a necessary condition. The next sentence adds the const-expression case with "either". The two do not conflict.
-- Three passages name only the `cfg`-split case, but none claims to list all no-header cases. `drop_repeated_impl_headers` (src/rust_parser.rs:215-217) and the test comment at src/rust_parser.rs:918 describe only that mechanism. `is_trait_impl_segment` (src/charon_names.rs:840-845) gives the `cfg`-split drop as the reason that an exact header is unique. The const-expression drop does not change that reason. The glossary "Known limits" (macro-generated impls carry no header) is a separate, still-accurate case.
-- architecture.md:100 and the code-quality auditor rule (.cursor/rules/auditors/code-quality-auditor.md:33) describe the header stage without listing no-header cases, so they need no change.
-- P20 "Where" names `impl_header_has_const_expression`, and the function exists in src/rust_parser.rs.
-- `last-updated` of properties.md, glossary.md and architecture.md is 2026-10-27. kb/index.md (2026-09-01) and kb/engineering/index.md (2026-08-11) are older than 30 days. This change does not touch what they describe.
-
-## Resolution
-
-- W1: P20 now defines a non-literal const expression (anything other than a literal or a single name), and the glossary, CHANGELOG-adjacent rustdoc and code match. The code now keeps the header for a single name such as `[u8; N]`, so the `Bits<N>` / `[u8; N]` inconsistency is gone. A test pins `[u8; N]` (kept) and `[u8; Foo::LEN]` (dropped).
-- I1: SCHEMA now says "methods of an impl whose header holds a non-literal const expression".
+- **P20** (properties.md:196-212): every new claim matches the code. The lookup is per package version (`CrateNames::crate_name`). If the version is missing, the lookup falls back to `by_name`. If the versions disagree, `by_name` holds `None`. A package absent from the metadata is read with `-` as `_`. `crate_names` tries `--offline` first and then `--no-deps`. If a reference in range has an unknown crate, `paths_in` returns nothing and the span check decides. `impl_header_hides_types` visits only the trait path and the self type. All names in the **Where** list exist.
+- **Stale names**: kb/engineering, docs/, README.md, CHANGELOG.md and src/ hold no `lib_crate_names`, `lib_crate_names_from_metadata` or `impl_header_has_const_expression`.
+- **Cross-file consistency**: P20, the glossary, the SCHEMA row and the CHANGELOG agree on the qualified-path rule and the crate-name rule. I1 is the only gap.
+- **Glossary terms**: P20 and the glossary use "exact", "compatible", "contradicted" and "complete" with the same meaning.
+- **Stamps**: properties.md and glossary.md show `last-updated: 2026-10-27`.
