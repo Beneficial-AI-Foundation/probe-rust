@@ -1,6 +1,6 @@
 # Architecture
 
-- **last-updated**: 2026-09-02
+- **last-updated**: 2026-10-27
 
 ## Overview
 
@@ -97,7 +97,7 @@ Provides precise Rust qualified names and item visibility via LLBC analysis. Fai
 
 An alternative Manifest source (`--translation <translation.json>`) skips the Charon run entirely: Aeneas already ran Charon once and its manifest carries each function's `def_id` and source span. This path stamps only `charon-def-id`/`charon-version` (it never overrides the heuristic `rust-qualified-name`) and fails closed on candidates without file proof ([P20](../engineering/properties.md#p20--charon-candidate-resolution-never-picks-arbitrarily)).
 
-Supports multi-crate LLBCs: when the LLBC contains functions from dependency crates (via Charon's `--include` flag), enrichment handles qualified names whose crate prefix differs from `translated.crate_name` by stripping the first `::` segment unconditionally. Colliding match keys (several impl blocks sharing a method name) are resolved by successive file, self-type, dedup, and span filters; an unresolvable collision stamps nothing and, on the LLBC path, clears the atom's RQN rather than guessing (P20). Span overlap is an inclusive line count, so single-line Charon spans (common for included dependencies) score `1` when inside the atom.
+Supports multi-crate LLBCs: when the LLBC contains functions from dependency crates (via Charon's `--include` flag), enrichment handles qualified names whose crate prefix differs from `translated.crate_name` by stripping the first `::` segment unconditionally. Colliding match keys (several impl blocks sharing a method name) are resolved by successive file, self-type, dedup, impl-header, and span filters (the impl-header filter compares the paths SCIP resolves in the impl header with the candidate's impl segment (Manifest source only, because LLBC segments are no evidence), so it holds when Charon ran on patched source with shifted lines); an unresolvable collision stamps nothing and, on the LLBC path, clears the atom's RQN rather than guessing (P20). Span overlap is an inclusive line count, so single-line Charon spans (common for included dependencies) score `1` when inside the atom.
 
 **Files**: `charon_cache.rs`, `charon_names.rs`
 

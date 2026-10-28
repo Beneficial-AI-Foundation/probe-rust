@@ -22,7 +22,7 @@
 //!   crates pulled in via `--include`) and `{...}` impl blocks to get the
 //!   same `scalar::from_bytes_mod_order` key.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -691,7 +691,20 @@ fn in_atom_file(c: &CharonFunInfo, norm_atom_path: &str) -> bool {
 /// - legacy trait impl without type info: `..::{impl Trait}::m` -> `None`
 /// - no impl segment (free function): `None`
 fn self_type_from_qualified_name(qualified_name: &str) -> Option<String> {
-    // Find the content of the last top-level `{...}` block.
+    let content = last_impl_block(qualified_name)?;
+    if content.starts_with("impl ") {
+        return None;
+    }
+    let self_part = match content.rfind(" for ") {
+        Some(idx) => &content[idx + 5..],
+        None => content,
+    };
+    Some(bare_type_name(self_part)?.to_string())
+}
+
+/// The content of the last top-level `{...}` block of a Charon qualified name
+/// (its innermost impl segment), or `None` when there is none.
+fn last_impl_block(qualified_name: &str) -> Option<&str> {
     let mut last_block: Option<(usize, usize)> = None;
     let mut depth = 0usize;
     let mut start = 0usize;
@@ -713,15 +726,125 @@ fn self_type_from_qualified_name(qualified_name: &str) -> Option<String> {
         }
     }
     let (s, e) = last_block?;
-    let content = &qualified_name[s..e];
-    if content.starts_with("impl ") {
-        return None;
-    }
-    let self_part = match content.rfind(" for ") {
-        Some(idx) => &content[idx + 5..],
+    Some(&qualified_name[s..e])
+}
+
+/// What a Charon qualified name's last impl segment names.
+struct ImplSegment<'q> {
+    /// The paths (`krate::module::Name`) of the trait, its type arguments and
+    /// the self type, in rendering order, one entry per occurrence.
+    paths: Vec<&'q str>,
+    /// `true` when the segment is made of these paths only: no primitive
+    /// type, type parameter, reference, slice, array, tuple, pointer or
+    /// unrenderable (`?`) argument.
+    path_only: bool,
+}
+
+/// Parse a Charon qualified name's last impl segment, in both renderings
+/// (`{impl Trait<..> for Self}` from `translation.json`, `{Trait<..> for
+/// Self}` from the LLBC, `{Self}` for inherent impls). `None` when there is
+/// no impl segment or it names no path, as in the legacy `{impl Trait}` form
+/// without type information.
+fn impl_segment(qualified_name: &str) -> Option<ImplSegment<'_>> {
+    let content = last_impl_block(qualified_name)?;
+    let body = match content.strip_prefix("impl ") {
+        Some(rest) if !rest.contains(" for ") => return None,
+        Some(rest) => rest,
         None => content,
     };
-    Some(bare_type_name(self_part)?.to_string())
+    let mut paths = Vec::new();
+    let mut path_only = !body.contains(['&', '?', '[', '(', '*', '\'']);
+    for token in body
+        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+        .map(|token| token.trim_matches(':'))
+        .filter(|token| !token.is_empty())
+    {
+        if token.contains("::") {
+            paths.push(token);
+        } else if token != "for" {
+            path_only = false;
+        }
+    }
+    if paths.is_empty() {
+        return None;
+    }
+    Some(ImplSegment { paths, path_only })
+}
+
+/// How a candidate's impl segment relates to the atom's impl header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderEvidence {
+    /// The segment names exactly the atom's complete header: the same paths
+    /// in the same order, and nothing else.
+    Exact,
+    /// The segment does not contradict the header: it names every header
+    /// path and possibly more (Charon adds default and associated type
+    /// arguments, and primitives such as the `u8` of `TryFrom<u8>` are not
+    /// paths), or there is nothing to compare (no header paths, no typed impl
+    /// segment, or an LLBC candidate).
+    Compatible,
+    /// The segment lacks a path of the header: the candidate is a different
+    /// impl.
+    Contradicted,
+}
+
+/// Compare the paths that SCIP resolves in the atom's impl header with the
+/// paths of the candidate's impl segment. Both sides name the defining
+/// paths, so this needs no line numbers: it stays correct when Charon ran on
+/// a patched copy of the source whose line numbers differ from the indexed
+/// one. Exactness compares the paths in order (source order on the atom,
+/// rendering order on the segment, both `Trait<args> for Self`), so
+/// `Tr<A, B>` is not exactly `Tr<B, A>`.
+///
+/// Only [`EnrichmentSource::Manifest`] segments are evidence. The manifest
+/// renders every type argument, so a header path missing from the segment
+/// names a different impl, while extra segment paths are the default and
+/// associated type arguments that Charon adds. The LLBC rendering drops an
+/// ADT's generic arguments and also adds associated types, so neither a
+/// missing nor an extra path proves anything: `impl Mul<Wrapper<Foo>> for X`
+/// with `type Output = Bar` renders `{Mul<c::Wrapper, c::Bar> for c::X}`.
+fn header_evidence(
+    c: &CharonFunInfo,
+    atom: &crate::AtomWithLines,
+    source: EnrichmentSource,
+) -> HeaderEvidence {
+    if source != EnrichmentSource::Manifest || atom.impl_header_paths.is_empty() {
+        return HeaderEvidence::Compatible;
+    }
+    let Some(segment) = impl_segment(&c.qualified_name) else {
+        return HeaderEvidence::Compatible;
+    };
+    let named: HashSet<&str> = segment.paths.iter().copied().collect();
+    if !atom
+        .impl_header_paths
+        .iter()
+        .all(|path| named.contains(path.as_str()))
+    {
+        return HeaderEvidence::Contradicted;
+    }
+    let exact = atom.impl_header_complete
+        && segment.path_only
+        && segment
+            .paths
+            .iter()
+            .copied()
+            .eq(atom.impl_header_paths.iter().map(String::as_str));
+    if exact {
+        HeaderEvidence::Exact
+    } else {
+        HeaderEvidence::Compatible
+    }
+}
+
+/// `true` when the candidate's impl segment is a trait impl (`... for ...`).
+/// Coherence allows one impl of a trait (with given type arguments) for a
+/// given self type, and `rust_parser` drops the header of a method whose name
+/// repeats under the same header in its file (`cfg`-split variants), so an
+/// [`HeaderEvidence::Exact`] header identifies a trait-impl method on its
+/// own. Inherent impls of one type can be split across blocks, so they still
+/// need the span check.
+fn is_trait_impl_segment(c: &CharonFunInfo) -> bool {
+    last_impl_block(&c.qualified_name).is_some_and(|content| content.contains(" for "))
 }
 
 /// Extract the bare self-type name from an atom display name:
@@ -770,7 +893,14 @@ enum ResolveOutcome<'a> {
     NoMatch,
 }
 
-/// Validate a lone candidate against the atom's file path and span.
+/// Validate a lone candidate against the atom's file path, impl header and
+/// span.
+///
+/// The [impl-header evidence](header_evidence) decides first when it can: a
+/// contradicted candidate is rejected, and an exactly matching trait-impl
+/// candidate from the manifest is accepted without the span check (its lines
+/// may come from a patched copy of the source). Otherwise the span must
+/// overlap as before.
 ///
 /// This prevents two mis-assignment patterns:
 /// 1. Cross-file collisions (e.g. `subtle::{impl}::from` assigned to every
@@ -811,6 +941,15 @@ fn validate_single_candidate<'a>(
     if !in_atom_file(c, normalize_source_path(&atom.code_path)) {
         return ResolveOutcome::NoMatch;
     }
+    // The impl header names the impl without line numbers: a contradicting
+    // header rejects the candidate, and an exact trait-impl header accepts it
+    // even when the spans disagree (Charon ran on patched source). Only
+    // manifest candidates carry header evidence (see `header_evidence`).
+    match header_evidence(c, atom, source) {
+        HeaderEvidence::Contradicted => return ResolveOutcome::NoMatch,
+        HeaderEvidence::Exact if is_trait_impl_segment(c) => return ResolveOutcome::Match(c),
+        HeaderEvidence::Exact | HeaderEvidence::Compatible => {}
+    }
     // Compare spans only when both the atom and the candidate carry usable
     // line numbers (`span_overlap` returns `None` otherwise), so a span-less
     // compiler-generated item is still accepted on the file-path match alone
@@ -834,7 +973,10 @@ fn validate_single_candidate<'a>(
 ///    restrict to those candidates;
 /// 3. **dedup**: survivors agreeing on `(def_id, qualified_name)` collapse to
 ///    one (Manifest loop helpers share their parent's `def_id`);
-/// 4. **span**: among the rest, the strict-maximum positive overlap wins.
+/// 4. **impl header**: drop the candidates whose impl segment contradicts
+///    the atom's impl header; when every candidate is contradicted the result
+///    is NoMatch (see [`header_evidence`]);
+/// 5. **span**: among the rest, the strict-maximum positive overlap wins.
 ///
 /// A single survivor still goes through [`validate_single_candidate`]. When
 /// distinct candidates remain and the span signal cannot break the tie, the
@@ -894,6 +1036,16 @@ fn resolve_charon_candidate<'a>(
         {
             distinct.push(c);
         }
+    }
+
+    // Header stage: drop the candidates whose impl segment contradicts the
+    // atom's impl header; when every candidate is contradicted, the atom is
+    // none of them. A compatible candidate is never dropped in favor of
+    // another, even an exact one: the span decides between them. LLBC
+    // candidates are never contradicted (see `header_evidence`).
+    distinct.retain(|c| header_evidence(c, atom, source) != HeaderEvidence::Contradicted);
+    if distinct.is_empty() {
+        return ResolveOutcome::NoMatch;
     }
 
     if let [single] = distinct.as_slice() {
@@ -1762,6 +1914,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -1842,6 +1996,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -1926,6 +2082,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2009,6 +2167,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2077,6 +2237,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2178,6 +2340,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2279,6 +2443,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
         atoms.insert(
@@ -2307,6 +2473,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2361,6 +2529,8 @@ mod tests {
             is_public_api: None,
             charon_def_id: None,
             charon_version: None,
+            impl_header_paths: Vec::new(),
+            impl_header_complete: false,
         };
 
         let json = serde_json::to_value(&atom).unwrap();
@@ -2400,6 +2570,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             }
         };
 
@@ -2444,6 +2616,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2522,6 +2696,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2602,6 +2778,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2684,6 +2862,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2765,6 +2945,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2852,6 +3034,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -2900,6 +3084,8 @@ mod tests {
             is_public_api: None,
             charon_def_id: None,
             charon_version: None,
+            impl_header_paths: Vec::new(),
+            impl_header_complete: false,
         }
     }
 
@@ -3018,6 +3204,465 @@ mod tests {
                 _ => panic!("expected a unique match for {display} at {lines:?}"),
             }
         }
+    }
+
+    /// An atom in `src/lib.rs` with the given impl-header paths, in source
+    /// order.
+    fn header_atom(lines: (usize, usize), header: &[&str]) -> crate::AtomWithLines {
+        let mut atom = test_atom();
+        atom.display_name = "Error::from".to_string();
+        atom.code_path = "src/lib.rs".to_string();
+        atom.code_text = crate::CodeTextInfo {
+            lines_start: lines.0,
+            lines_end: lines.1,
+        };
+        atom.impl_header_paths = header.iter().map(|p| p.to_string()).collect();
+        atom.impl_header_complete = true;
+        atom
+    }
+
+    /// The SPQR collision (probe-rust#39): Charon ran on a patched `lib.rs`
+    /// whose lines are 8 below the indexed source, so the manifest spans of
+    /// the three `From<_> for Error` impls do not match the atoms. Before the
+    /// header stage, `From<serialize::Error>` (139-141) overlapped def 60 by
+    /// one line and took it. The header names each impl without lines.
+    #[test]
+    fn test_resolve_multi_candidate_by_impl_header_with_shifted_spans() {
+        let candidates = vec![
+            candidate(
+                60,
+                "spqr::{impl core::convert::From<spqr::encoding::EncodingError> for spqr::Error}::from",
+                "src/lib.rs",
+                (141, 143),
+            ),
+            candidate(
+                62,
+                "spqr::{impl core::convert::From<spqr::authenticator::Error> for spqr::Error}::from",
+                "src/lib.rs",
+                (153, 155),
+            ),
+        ];
+        let encoding = header_atom(
+            (133, 135),
+            &[
+                "core::convert::From",
+                "spqr::encoding::EncodingError",
+                "spqr::Error",
+            ],
+        );
+        let authenticator = header_atom(
+            (145, 147),
+            &[
+                "core::convert::From",
+                "spqr::authenticator::Error",
+                "spqr::Error",
+            ],
+        );
+        let serialize = header_atom(
+            (139, 141),
+            &[
+                "core::convert::From",
+                "spqr::serialize::Error",
+                "spqr::Error",
+            ],
+        );
+
+        for (atom, want) in [(&encoding, 60), (&authenticator, 62)] {
+            match resolve_charon_candidate(&candidates, atom, EnrichmentSource::Manifest) {
+                ResolveOutcome::Match(c) => assert_eq!(c.def_id, want),
+                _ => panic!("expected def {want}"),
+            }
+        }
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &serialize, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// A lone candidate: a contradicting header rejects it even when the
+    /// spans overlap; an exact trait-impl header from the manifest accepts it
+    /// even when the spans are disjoint; an exact inherent-impl header still
+    /// needs the span check, because one type can have several inherent impl
+    /// blocks.
+    #[test]
+    fn test_resolve_single_candidate_impl_header() {
+        let trait_impl = [candidate(
+            60,
+            "spqr::{impl core::convert::From<spqr::encoding::EncodingError> for spqr::Error}::from",
+            "src/lib.rs",
+            (141, 143),
+        )];
+        let contradicted = header_atom(
+            (139, 141),
+            &[
+                "core::convert::From",
+                "spqr::serialize::Error",
+                "spqr::Error",
+            ],
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&trait_impl, &contradicted, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+        let exact = header_atom(
+            (133, 135),
+            &[
+                "core::convert::From",
+                "spqr::encoding::EncodingError",
+                "spqr::Error",
+            ],
+        );
+        assert_eq!(
+            header_evidence(&trait_impl[0], &exact, EnrichmentSource::Manifest),
+            HeaderEvidence::Exact
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&trait_impl, &exact, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 60
+        ));
+
+        let inherent = [candidate(
+            7,
+            "spqr::{spqr::SecretOutput}::secret",
+            "src/lib.rs",
+            (160, 165),
+        )];
+        let inherent_atom = header_atom((150, 155), &["spqr::SecretOutput"]);
+        assert!(matches!(
+            resolve_charon_candidate(&inherent, &inherent_atom, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+        let inherent_atom = header_atom((160, 165), &["spqr::SecretOutput"]);
+        assert!(matches!(
+            resolve_charon_candidate(&inherent, &inherent_atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 7
+        ));
+    }
+
+    /// Without typed impl segments (legacy `{impl Trait}`), every candidate
+    /// is compatible and the span stage decides as before.
+    #[test]
+    fn test_resolve_untyped_impl_segment_falls_back_to_span() {
+        let candidates = vec![
+            candidate(1, "c::m::{impl c::T}::conv", "src/lib.rs", (10, 12)),
+            candidate(2, "c::m::{impl c::T}::conv", "src/lib.rs", (20, 22)),
+        ];
+        let atom = header_atom((20, 22), &["c::T", "c::m::Alpha"]);
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Match(c) if c.def_id == 2
+        ));
+    }
+
+    /// A lone sibling impl that differs only in a primitive argument is
+    /// compatible with the header (`u8` and `i32` are not paths) but not
+    /// exact, so the span still decides: Aeneas may have left the atom's own
+    /// impl out.
+    #[test]
+    fn test_resolve_single_candidate_primitive_sibling_needs_span() {
+        let sibling = [candidate(
+            105,
+            "c::address::{impl core::convert::TryFrom<i32> for c::address::DeviceId}::try_from",
+            "src/lib.rs",
+            (748, 750),
+        )];
+        // The atom is `impl TryFrom<u8> for DeviceId`: `u8` is a path to
+        // `syn` but no SCIP type, so the header is not complete.
+        let mut atom = header_atom(
+            (741, 743),
+            &["core::convert::TryFrom", "c::address::DeviceId"],
+        );
+        atom.impl_header_complete = false;
+        assert!(matches!(
+            resolve_charon_candidate(&sibling, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+        // The same pair with overlapping spans still matches, as before.
+        atom.code_text = crate::CodeTextInfo {
+            lines_start: 748,
+            lines_end: 750,
+        };
+        assert!(matches!(
+            resolve_charon_candidate(&sibling, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 105
+        ));
+    }
+
+    /// The manifest renders every type argument, so a candidate that lacks
+    /// a header path is a different impl. Here the spans are shifted (Charon
+    /// ran on patched source) and overlap the wrong impl `From<Foo>`, which
+    /// lacks `Wrapper`: it is contradicted and dropped, and the exact impl
+    /// matches without the span.
+    #[test]
+    fn test_resolve_manifest_missing_header_path_contradicts() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::{impl core::convert::From<c::Wrapper<c::Foo>> for c::X}::from",
+                "src/lib.rs",
+                (30, 32),
+            ),
+            candidate(
+                2,
+                "c::{impl core::convert::From<c::Foo> for c::X}::from",
+                "src/lib.rs",
+                (20, 22),
+            ),
+        ];
+        let mut atom = header_atom(
+            (20, 22),
+            &["core::convert::From", "c::Wrapper", "c::Foo", "c::X"],
+        );
+        atom.display_name = "X::from".to_string();
+        assert_eq!(
+            header_evidence(&candidates[1], &atom, EnrichmentSource::Manifest),
+            HeaderEvidence::Contradicted
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 1
+        ));
+    }
+
+    /// Exactness compares the paths in order, repeats included: a segment
+    /// that names `Error` twice is not exactly a header that names it once.
+    #[test]
+    fn test_header_evidence_exact_counts_repeats() {
+        let c = candidate(
+            1,
+            "c::{impl core::convert::From<c::Error> for c::Error}::from",
+            "src/lib.rs",
+            (1, 3),
+        );
+        let twice = header_atom((50, 52), &["core::convert::From", "c::Error", "c::Error"]);
+        assert_eq!(
+            header_evidence(&c, &twice, EnrichmentSource::Manifest),
+            HeaderEvidence::Exact
+        );
+        let once = header_atom((50, 52), &["core::convert::From", "c::Error"]);
+        assert_eq!(
+            header_evidence(&c, &once, EnrichmentSource::Manifest),
+            HeaderEvidence::Compatible
+        );
+    }
+
+    /// An exact candidate does not drop a compatible sibling in the
+    /// multi-candidate stage: both go on to the span stage, which decides.
+    /// Candidate 1 names exactly the atom's header; candidate 2 names it plus
+    /// `Box` and the `Global` that Charon adds, so it is only compatible. The
+    /// span overlaps candidate 2, and the span wins.
+    #[test]
+    fn test_resolve_exact_candidate_does_not_drop_compatible_sibling() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::{impl core::convert::From<c::Foo> for c::X}::from",
+                "src/lib.rs",
+                (20, 22),
+            ),
+            candidate(
+                2,
+                "c::{impl core::convert::From<alloc::boxed::Box<c::Foo, alloc::alloc::Global>> for c::X}::from",
+                "src/lib.rs",
+                (10, 12),
+            ),
+        ];
+        let mut atom = header_atom((10, 12), &["core::convert::From", "c::Foo", "c::X"]);
+        atom.display_name = "X::from".to_string();
+        assert_eq!(
+            header_evidence(&candidates[0], &atom, EnrichmentSource::Manifest),
+            HeaderEvidence::Exact
+        );
+        assert_eq!(
+            header_evidence(&candidates[1], &atom, EnrichmentSource::Manifest),
+            HeaderEvidence::Compatible
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 2
+        ));
+    }
+
+    /// Exactness compares paths in order: `Tr<A, B> for X` is not exactly
+    /// `Tr<B, A> for X`, so a lone swapped sibling still needs the span.
+    #[test]
+    fn test_resolve_single_candidate_swapped_arguments_need_span() {
+        let sibling = [candidate(
+            9,
+            "c::{impl c::Tr<c::B, c::A> for c::X}::f",
+            "src/lib.rs",
+            (20, 22),
+        )];
+        let mut atom = header_atom((10, 12), &["c::Tr", "c::A", "c::B", "c::X"]);
+        atom.display_name = "X::f".to_string();
+        assert_eq!(
+            header_evidence(&sibling[0], &atom, EnrichmentSource::Manifest),
+            HeaderEvidence::Compatible
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&sibling, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// The LLBC rendering drops an ADT's generic arguments, so an LLBC
+    /// segment is no evidence: `impl Tr for W` and `impl Tr for W<bool>`
+    /// (with `struct W<T = u8>`) both render `{c::Tr for c::W}`. A lone LLBC
+    /// candidate still needs the span.
+    #[test]
+    fn test_resolve_single_llbc_candidate_exact_needs_span() {
+        let sibling = [candidate(
+            9,
+            "c::{c::Tr for c::W}::f",
+            "src/lib.rs",
+            (20, 22),
+        )];
+        let mut atom = header_atom((10, 12), &["c::Tr", "c::W"]);
+        atom.display_name = "W::f".to_string();
+        assert_eq!(
+            header_evidence(&sibling[0], &atom, EnrichmentSource::Llbc),
+            HeaderEvidence::Compatible
+        );
+        assert!(matches!(
+            resolve_charon_candidate(&sibling, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::NoMatch
+        ));
+    }
+
+    /// On the LLBC source the atom's own impl can render as a subset of its
+    /// header while a sibling names every header path. LLBC segments are no
+    /// evidence, so the header stage keeps both, and the span picks the
+    /// atom's own impl.
+    #[test]
+    fn test_resolve_llbc_subset_candidate_kept_beside_superset_sibling() {
+        // `impl PartialEq<Wrapper<Foo>> for Wrapper<Foo>` (the atom) and
+        // `impl PartialEq<Foo> for Wrapper<Foo>`.
+        let candidates = vec![
+            candidate(
+                1,
+                "c::{core::cmp::PartialEq<c::Wrapper> for c::Wrapper}::eq",
+                "src/lib.rs",
+                (10, 12),
+            ),
+            candidate(
+                2,
+                "c::{core::cmp::PartialEq<c::Foo> for c::Wrapper}::eq",
+                "src/lib.rs",
+                (20, 22),
+            ),
+        ];
+        let mut atom = header_atom(
+            (10, 12),
+            &[
+                "core::cmp::PartialEq",
+                "c::Wrapper",
+                "c::Foo",
+                "c::Wrapper",
+                "c::Foo",
+            ],
+        );
+        atom.display_name = "Wrapper::eq".to_string();
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Match(c) if c.def_id == 1
+        ));
+    }
+
+    /// The LLBC rendering drops `Foo` from `Wrapper<Foo>` and adds the
+    /// associated type `Output = Bar`, so each side names a path the other
+    /// lacks. LLBC segments are no evidence, so the lone candidate is still
+    /// accepted on its span.
+    #[test]
+    fn test_resolve_llbc_candidate_with_associated_type_not_contradicted() {
+        let candidates = [candidate(
+            3,
+            "c::{core::ops::arith::Mul<c::Wrapper, c::Bar> for c::X}::mul",
+            "src/lib.rs",
+            (10, 12),
+        )];
+        let mut atom = header_atom(
+            (10, 12),
+            &["core::ops::arith::Mul", "c::Wrapper", "c::Foo", "c::X"],
+        );
+        atom.display_name = "X::mul".to_string();
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Llbc),
+            ResolveOutcome::Match(c) if c.def_id == 3
+        ));
+    }
+
+    /// `impl From<[u8; core::mem::size_of::<Foo>()]> for X`: SCIP sees
+    /// `Foo` in the const expression, but the manifest renders the evaluated
+    /// length, so the header would contradict the correct candidate and a
+    /// shifted `From<(Foo, u8)>` sibling would win. `rust_parser` drops such a
+    /// header, and with no header paths the span picks the correct impl.
+    #[test]
+    fn test_resolve_const_expression_header_left_to_span() {
+        let candidates = vec![
+            candidate(
+                1,
+                "c::{impl core::convert::From<[u8; 4usize]> for c::X}::from",
+                "src/lib.rs",
+                (14, 24),
+            ),
+            candidate(
+                2,
+                "c::{impl core::convert::From<(c::Foo, u8)> for c::X}::from",
+                "src/lib.rs",
+                (9, 11),
+            ),
+            candidate(
+                3,
+                "c::{impl core::convert::From<(c::Foo, u16)> for c::X}::from",
+                "src/lib.rs",
+                (27, 29),
+            ),
+        ];
+        let mut atom = header_atom((9, 19), &[]);
+        atom.impl_header_complete = false;
+        atom.display_name = "X::from".to_string();
+        assert!(matches!(
+            resolve_charon_candidate(&candidates, &atom, EnrichmentSource::Manifest),
+            ResolveOutcome::Match(c) if c.def_id == 1
+        ));
+    }
+
+    #[test]
+    fn test_impl_segment() {
+        fn parse(q: &str) -> Option<(Vec<&str>, bool)> {
+            impl_segment(q).map(|seg| (seg.paths, seg.path_only))
+        }
+        assert_eq!(
+            parse("spqr::{impl core::convert::TryFrom<u8, alloc::string::String> for spqr::proto::Version}::try_from"),
+            Some((
+                vec!["core::convert::TryFrom", "alloc::string::String", "spqr::proto::Version"],
+                false
+            ))
+        );
+        assert_eq!(
+            parse("spqr::{impl core::convert::From<spqr::Error> for spqr::Error}::from"),
+            Some((
+                vec!["core::convert::From", "spqr::Error", "spqr::Error"],
+                true
+            ))
+        );
+        assert_eq!(
+            parse("c::m::{core::ops::arith::Mul<&'0 (c::s::Scalar)> for &'1 (c::e::Point)}::mul"),
+            Some((
+                vec!["core::ops::arith::Mul", "c::s::Scalar", "c::e::Point"],
+                false
+            ))
+        );
+        assert_eq!(
+            parse("spqr::chain::{spqr::chain::Chain}::from_pb"),
+            Some((vec!["spqr::chain::Chain"], true))
+        );
+        assert_eq!(
+            parse("c::m::{c::T<?> for c::m::X}::f").map(|p| p.1),
+            Some(false)
+        );
+        assert_eq!(parse("c::m::{impl c::T}::conv"), None);
+        assert_eq!(parse("c::m::free_fn"), None);
     }
 
     /// Self type alone resolves a collision even when spans are unusable —

@@ -20,7 +20,7 @@ pub use error::{ProbeError, ProbeResult};
 
 use constants::{
     is_definition, is_external_function_symbol, is_function_like_kind, PROBE_URI_PREFIX,
-    SCIP_SYMBOL_PREFIX, TYPE_CONTEXT_LOOKBACK_LINES,
+    SCIP_KIND_TYPE_ALIAS, SCIP_SYMBOL_PREFIX, TYPE_CONTEXT_LOOKBACK_LINES,
 };
 
 // =============================================================================
@@ -296,6 +296,24 @@ pub struct AtomWithLines {
         default
     )]
     pub charon_version: Option<String>,
+    /// For a method of an `impl` block: the Rust paths (`krate::module::Type`)
+    /// of the trait and types that SCIP resolves in the impl header (trait
+    /// path and self type), in source order, one entry per reference. Type
+    /// parameters and primitive types are left out. Empty for every other
+    /// function, and for a method whose impl header gives no usable evidence:
+    /// the method name repeats under the header in its file, or the header
+    /// holds a non-literal const expression, a qualified path, a type alias
+    /// defined in the workspace, or a type whose crate is unknown (KB P20).
+    /// Internal: used to tell same-named Charon candidates apart without line
+    /// numbers (see `charon_names::resolve_charon_candidate`), never emitted.
+    #[serde(skip)]
+    pub impl_header_paths: Vec<String>,
+    /// `true` when `impl_header_paths` is the whole impl header: the header is
+    /// made of type paths only, and SCIP resolved every one of them to a
+    /// trait or type (no primitive, type parameter, reference, ...).
+    /// Internal, never emitted.
+    #[serde(skip)]
+    pub impl_header_complete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -533,6 +551,261 @@ fn collect_self_types(scip_data: &ScipIndex) -> HashMap<String, Vec<String>> {
         }
     }
     enclosing_to_self_types
+}
+
+// =============================================================================
+// Impl-header symbols
+// =============================================================================
+
+/// One SCIP reference to a trait or type, rendered as a Rust path.
+#[derive(Debug, Clone)]
+struct HeaderSymbolRef {
+    /// 1-based line and 0-based column where the reference starts.
+    start: (usize, usize),
+    /// 1-based line and 0-based column where the reference ends.
+    end: (usize, usize),
+    /// `None` when the crate segment is unknown (see [`CrateNames`]) or the
+    /// reference names a type alias defined in the workspace.
+    path: Option<String>,
+}
+
+/// Per file, the SCIP references to traits and types, rendered as Rust paths.
+/// Built once per index by [`build_impl_header_symbols`]; queried with the
+/// impl-header ranges from `rust_parser` to fill
+/// [`AtomWithLines::impl_header_paths`].
+#[derive(Debug, Default)]
+pub struct ImplHeaderSymbols {
+    by_file: HashMap<String, Vec<HeaderSymbolRef>>,
+}
+
+impl ImplHeaderSymbols {
+    /// Paths of the references in `file` that lie inside one of `ranges`, in
+    /// source order, one entry per reference. Empty when one of these
+    /// references has an unknown crate segment or names a type alias defined
+    /// in the workspace: the header could then contradict the right
+    /// candidate.
+    #[must_use]
+    pub fn paths_in(&self, file: &str, ranges: &[rust_parser::SourceRange]) -> Vec<String> {
+        let Some(refs) = self.by_file.get(file) else {
+            return Vec::new();
+        };
+        let mut inside: Vec<&HeaderSymbolRef> = refs
+            .iter()
+            .filter(|r| ranges.iter().any(|range| range.contains(r.start, r.end)))
+            .collect();
+        inside.sort_by_key(|r| r.start);
+        inside
+            .into_iter()
+            .map(|r| r.path.clone())
+            .collect::<Option<Vec<String>>>()
+            .unwrap_or_default()
+    }
+}
+
+/// Collect the trait and type references of every document in `scip`.
+///
+/// rust-analyzer resolves each reference to the defining symbol, so a type
+/// named through a re-export alias (`pub use serialize::Error as
+/// SerializationError`) still yields its defining path
+/// (`spqr::serialize::Error`), the same path Charon prints. A reference to a
+/// type alias (`type X = ...;`) defined in the indexed workspace gives no
+/// path, and [`ImplHeaderSymbols::paths_in`] then drops the whole header. Charon
+/// expands the alias, and the expansion can differ from the alias arguments:
+/// with `type Alias<T> = <T as HasType>::Item`, Charon prints the bound type
+/// of `Alias<Marker>`, not `Marker`.
+///
+/// SCIP names a crate by its Cargo package and version; Charon prints the
+/// crate name. `crate_names` gives the crate name of each package (see
+/// [`crate_names`]).
+#[must_use]
+pub fn build_impl_header_symbols(scip: &ScipIndex, crate_names: &CrateNames) -> ImplHeaderSymbols {
+    let aliases: HashSet<&str> = scip
+        .documents
+        .iter()
+        .flat_map(|doc| &doc.symbols)
+        .filter(|sym| sym.kind == SCIP_KIND_TYPE_ALIAS)
+        .map(|sym| sym.symbol.as_str())
+        .collect();
+
+    let mut by_file: HashMap<String, Vec<HeaderSymbolRef>> = HashMap::new();
+    for doc in &scip.documents {
+        for occ in &doc.occurrences {
+            if is_definition(occ.symbol_roles) {
+                continue;
+            }
+            let path = if aliases.contains(occ.symbol.as_str()) {
+                None
+            } else {
+                let Some(path) = scip_type_symbol_to_path(&occ.symbol, crate_names) else {
+                    continue;
+                };
+                path
+            };
+            let Some((start, end)) = occurrence_bounds(&occ.range) else {
+                continue;
+            };
+            by_file
+                .entry(doc.relative_path.clone())
+                .or_default()
+                .push(HeaderSymbolRef { start, end, path });
+        }
+    }
+    ImplHeaderSymbols { by_file }
+}
+
+/// Render a SCIP global symbol for a trait or type as a Rust path, e.g.
+/// `rust-analyzer cargo spqr 1.6.0 serialize/Error#` becomes
+/// `Some(Some("spqr::serialize::Error"))`. The crate segment comes from
+/// `crate_names`; the inner `None` means it is unknown. The outer `None` is
+/// for locals and for every other descriptor: namespaces, functions, fields,
+/// and impl-scoped names such as type parameters.
+fn scip_type_symbol_to_path(symbol: &str, crate_names: &CrateNames) -> Option<Option<String>> {
+    if symbol.starts_with("local ") {
+        return None;
+    }
+    let mut fields = symbol.splitn(5, ' ');
+    let _scheme = fields.next()?;
+    let _manager = fields.next()?;
+    let package = fields.next()?;
+    let version = fields.next()?;
+    let descriptors = fields.next()?;
+    let body = descriptors.strip_suffix('#')?;
+    if body.is_empty() || body.contains(['#', '[', '(', '.', '!', '`', ' ']) {
+        return None;
+    }
+    if body.split('/').any(str::is_empty) {
+        return None;
+    }
+    Some(
+        crate_names
+            .crate_name(package, version)
+            .map(|krate| format!("{krate}::{}", body.replace('/', "::"))),
+    )
+}
+
+/// The crate name of each Cargo package, as Charon prints it. Built by
+/// [`crate_names`] from `cargo metadata`.
+#[derive(Debug, Default)]
+pub struct CrateNames {
+    /// Keyed by package name and version. `None` when the lib and bin
+    /// targets of the package build crates with different names: a SCIP
+    /// symbol names the package, not the target, so the crate is unknown.
+    /// `None` also when two packages from different sources share the name
+    /// and version but disagree.
+    by_version: HashMap<(String, String), Option<String>>,
+    /// The same keyed by package name only, for a SCIP version that is not in
+    /// `by_version`. `None` also when two versions disagree.
+    by_name: HashMap<String, Option<String>>,
+}
+
+impl CrateNames {
+    /// The crate name of `package` at `version`, `None` when it is unknown.
+    /// A package absent from the metadata is read with `-` as `_`.
+    fn crate_name(&self, package: &str, version: &str) -> Option<String> {
+        self.by_version
+            .get(&(package.to_string(), version.to_string()))
+            .or_else(|| self.by_name.get(package))
+            .cloned()
+            .unwrap_or_else(|| Some(package.replace('-', "_")))
+    }
+}
+
+/// The crate names of the packages of `project_path` and its dependencies
+/// (see [`CrateNames`]). A package can rename its lib target (`[lib] name =
+/// "md5"` in package `md-5`) or build only a bin with another name. Reads
+/// `cargo metadata --offline`, falling back to `cargo metadata --no-deps`
+/// (workspace packages only) when the dependency graph cannot be resolved
+/// offline. Empty when both fail: every package is then read with `-` as `_`.
+#[must_use]
+pub fn crate_names(project_path: &Path) -> CrateNames {
+    let run = |extra: &str| {
+        let output = std::process::Command::new("cargo")
+            .args(["metadata", extra, "--format-version", "1"])
+            .current_dir(project_path)
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| crate_names_from_metadata(&String::from_utf8_lossy(&output.stdout)))
+    };
+    run("--offline")
+        .or_else(|| run("--no-deps"))
+        .unwrap_or_default()
+}
+
+/// The [`CrateNames`] of `cargo metadata` JSON. Only lib and bin targets
+/// count: Charon does not translate tests, examples, benches or build
+/// scripts. A target's crate name is its name with `-` read as `_`.
+fn crate_names_from_metadata(json: &str) -> CrateNames {
+    const KINDS: &[&str] = &[
+        "lib",
+        "rlib",
+        "dylib",
+        "cdylib",
+        "staticlib",
+        "proc-macro",
+        "bin",
+    ];
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(json) else {
+        return CrateNames::default();
+    };
+    let mut names = CrateNames::default();
+    for package in root["packages"].as_array().into_iter().flatten() {
+        let (Some(package_name), Some(version)) =
+            (package["name"].as_str(), package["version"].as_str())
+        else {
+            continue;
+        };
+        let crates: BTreeSet<String> = package["targets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|t| {
+                t["kind"].as_array().is_some_and(|kinds| {
+                    kinds
+                        .iter()
+                        .any(|k| k.as_str().is_some_and(|k| KINDS.contains(&k)))
+                })
+            })
+            .filter_map(|t| t["name"].as_str())
+            .map(|name| name.replace('-', "_"))
+            .collect();
+        let name = match crates.len() {
+            0 => continue,
+            1 => crates.into_iter().next(),
+            _ => None,
+        };
+        let merge = |known: &mut Option<String>| {
+            if *known != name {
+                *known = None;
+            }
+        };
+        names
+            .by_name
+            .entry(package_name.to_string())
+            .and_modify(merge)
+            .or_insert_with(|| name.clone());
+        names
+            .by_version
+            .entry((package_name.to_string(), version.to_string()))
+            .and_modify(merge)
+            .or_insert(name);
+    }
+    names
+}
+
+/// Start and end of a SCIP occurrence range (`[line, start_col, end_col]` or
+/// `[start_line, start_col, end_line, end_col]`, all 0-based) as 1-based line
+/// and 0-based column pairs.
+fn occurrence_bounds(range: &[i32]) -> Option<((usize, usize), (usize, usize))> {
+    let at = |i: usize| range.get(i).map(|v| (*v).max(0) as usize);
+    match range.len() {
+        3 => Some(((at(0)? + 1, at(1)?), (at(0)? + 1, at(2)?))),
+        4 => Some(((at(0)? + 1, at(1)?), (at(2)? + 1, at(3)?))),
+        _ => None,
+    }
 }
 
 /// Build a call graph from SCIP data.
@@ -969,6 +1242,7 @@ fn symbol_to_code_name_full(
 pub fn convert_to_atoms_with_parsed_spans(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
+    header_symbols: Option<&ImplHeaderSymbols>,
     project_root: &Path,
     with_locations: bool,
 ) -> Vec<AtomWithLines> {
@@ -1004,6 +1278,7 @@ pub fn convert_to_atoms_with_parsed_spans(
         symbol_to_display_name,
         Some(&span_map),
         Some(&chain_facts),
+        header_symbols,
         with_locations,
     );
     // A failed span-map lookup silently degrades the atom (`lines-end` falls
@@ -1032,6 +1307,7 @@ fn convert_to_atoms_with_lines_internal(
     symbol_to_display_name: &HashMap<String, String>,
     span_map: Option<&HashMap<(String, String, usize), rust_parser::SpanInfo>>,
     chain_facts: Option<&mod_chain::ModChainFacts>,
+    header_symbols: Option<&ImplHeaderSymbols>,
     with_locations: bool,
 ) -> (Vec<AtomWithLines>, usize) {
     // === Phase 1: Compute line ranges and base code_names for all nodes ===
@@ -1345,6 +1621,15 @@ fn convert_to_atoms_with_lines_internal(
             };
             let is_unmounted =
                 chain_facts.is_some_and(|f| f.unmounted.contains(&data.node.relative_path));
+            let impl_header_paths = match (header_symbols, span_info) {
+                (Some(symbols), Some(info)) if !info.impl_header.is_empty() => {
+                    symbols.paths_in(&data.node.relative_path, &info.impl_header)
+                }
+                _ => Vec::new(),
+            };
+            let impl_header_complete = !impl_header_paths.is_empty()
+                && span_info.and_then(|s| s.impl_header_path_count)
+                    == Some(impl_header_paths.len());
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 code_name,
@@ -1369,6 +1654,8 @@ fn convert_to_atoms_with_lines_internal(
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths,
+                impl_header_complete,
             }
         })
         .collect();
@@ -1482,6 +1769,8 @@ pub fn add_external_stubs(atoms_dict: &mut BTreeMap<String, AtomWithLines>) -> u
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
     }
@@ -1597,6 +1886,8 @@ mod tests {
                 is_public_api: None,
                 charon_def_id: None,
                 charon_version: None,
+                impl_header_paths: Vec::new(),
+                impl_header_complete: false,
             },
         );
 
@@ -1914,8 +2205,14 @@ mod tests {
             }
 
             // Now convert to atoms to test the disambiguation path
-            let (atoms, _span_misses) =
-                convert_to_atoms_with_lines_internal(&graph, &display_names, None, None, false);
+            let (atoms, _span_misses) = convert_to_atoms_with_lines_internal(
+                &graph,
+                &display_names,
+                None,
+                None,
+                None,
+                false,
+            );
 
             let caller_atom = atoms.iter().find(|a| a.display_name == "caller");
             if let Some(atom) = caller_atom {
@@ -2033,6 +2330,8 @@ mod tests {
             is_public_api: None,
             charon_def_id: None,
             charon_version: None,
+            impl_header_paths: Vec::new(),
+            impl_header_complete: false,
         }
     }
 
@@ -2134,12 +2433,13 @@ mod tests {
             &HashMap::new(),
             Some(&empty_span_map),
             None,
+            None,
             false,
         );
         assert_eq!(misses, 2);
 
         let (_, misses_without_map) =
-            convert_to_atoms_with_lines_internal(&graph, &HashMap::new(), None, None, false);
+            convert_to_atoms_with_lines_internal(&graph, &HashMap::new(), None, None, None, false);
         assert_eq!(misses_without_map, 0);
     }
 
@@ -2196,7 +2496,7 @@ mod tests {
             graph.insert(sym.to_string(), mk_node(sym, name, path, line0));
         }
 
-        let atoms = convert_to_atoms_with_parsed_spans(&graph, &HashMap::new(), root, false);
+        let atoms = convert_to_atoms_with_parsed_spans(&graph, &HashMap::new(), None, root, false);
         let by = |n: &str| atoms.iter().find(|a| a.display_name == n).unwrap();
 
         let own = by("own_gate");
@@ -2227,5 +2527,366 @@ mod tests {
         let dead = by("dead");
         assert!(dead.is_unmounted);
         assert_eq!(dead.cfg, None, "unmounted files carry no chain gate");
+    }
+
+    /// End-to-end over the parsed-spans path with SCIP header symbols: a
+    /// method of a path-only trait impl gets its resolved header paths and a
+    /// complete header; a method of `impl TryFrom<u8> for Error` gets the
+    /// resolved paths, but `u8` resolves to no type, so its header is not
+    /// complete.
+    #[test]
+    fn test_convert_with_impl_header_symbols() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"x\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "mod serialize { pub struct Error; }\n\
+             pub struct Error;\n\
+             impl From<serialize::Error> for Error {\n\
+             \x20   fn from(_v: serialize::Error) -> Self { Error }\n\
+             }\n\
+             impl TryFrom<u8> for Error {\n\
+             \x20   type Error = ();\n\
+             \x20   fn try_from(_v: u8) -> Result<Self, ()> { Ok(Error) }\n\
+             }\n",
+        )
+        .unwrap();
+
+        let core = "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core";
+        let occ = |sym: String, line: i32, start: i32, end: i32| Occurrence {
+            range: vec![line, start, end],
+            symbol: sym,
+            symbol_roles: None,
+        };
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "src/lib.rs".into(),
+                occurrences: vec![
+                    occ(format!("{core} convert/From#"), 2, 5, 9),
+                    occ("rust-analyzer cargo x 0.1.0 serialize/".into(), 2, 10, 19),
+                    occ(
+                        "rust-analyzer cargo x 0.1.0 serialize/Error#".into(),
+                        2,
+                        21,
+                        26,
+                    ),
+                    occ("rust-analyzer cargo x 0.1.0 Error#".into(), 2, 32, 37),
+                    occ(format!("{core} convert/TryFrom#"), 5, 5, 12),
+                    occ("rust-analyzer cargo x 0.1.0 Error#".into(), 5, 21, 26),
+                ],
+                symbols: Vec::new(),
+            }],
+        };
+        // Package `x` builds the lib `xlib`, as Charon prints it.
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [{"name": "x", "version": "0.1.0",
+                "targets": [{"name": "xlib", "kind": ["lib"]}]}]}"#,
+        );
+        let symbols = build_impl_header_symbols(&scip, &crates);
+
+        let mk_node = |symbol: &str, name: &str, line0: i32| FunctionNode {
+            symbol: symbol.to_string(),
+            display_name: name.to_string(),
+            signature_text: format!("fn {}()", name),
+            relative_path: "src/lib.rs".to_string(),
+            callees: HashSet::new(),
+            range: vec![line0, 7, line0, 11],
+            self_type: None,
+            definition_type_context: Vec::new(),
+        };
+        let mut graph = HashMap::new();
+        graph.insert("s1".to_string(), mk_node("s1", "from", 3));
+        graph.insert("s2".to_string(), mk_node("s2", "try_from", 7));
+
+        let atoms = convert_to_atoms_with_parsed_spans(
+            &graph,
+            &HashMap::new(),
+            Some(&symbols),
+            root,
+            false,
+        );
+        let by = |n: &str| atoms.iter().find(|a| a.display_name == n).unwrap();
+
+        let from = by("from");
+        assert_eq!(
+            from.impl_header_paths,
+            vec![
+                "core::convert::From",
+                "xlib::serialize::Error",
+                "xlib::Error"
+            ]
+        );
+        assert!(from.impl_header_complete);
+
+        let try_from = by("try_from");
+        assert_eq!(
+            try_from.impl_header_paths,
+            vec!["core::convert::TryFrom", "xlib::Error"]
+        );
+        assert!(!try_from.impl_header_complete);
+    }
+
+    #[test]
+    fn test_occurrence_bounds() {
+        assert_eq!(occurrence_bounds(&[2, 5, 9]), Some(((3, 5), (3, 9))));
+        assert_eq!(occurrence_bounds(&[2, 5, 4, 1]), Some(((3, 5), (5, 1))));
+        assert_eq!(occurrence_bounds(&[2, 5]), None);
+    }
+
+    #[test]
+    fn test_scip_type_symbol_to_path() {
+        let none = CrateNames::default();
+        let path = |symbol: &str, crates: &CrateNames| scip_type_symbol_to_path(symbol, crates);
+        assert_eq!(
+            path("rust-analyzer cargo spqr 1.6.0 serialize/Error#", &none),
+            Some(Some("spqr::serialize::Error".to_string()))
+        );
+        assert_eq!(
+            path(
+                "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#",
+                &none
+            ),
+            Some(Some("core::convert::From".to_string()))
+        );
+        assert_eq!(
+            path(
+                "rust-analyzer cargo curve25519-dalek 4.2.0 scalar/Scalar#",
+                &none
+            ),
+            Some(Some("curve25519_dalek::scalar::Scalar".to_string()))
+        );
+        for not_a_type in [
+            "local 3",
+            "rust-analyzer cargo spqr 1.6.0 serialize/",
+            "rust-analyzer cargo spqr 1.6.0 Error#Serialization#",
+            "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]",
+            "rust-analyzer cargo spqr 1.6.0 impl#[Error][`From<SerializationError>`]from().",
+        ] {
+            assert_eq!(path(not_a_type, &none), None, "{not_a_type}");
+        }
+        // The crate segment follows the package version; an unknown crate
+        // gives an unknown path.
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [
+                {"name": "wire-pkg", "version": "1.0.0", "targets": [{"name": "wire_v1", "kind": ["lib"]}]},
+                {"name": "wire-pkg", "version": "2.0.0", "targets": [{"name": "wire_pkg", "kind": ["lib"]}]},
+                {"name": "demo-pkg", "version": "0.1.0", "targets": [{"name": "worker", "kind": ["bin"]}]},
+                {"name": "mixed", "version": "0.1.0", "targets": [{"name": "mixed", "kind": ["lib"]}, {"name": "tool", "kind": ["bin"]}]}
+            ]}"#,
+        );
+        assert_eq!(
+            path("rust-analyzer cargo wire-pkg 1.0.0 io/E#", &crates),
+            Some(Some("wire_v1::io::E".to_string()))
+        );
+        assert_eq!(
+            path("rust-analyzer cargo wire-pkg 2.0.0 io/E#", &crates),
+            Some(Some("wire_pkg::io::E".to_string()))
+        );
+        assert_eq!(
+            path("rust-analyzer cargo demo-pkg 0.1.0 X#", &crates),
+            Some(Some("worker::X".to_string()))
+        );
+        assert_eq!(
+            path("rust-analyzer cargo mixed 0.1.0 X#", &crates),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn test_crate_names_from_metadata() {
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [
+                {"name": "my-pkg", "version": "1.0.0", "targets": [{"name": "mylib", "kind": ["lib"]}, {"name": "mylib", "kind": ["bin"]}, {"name": "it", "kind": ["test"]}]},
+                {"name": "plain-pkg", "version": "1.0.0", "targets": [{"name": "plain_pkg", "kind": ["rlib"]}, {"name": "plain-pkg", "kind": ["bin"]}]},
+                {"name": "tool-pkg", "version": "1.0.0", "targets": [{"name": "tool", "kind": ["bin"]}, {"name": "build-script-build", "kind": ["custom-build"]}]},
+                {"name": "two-bins", "version": "1.0.0", "targets": [{"name": "a", "kind": ["bin"]}, {"name": "b", "kind": ["bin"]}]},
+                {"name": "wire-pkg", "version": "1.0.0", "targets": [{"name": "wire_v1", "kind": ["lib"]}]},
+                {"name": "wire-pkg", "version": "2.0.0", "targets": [{"name": "wire_pkg", "kind": ["lib"]}]},
+                {"name": "fork-pkg", "version": "1.0.0", "targets": [{"name": "fork_registry", "kind": ["lib"]}]},
+                {"name": "fork-pkg", "version": "1.0.0", "targets": [{"name": "fork_git", "kind": ["lib"]}]},
+                {"name": "same-pkg", "version": "1.0.0", "targets": [{"name": "same_pkg", "kind": ["lib"]}]},
+                {"name": "same-pkg", "version": "1.0.0", "targets": [{"name": "same_pkg", "kind": ["lib"]}]}
+            ]}"#,
+        );
+        let name = |p: &str, v: &str| crates.crate_name(p, v);
+        assert_eq!(name("my-pkg", "1.0.0").as_deref(), Some("mylib"));
+        assert_eq!(name("plain-pkg", "1.0.0").as_deref(), Some("plain_pkg"));
+        assert_eq!(name("tool-pkg", "1.0.0").as_deref(), Some("tool"));
+        assert_eq!(name("two-bins", "1.0.0"), None);
+        assert_eq!(name("wire-pkg", "1.0.0").as_deref(), Some("wire_v1"));
+        assert_eq!(name("wire-pkg", "2.0.0").as_deref(), Some("wire_pkg"));
+        // Two sources build one name and version under different crate names.
+        assert_eq!(name("fork-pkg", "1.0.0"), None);
+        assert_eq!(name("fork-pkg", "2.0.0"), None);
+        // Two sources that agree keep the name.
+        assert_eq!(name("same-pkg", "1.0.0").as_deref(), Some("same_pkg"));
+        // A version missing from the metadata: the versions disagree.
+        assert_eq!(name("wire-pkg", "3.0.0"), None);
+        // A version missing from the metadata: the package has one name.
+        assert_eq!(name("my-pkg", "9.9.9").as_deref(), Some("mylib"));
+        // A package missing from the metadata.
+        assert_eq!(name("other-pkg", "1.0.0").as_deref(), Some("other_pkg"));
+        assert_eq!(
+            crate_names_from_metadata("not json")
+                .crate_name("my-pkg", "1.0.0")
+                .as_deref(),
+            Some("my_pkg")
+        );
+    }
+
+    /// The SPQR header `impl From<serialize::Error> for Error` (line 138):
+    /// the references resolve to the defining paths, the module segment is
+    /// skipped, and only references inside the queried ranges count.
+    #[test]
+    fn test_impl_header_symbols_paths_in() {
+        let from =
+            "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#";
+        let module = "rust-analyzer cargo spqr 1.6.0 serialize/";
+        let ser_error = "rust-analyzer cargo spqr 1.6.0 serialize/Error#";
+        let error = "rust-analyzer cargo spqr 1.6.0 Error#";
+        let occ = |sym: &str, line: i32, start: i32, end: i32| Occurrence {
+            range: vec![line, start, end],
+            symbol: sym.into(),
+            symbol_roles: None,
+        };
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "src/lib.rs".into(),
+                // Listed out of source order: `paths_in` sorts by position.
+                occurrences: vec![
+                    occ(error, 137, 32, 37),
+                    occ(from, 137, 5, 9),
+                    occ(module, 137, 10, 19),
+                    occ(ser_error, 137, 21, 26),
+                    // Outside the header: the method's return type.
+                    occ(error, 138, 30, 35),
+                ],
+                symbols: Vec::new(),
+            }],
+        };
+        let symbols = build_impl_header_symbols(&scip, &CrateNames::default());
+        // `From<serialize::Error>` spans columns 5..27 of line 138 (1-based),
+        // the self type `Error` 32..37.
+        let header = [
+            rust_parser::SourceRange {
+                start_line: 138,
+                start_column: 5,
+                end_line: 138,
+                end_column: 27,
+            },
+            rust_parser::SourceRange {
+                start_line: 138,
+                start_column: 32,
+                end_line: 138,
+                end_column: 37,
+            },
+        ];
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &header),
+            vec![
+                "core::convert::From",
+                "spqr::serialize::Error",
+                "spqr::Error"
+            ]
+        );
+        // One entry per reference: the second line names `Error` again.
+        let two_lines = [rust_parser::SourceRange {
+            start_line: 138,
+            start_column: 0,
+            end_line: 139,
+            end_column: 40,
+        }];
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &two_lines),
+            vec![
+                "core::convert::From",
+                "spqr::serialize::Error",
+                "spqr::Error",
+                "spqr::Error"
+            ]
+        );
+        assert!(symbols.paths_in("src/other.rs", &header).is_empty());
+
+        // When `spqr` builds a lib and a bin with other names, its crate is
+        // unknown and the header gives no paths at all.
+        let crates = crate_names_from_metadata(
+            r#"{"packages": [{"name": "spqr", "version": "1.6.0", "targets": [
+                {"name": "spqr", "kind": ["lib"]}, {"name": "spqr-cli", "kind": ["bin"]}]}]}"#,
+        );
+        let symbols = build_impl_header_symbols(&scip, &crates);
+        assert!(symbols.paths_in("src/lib.rs", &header).is_empty());
+        // A header that names no `spqr` type keeps its paths, even though
+        // `spqr` types appear elsewhere in the file.
+        let trait_only = [rust_parser::SourceRange {
+            start_line: 138,
+            start_column: 5,
+            end_line: 138,
+            end_column: 9,
+        }];
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &trait_only),
+            vec!["core::convert::From"]
+        );
+    }
+
+    /// `impl From<Alias<Marker>> for X` with `type Alias<T: HasType> = <T as
+    /// HasType>::Item`: Charon prints the bound type, not `Marker`, so a
+    /// header that names a workspace alias gives no paths at all.
+    #[test]
+    fn test_impl_header_symbols_alias_drops_header() {
+        let from =
+            "rust-analyzer cargo core https://github.com/rust-lang/rust/library/core convert/From#";
+        let alias = "rust-analyzer cargo x 0.1.0 Alias#";
+        let marker = "rust-analyzer cargo x 0.1.0 Marker#";
+        let x = "rust-analyzer cargo x 0.1.0 X#";
+        let occ = |sym: &str, start: i32, end: i32| Occurrence {
+            range: vec![9, start, end],
+            symbol: sym.into(),
+            symbol_roles: None,
+        };
+        let scip = ScipIndex {
+            metadata: make_scip_metadata(),
+            documents: vec![Document {
+                language: "rust".into(),
+                relative_path: "src/lib.rs".into(),
+                occurrences: vec![
+                    occ(from, 5, 9),
+                    occ(alias, 10, 15),
+                    occ(marker, 16, 22),
+                    occ(x, 28, 29),
+                ],
+                symbols: vec![make_symbol(
+                    alias,
+                    SCIP_KIND_TYPE_ALIAS,
+                    "Alias",
+                    "type Alias<T: HasType> = <T as HasType>::Item",
+                )],
+            }],
+        };
+        let symbols = build_impl_header_symbols(&scip, &CrateNames::default());
+        let range = |start_column, end_column| rust_parser::SourceRange {
+            start_line: 10,
+            start_column,
+            end_line: 10,
+            end_column,
+        };
+        assert!(symbols
+            .paths_in("src/lib.rs", &[range(5, 23), range(28, 29)])
+            .is_empty());
+        // Without the alias, the same references keep their paths.
+        assert_eq!(
+            symbols.paths_in("src/lib.rs", &[range(5, 9), range(16, 29)]),
+            vec!["core::convert::From", "x::Marker", "x::X"]
+        );
     }
 }

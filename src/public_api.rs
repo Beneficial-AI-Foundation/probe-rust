@@ -2241,6 +2241,8 @@ pub use crate::c::Bar;
             is_public_api: None,
             charon_def_id: None,
             charon_version: None,
+            impl_header_paths: Vec::new(),
+            impl_header_complete: false,
         }
     }
 }

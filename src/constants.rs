@@ -24,6 +24,9 @@ pub const SCIP_KIND_MACRO: i32 = 80;
 /// SCIP kind for module definitions (used for module-chain visibility walk)
 pub const SCIP_KIND_MODULE: i32 = 29;
 
+/// SCIP kind for type alias definitions (`type X = ...;`)
+pub const SCIP_KIND_TYPE_ALIAS: i32 = 55;
+
 /// Check if a SCIP symbol kind represents a function-like entity.
 #[inline]
 pub fn is_function_like_kind(kind: i32) -> bool {
